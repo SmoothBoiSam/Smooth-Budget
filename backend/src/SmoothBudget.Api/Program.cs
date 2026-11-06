@@ -71,6 +71,7 @@ builder.Services.AddScoped<BudgetGeneratorService>();
 builder.Services.AddScoped<DemoSeeder>();
 builder.Services.AddScoped<TransferDetectionService>();
 builder.Services.AddScoped<ImportService>();
+builder.Services.AddScoped<CategorizationService>();
 
 // Plaid (milestone 3). Credentials and the token-encryption key come only from environment variables.
 var plaidOptions = new PlaidOptions
@@ -135,6 +136,7 @@ app.MapImportEndpoints();
 app.MapTransactionEndpoints();
 app.MapBudgetEndpoints();
 app.MapPlaidEndpoints();
+app.MapPartnerEndpoints();
 app.MapGet("/api/home/summary", (HttpContext ctx, HomeSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct))
     .RequireAuthorization();
 

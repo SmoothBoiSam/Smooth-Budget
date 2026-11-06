@@ -30,7 +30,7 @@ export default function App() {
   const refreshInbox = useCallback(() => {
     budgetApi
       .inboxCount()
-      .then((r) => setInboxCount(r.count))
+      .then((r) => setInboxCount(r.count + r.review))
       .catch(() => undefined)
   }, [])
 

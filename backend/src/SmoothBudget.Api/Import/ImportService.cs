@@ -28,7 +28,7 @@ public class ImportException(string message) : Exception(message);
 /// CSV import pipeline: parse → skip rows already in the account → categorize (rules, then bank category)
 /// → save → detect card payments and own-account transfers across all of the household's accounts.
 /// </summary>
-public class ImportService(AppDbContext db, TransferDetectionService transfers, TimeProvider clock)
+public class ImportService(AppDbContext db, TransferDetectionService transfers, CategorizationService categorization, TimeProvider clock)
 {
     public const long MaxFileBytes = 5 * 1024 * 1024;
 
@@ -100,10 +100,7 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
             }
         }
 
-        var rules = await db.CategoryRules.Where(r => r.HouseholdId == householdId)
-            .Select(r => new MerchantRule(r.CategoryId, r.Pattern, r.CreatedUtc)).ToListAsync(ct);
-        var categoryIds = await db.Categories.Where(c => c.HouseholdId == householdId && !c.IsHidden)
-            .ToDictionaryAsync(c => c.Name, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var categorize = await categorization.ContextAsync(householdId, ct);
 
         var now = clock.GetUtcNow().UtcDateTime;
         var batch = new ImportBatch
@@ -117,14 +114,15 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
 
         var created = fresh.Select(r =>
         {
-            var (categoryId, source) = Categorizer.Categorize(r.Merchant, r.BankCategory, rules, categoryIds);
-            return new Transaction
+            var t = new Transaction
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = accountId, ImportBatchId = batch.Id,
                 Date = r.Date, AmountCents = r.AmountCents, Merchant = Truncate(r.Merchant, 200), Description = Truncate(r.Description, 300),
                 Kind = r.Kind, BankCategory = r.BankCategory is null ? null : Truncate(r.BankCategory, 100),
-                CategoryId = categoryId, CategorySource = source, Fingerprint = r.Fingerprint, Source = DataSource.Csv, CreatedUtc = now,
+                Fingerprint = r.Fingerprint, Source = DataSource.Csv, CreatedUtc = now,
             };
+            categorize.Apply(t); // rules, your past choices, then the bank's category; tags partner money
+            return t;
         }).ToList();
         db.Transactions.AddRange(created);
 

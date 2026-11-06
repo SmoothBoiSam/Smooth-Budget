@@ -10,6 +10,7 @@ import {
   type Category,
   type Health,
   type LastMonth,
+  type SuggestedCategory,
   type Transaction,
 } from './api'
 import BudgetPlanner from './BudgetPlanner'
@@ -46,6 +47,8 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [summary, setSummary] = useState<BudgetSummary | null>(null)
   const [month, setMonth] = useState<Transaction[]>([])
   const [inbox, setInbox] = useState<Transaction[]>([])
+  const [review, setReview] = useState<Transaction[]>([])
+  const [suggestions, setSuggestions] = useState<SuggestedCategory[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
@@ -64,15 +67,19 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   const load = useCallback(async () => {
     try {
-      const [s, m, i, c] = await Promise.all([
+      const [s, m, i, c, r, sg] = await Promise.all([
         budgetSummaryApi.get(),
         budgetApi.monthTransactions(),
         budgetApi.inbox(),
         budgetApi.categories(),
+        budgetApi.review(),
+        budgetApi.suggestedCategories(),
       ])
       setSummary(s)
       setMonth(m.items)
       setInbox(i)
+      setReview(r)
+      setSuggestions(sg)
       setCategories(c)
       setError(null)
     } catch (e) {
@@ -138,7 +145,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           <div className="mt-1 flex items-center justify-between gap-3">
             <h1 className="truncate text-2xl font-bold tracking-tight">
               {view.kind === 'inbox'
-                ? 'Needs a category'
+                ? 'To review'
                 : view.kind === 'all'
                   ? 'All transactions'
                   : view.kind === 'plan'
@@ -170,10 +177,11 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         <Overview
           summary={summary}
           inboxCount={inbox.length}
+          guessCount={review.length}
           onAdd={() => setEditing(null)}
           onCloseMonth={(start) => act(() => budgetEditApi.closeMonth(start), 'Month closed.')}
           onSweep={(id, done) => act(() => (done ? budgetEditApi.sweepDone(id) : budgetEditApi.sweepUndo(id)), done ? 'Marked as sent.' : 'Marked as not sent.')}
-          onIncome={(cents) => act(() => budgetEditApi.setIncome(cents), 'Expected income updated.')}
+          onIncome={(income, partner) => act(() => budgetEditApi.setIncome(income, partner), 'Expected income updated.')}
         />
       )}
 
@@ -201,12 +209,27 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
 
       {summary && view.kind === 'inbox' && (
-        <>
-          <p className="mt-2 text-sm text-slate-500">
-            These aren't counted in Left to Spend until they have a category. Tap one to set it.
-          </p>
-          <TransactionList items={inbox} empty="All caught up. Every purchase has a category." onSelect={setSelected} />
-        </>
+        <ReviewView
+          inbox={inbox}
+          review={review}
+          suggestions={suggestions}
+          onSelect={setSelected}
+          onConfirm={(ids) => act(() => budgetApi.confirmGuesses(ids), ids.length === 1 ? 'Confirmed.' : `Confirmed ${ids.length} categories.`)}
+          onAddCategory={(s) =>
+            act(
+              () => budgetEditApi.createCategory(s.name, s.type, 0, s.isDiscretionary),
+              `Added ${s.name} and filed what fits. Give it a limit on the Budget tab.`,
+            )
+          }
+          onRerun={async () => {
+            try {
+              const r = await budgetApi.autoCategorize()
+              saved(`Filed ${r.filed} automatically · ${r.guesses} guesses to check · ${r.stillUncategorized} still need a category.`)
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Could not auto-categorize.')
+            }
+          }}
+        />
       )}
 
       {summary && view.kind === 'all' && (
@@ -236,6 +259,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 function Overview({
   summary: s,
   inboxCount,
+  guessCount,
   onAdd,
   onCloseMonth,
   onSweep,
@@ -243,10 +267,11 @@ function Overview({
 }: {
   summary: BudgetSummary
   inboxCount: number
+  guessCount: number
   onAdd: () => void
   onCloseMonth: (start: string) => void
   onSweep: (id: string, done: boolean) => void
-  onIncome: (cents: number) => void
+  onIncome: (income: number, partner: number) => void
 }) {
   const lastMonthSweepIds = new Set(s.lastMonth?.sweeps.map((x) => x.id) ?? [])
   const olderSweeps = s.pendingSweeps.filter((p) => !lastMonthSweepIds.has(p.id))
@@ -276,13 +301,23 @@ function Overview({
         </p>
       </section>
 
-      {inboxCount > 0 && (
+      {inboxCount + guessCount > 0 && (
         <a
           href="#/budget/inbox"
           className="mt-3 flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200"
         >
           <span>
-            <span className="font-semibold">{inboxCount}</span> {inboxCount === 1 ? 'transaction needs' : 'transactions need'} a category
+            {guessCount > 0 && (
+              <>
+                <span className="font-semibold">{guessCount}</span> category {guessCount === 1 ? 'guess' : 'guesses'} to check
+              </>
+            )}
+            {guessCount > 0 && inboxCount > 0 && ' · '}
+            {inboxCount > 0 && (
+              <>
+                <span className="font-semibold">{inboxCount}</span> {inboxCount === 1 ? 'needs' : 'need'} a category
+              </>
+            )}
           </span>
           <span aria-hidden className="font-semibold">
             ›
@@ -419,8 +454,10 @@ function TransactionList({ items, empty, onSelect }: { items: Transaction[]; emp
 
 function Tag({ t }: { t: Transaction }) {
   if (t.isTransfer) return <span className="text-xs text-slate-400">{t.categoryName ?? 'Transfer'}</span>
+  if (t.categoryName && t.needsReview) return <span className="text-xs font-medium text-amber-600">{t.categoryName}?</span>
   if (t.categoryName) return <span className="text-xs text-slate-500">{t.categoryName}</span>
   if (t.kind === 'Income') return <span className="text-xs text-emerald-600">Income</span>
+  if (t.kind === 'PartnerContribution') return <span className="text-xs text-emerald-600">Partner</span>
   return <span className="text-xs font-medium text-amber-600">Needs category</span>
 }
 
@@ -489,12 +526,19 @@ function LastMonthCard({ last, onClose, onSweep }: { last: LastMonth; onClose: (
   )
 }
 
-/** SPEC section 3: income = all limits + an explicit unallocated remainder. */
-function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome: (cents: number) => void }) {
+/**
+ * SPEC section 3: money in (your income plus partner contributions) = all limits + an explicit remainder.
+ * Your own income and the partner's contributions are shown separately, each expected vs received so far.
+ */
+function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome: (income: number, partner: number) => void }) {
   const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState(centsToInput(s.incomeExpectedCents))
-  const cents = parseDollars(value)
+  const [income, setIncome] = useState(centsToInput(s.incomeExpectedCents))
+  const [partner, setPartner] = useState(centsToInput(s.partnerExpectedCents))
+  const incomeCents = parseDollars(income)
+  const partnerCents = parseDollars(partner)
   const over = s.unallocatedCents < 0
+  const partnerLabel = s.partnerName ? `From ${s.partnerName.split(' ')[0]}` : 'Partner contributions'
+
   return (
     <section aria-labelledby="income-h" className="mt-6 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <div className="flex items-baseline justify-between gap-3">
@@ -503,57 +547,199 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
         </h2>
         {!editing && (
           <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-slate-600 underline">
-            Edit income
+            Edit
           </button>
         )}
       </div>
+
       {editing ? (
         <form
-          className="mt-2 flex gap-2"
+          className="mt-2 space-y-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (cents !== null) {
-              onIncome(cents)
+            if (incomeCents !== null && partnerCents !== null) {
+              onIncome(incomeCents, partnerCents)
               setEditing(false)
             }
           }}
         >
-          <div className="flex flex-1 items-center rounded-lg border border-slate-300 bg-white px-3">
-            <span className="text-sm text-slate-500">$</span>
-            <input
-              aria-label="Expected income this month"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              inputMode="decimal"
-              autoFocus
-              className="block w-full bg-transparent px-1 py-2 tabular-nums outline-none"
-            />
-          </div>
-          <button type="submit" disabled={cents === null} className="rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-50">
+          <MoneyField label="Your expected income" value={income} onChange={setIncome} />
+          <MoneyField label={`${partnerLabel}, expected`} value={partner} onChange={setPartner} />
+          <button
+            type="submit"
+            disabled={incomeCents === null || partnerCents === null}
+            className="w-full rounded-lg bg-slate-900 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
             Save
           </button>
         </form>
       ) : (
-        <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-xl bg-slate-50 p-2">
-            <dt className="text-xs text-slate-500">Income</dt>
-            <dd className="text-sm font-semibold tabular-nums">{formatCents(s.incomeExpectedCents)}</dd>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-2">
-            <dt className="text-xs text-slate-500">Planned</dt>
-            <dd className="text-sm font-semibold tabular-nums">{formatCents(s.plannedCents)}</dd>
-          </div>
-          <div className={`rounded-xl p-2 ${over ? 'bg-red-50' : 'bg-slate-50'}`}>
-            <dt className="text-xs text-slate-500">{over ? 'Over income' : 'Unallocated'}</dt>
-            <dd className={`text-sm font-semibold tabular-nums ${over ? 'text-red-600' : ''}`}>{formatCents(Math.abs(s.unallocatedCents))}</dd>
-          </div>
-        </dl>
+        <>
+          <dl className="mt-2 space-y-1 text-sm">
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-600">Your income</dt>
+              <dd className="tabular-nums">
+                {formatCents(s.incomeExpectedCents)} <span className="text-xs text-slate-500">· {formatCents(s.incomeReceivedCents)} in so far</span>
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-600">{partnerLabel}</dt>
+              <dd className="tabular-nums">
+                {formatCents(s.partnerExpectedCents)} <span className="text-xs text-slate-500">· {formatCents(s.partnerReceivedCents)} in so far</span>
+              </dd>
+            </div>
+          </dl>
+          <dl className="mt-3 grid grid-cols-2 gap-2 text-center">
+            <div className="rounded-xl bg-slate-50 p-2">
+              <dt className="text-xs text-slate-500">Planned</dt>
+              <dd className="text-sm font-semibold tabular-nums">{formatCents(s.plannedCents)}</dd>
+            </div>
+            <div className={`rounded-xl p-2 ${over ? 'bg-red-50' : 'bg-slate-50'}`}>
+              <dt className="text-xs text-slate-500">{over ? 'Over what comes in' : 'Unallocated'}</dt>
+              <dd className={`text-sm font-semibold tabular-nums ${over ? 'text-red-600' : ''}`}>{formatCents(Math.abs(s.unallocatedCents))}</dd>
+            </div>
+          </dl>
+          {!s.partnerName && (
+            <p className="mt-2 text-xs text-slate-500">
+              <a href="#/more" className="underline">
+                Set your partner's name
+              </a>{' '}
+              in More to track her contributions apart from your income.
+            </p>
+          )}
+        </>
       )}
       {s.incomeExpectedCents === 0 && !editing && (
         <p className="mt-2 text-xs text-slate-500">
-          Set your expected income, or <a href="#/budget/plan" className="underline">build a budget from your history</a>.
+          Set your expected income, or{' '}
+          <a href="#/budget/plan" className="underline">
+            build a budget from your history
+          </a>
+          .
         </p>
       )}
     </section>
+  )
+}
+
+function MoneyField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="block">
+      <span className="text-xs text-slate-500">{label}</span>
+      <div className="mt-0.5 flex items-center rounded-lg border border-slate-300 bg-white px-3">
+        <span className="text-sm text-slate-500">$</span>
+        <input
+          aria-label={label}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          inputMode="decimal"
+          aria-invalid={parseDollars(value) === null}
+          className="block w-full bg-transparent px-1 py-2 tabular-nums outline-none"
+        />
+      </div>
+    </label>
+  )
+}
+
+/**
+ * Budget → To review: categories worth adding, automatic guesses to confirm (they already count), and
+ * purchases with no category yet (they don't count until filed).
+ */
+function ReviewView({
+  inbox,
+  review,
+  suggestions,
+  onSelect,
+  onConfirm,
+  onAddCategory,
+  onRerun,
+}: {
+  inbox: Transaction[]
+  review: Transaction[]
+  suggestions: SuggestedCategory[]
+  onSelect: (t: Transaction) => void
+  onConfirm: (ids: string[]) => void
+  onAddCategory: (s: SuggestedCategory) => void
+  onRerun: () => void
+}) {
+  return (
+    <>
+      {suggestions.length > 0 && (
+        <section aria-labelledby="sugg-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+          <h2 id="sugg-h" className="text-sm font-semibold">
+            Categories to add
+          </h2>
+          <p className="text-xs text-slate-500">Your bank groups these, but none of your categories fit. Adding one files them automatically.</p>
+          <ul className="mt-2 divide-y divide-slate-100">
+            {suggestions.map((s) => (
+              <li key={s.name} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span>
+                  <span className="font-medium">{s.name}</span>{' '}
+                  <span className="text-slate-500">
+                    · {s.transactionCount} {s.transactionCount === 1 ? 'transaction' : 'transactions'}
+                  </span>
+                </span>
+                <button type="button" onClick={() => onAddCategory(s)} className="shrink-0 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
+                  Add
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section aria-labelledby="guess-h" className="mt-6">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="guess-h" className="text-sm font-semibold text-slate-700">
+            Check these guesses <span className="text-slate-400">({review.length})</span>
+          </h2>
+          {review.length > 1 && (
+            <button type="button" onClick={() => onConfirm(review.map((t) => t.id))} className="text-xs font-medium text-slate-700 underline">
+              All look right
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-slate-500">Already counted in their category. Confirm, or tap to change.</p>
+        {review.length === 0 ? (
+          <p className="mt-2 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">Nothing to check.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+            {review.map((t) => (
+              <li key={t.id} className="flex items-center gap-2 pr-2">
+                <button type="button" onClick={() => onSelect(t)} className="min-w-0 flex-1 px-4 py-3 text-left hover:bg-slate-50">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="truncate text-sm font-medium">{titleCase(t.merchant)}</span>
+                    <span className="shrink-0 text-sm tabular-nums">{formatSigned(t.amountCents)}</span>
+                  </div>
+                  <p className="truncate text-xs text-slate-500">
+                    {formatDay(t.date)} · <span className="font-medium text-amber-600">{t.categoryName}?</span> {t.categoryReason}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onConfirm([t.id])}
+                  aria-label={`${t.categoryName} is right for ${titleCase(t.merchant)}`}
+                  className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+                >
+                  ✓ Right
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="none-h" className="mt-6">
+        <h2 id="none-h" className="text-sm font-semibold text-slate-700">
+          Needs a category <span className="text-slate-400">({inbox.length})</span>
+        </h2>
+        <p className="text-xs text-slate-500">Not counted in Left to Spend until filed. Tap one to set it.</p>
+        <TransactionList items={inbox} empty="All caught up. Every purchase has a category." onSelect={onSelect} />
+      </section>
+
+      <button type="button" onClick={onRerun} className="mt-6 w-full rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
+        Auto-categorize again
+      </button>
+    </>
   )
 }

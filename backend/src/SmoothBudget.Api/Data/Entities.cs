@@ -32,6 +32,9 @@ public class Household
     /// <summary>For <see cref="SweepTarget.Split"/>: the share that goes to savings, 0 to 100.</summary>
     public int SweepSavingsPercent { get; set; } = 50;
 
+    /// <summary>The partner's name as it appears on incoming transfers ("Zelle payment from ..."); set in Settings.</summary>
+    public string? PartnerName { get; set; }
+
     public DateTime CreatedUtc { get; set; }
 
     public List<AppUser> Users { get; set; } = [];
@@ -136,8 +139,20 @@ public class Transaction
     public TransactionKind Kind { get; set; }
     public CategorySource CategorySource { get; set; }
 
-    /// <summary>The bank's own category label, if the export has one (Chase credit, Apple Card).</summary>
+    /// <summary>The most specific bank category label: Plaid's detailed category, or a CSV's category column.</summary>
     public string? BankCategory { get; set; }
+
+    /// <summary>Plaid's primary category (e.g. FOOD_AND_DRINK), when known.</summary>
+    public string? BankCategoryPrimary { get; set; }
+
+    /// <summary>Plaid's confidence in its category (VERY_HIGH, HIGH, MEDIUM, LOW, UNKNOWN), when known.</summary>
+    public string? BankConfidence { get; set; }
+
+    /// <summary>The category is an automatic guess the user should confirm. It still counts in the budget.</summary>
+    public bool NeedsReview { get; set; }
+
+    /// <summary>Why it has this category, in plain words ("The bank calls it ...").</summary>
+    public string? CategoryReason { get; set; }
 
     public bool Pending { get; set; }
     public bool IsTransfer { get; set; }
@@ -194,7 +209,11 @@ public class BudgetMonth
     public Guid HouseholdId { get; set; }
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
+    /// <summary>The owner's own expected income this month (not partner money).</summary>
     public long IncomeExpectedCents { get; set; }
+
+    /// <summary>Expected partner contributions this month.</summary>
+    public long PartnerExpectedCents { get; set; }
 
     /// <summary>
     /// Net overspend carried in, as a positive number of cents. For the first month on record this is the

@@ -11,7 +11,11 @@ namespace SmoothBudget.Api.Transactions;
 public record TransactionDto(
     Guid Id, DateOnly Date, long AmountCents, string Merchant, string Description, string Kind,
     Guid? CategoryId, string? CategoryName, string CategorySource, bool IsTransfer, bool Pending,
-    Guid AccountId, string AccountName, string? BankCategory);
+    Guid AccountId, string AccountName, string? BankCategory,
+    // An automatic guess waiting for the user to confirm; and why it has this category.
+    bool NeedsReview = false, string? CategoryReason = null);
+
+public record ConfirmRequest(List<Guid> Ids);
 
 public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<TransactionDto> Items);
 
@@ -55,7 +59,28 @@ public static partial class TransactionEndpoints
             await Project(Inbox(db, ctx.User.HouseholdId())).Take(InboxLimit).ToListAsync(ct));
 
         group.MapGet("/transactions/inbox/count", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
-            new { count = await Inbox(db, ctx.User.HouseholdId()).CountAsync(ct) });
+            new { count = await Inbox(db, ctx.User.HouseholdId()).CountAsync(ct), review = await Review(db, ctx.User.HouseholdId()).CountAsync(ct) });
+
+        // Automatic guesses to confirm (filed and counted, but not certain), newest first.
+        group.MapGet("/transactions/review", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+            await Project(Review(db, ctx.User.HouseholdId())).Take(InboxLimit).ToListAsync(ct));
+
+        // "Looks right": confirming guesses makes them the user's own choice (and teaches the categorizer).
+        group.MapPost("/transactions/review/confirm", async (ConfirmRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var n = await db.Transactions
+                .Where(t => t.HouseholdId == ctx.User.HouseholdId() && req.Ids.Contains(t.Id) && t.NeedsReview && t.CategoryId != null)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.NeedsReview, false)
+                    .SetProperty(t => t.CategorySource, CategorySource.User)
+                    .SetProperty(t => t.CategoryReason, "You confirmed this."), ct);
+            return Results.Ok(new { confirmed = n });
+        });
+
+        group.MapPost("/transactions/auto-categorize", async (HttpContext ctx, CategorizationService svc, CancellationToken ct) =>
+            await svc.RunAsync(ctx.User.HouseholdId(), ct));
+
+        group.MapGet("/transactions/suggested-categories", async (HttpContext ctx, CategorizationService svc, CancellationToken ct) =>
+            await svc.SuggestionsAsync(ctx.User.HouseholdId(), ct));
 
         group.MapPatch("/transactions/{id:guid}", async (Guid id, UpdateTransactionRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
@@ -68,6 +93,8 @@ public static partial class TransactionEndpoints
 
             t.CategoryId = req.CategoryId;
             t.CategorySource = CategorySource.User; // locks this row against rules and transfer detection
+            t.NeedsReview = false;
+            t.CategoryReason = "You chose this.";
             if (req.IsTransfer && !t.IsTransfer)
             {
                 t.IsTransfer = true;
@@ -99,11 +126,13 @@ public static partial class TransactionEndpoints
                 // Merchants are stored upper case, and so is the pattern.
                 applied = await db.Transactions
                     .Where(x => x.HouseholdId == householdId && x.Id != t.Id && !x.IsTransfer
-                                && (x.CategorySource == CategorySource.None || x.CategorySource == CategorySource.Bank)
+                                && (x.CategorySource == CategorySource.None || x.CategorySource == CategorySource.Bank || x.CategorySource == CategorySource.Learned)
                                 && x.Merchant.ToUpper().Contains(pattern))
                     .ExecuteUpdateAsync(s => s
                         .SetProperty(x => x.CategoryId, req.CategoryId)
-                        .SetProperty(x => x.CategorySource, CategorySource.Rule), ct);
+                        .SetProperty(x => x.CategorySource, CategorySource.Rule)
+                        .SetProperty(x => x.NeedsReview, false)
+                        .SetProperty(x => x.CategoryReason, "Your rule for \"" + pattern + "\"."), ct);
             }
             await db.SaveChangesAsync(ct);
 
@@ -136,16 +165,21 @@ public static partial class TransactionEndpoints
                                    && t.CategoryId == null
                                    && !t.IsTransfer
                                    && t.Kind != TransactionKind.Income
+                                   && t.Kind != TransactionKind.PartnerContribution
                                    && t.Kind != TransactionKind.CardPayment
                                    && t.Kind != TransactionKind.Transfer
                                    && (t.AmountCents > 0 || t.Kind == TransactionKind.Refund));
+
+    /// <summary>Automatic guesses the user hasn't confirmed yet.</summary>
+    public static IQueryable<Transaction> Review(AppDbContext db, Guid householdId) =>
+        db.Transactions.Where(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null && !t.IsTransfer);
 
     private static IQueryable<TransactionDto> Project(IQueryable<Transaction> q) =>
         q.OrderByDescending(t => t.Date).ThenByDescending(t => t.CreatedUtc).ThenBy(t => t.Id)
             .Select(t => new TransactionDto(
                 t.Id, t.Date, t.AmountCents, t.Merchant, t.Description, t.Kind.ToString(),
                 t.CategoryId, t.Category != null ? t.Category.Name : null, t.CategorySource.ToString(), t.IsTransfer, t.Pending,
-                t.AccountId, t.Account.Name, t.BankCategory));
+                t.AccountId, t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason));
 
     public static string? NormalizePattern(string? pattern)
     {

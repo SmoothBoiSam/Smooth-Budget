@@ -68,6 +68,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         await db.PlaidItems.Where(i => i.HouseholdId == householdId).ExecuteDeleteAsync(ct); // demo only; sandbox items are disposable
         household.SweepTarget = SweepTarget.Debt;
         household.SweepSavingsPercent = 50;
+        household.PartnerName = "Partner"; // matches the fake "Zelle payment from Partner" rows
 
         Account NewAccount(string name, AccountType type, string mask, long balance) => new()
         {
@@ -169,7 +170,9 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
                     Kind = p.Transfer
                         ? (p.Merchant.Contains("Payment", StringComparison.OrdinalIgnoreCase) ? TransactionKind.CardPayment : TransactionKind.Transfer)
                         : p.Cents < 0
-                            ? (p.Merchant.Contains("return", StringComparison.OrdinalIgnoreCase) ? TransactionKind.Refund : TransactionKind.Income)
+                            ? (p.Merchant.Contains("return", StringComparison.OrdinalIgnoreCase) ? TransactionKind.Refund
+                                : p.Merchant.Contains("Zelle payment from Partner", StringComparison.Ordinal) ? TransactionKind.PartnerContribution
+                                : TransactionKind.Income)
                             : TransactionKind.Purchase,
                     CategorySource = p.Category is null ? CategorySource.None : p.Transfer ? CategorySource.Transfer : CategorySource.Bank,
                     Pending = back == 0 && date >= today.AddDays(-1), Source = DataSource.Seed, CreatedUtc = now,
@@ -179,7 +182,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             rows.Add(db.BudgetMonths.Add(new BudgetMonth
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, StartDate = m.Start, EndDate = m.End,
-                IncomeExpectedCents = 1_700_86 + 760_00 + 800_00,
+                IncomeExpectedCents = 1_700_86 + 760_00, PartnerExpectedCents = 800_00,
             }).Entity);
         }
         await db.SaveChangesAsync(ct);

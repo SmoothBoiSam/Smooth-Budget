@@ -48,7 +48,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
         var rows = await db.BudgetMonths.Where(m => m.HouseholdId == householdId).OrderBy(m => m.StartDate).ToListAsync(ct);
         if (rows.Count == 0)
         {
-            rows.Add(db.BudgetMonths.Add(NewRow(householdId, current, income: 0)).Entity);
+            rows.Add(db.BudgetMonths.Add(NewRow(householdId, current, income: 0, partner: 0)).Entity);
         }
         else
         {
@@ -58,7 +58,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             while (rows[^1].StartDate < current.Start)
             {
                 label = label.AddMonths(1);
-                rows.Add(db.BudgetMonths.Add(NewRow(householdId, calendar.MonthOf(label.Year, label.Month), rows[^1].IncomeExpectedCents)).Entity);
+                rows.Add(db.BudgetMonths.Add(NewRow(householdId, calendar.MonthOf(label.Year, label.Month), rows[^1].IncomeExpectedCents, rows[^1].PartnerExpectedCents)).Entity);
             }
         }
         if (!await SaveTolerantAsync(ct))
@@ -218,9 +218,10 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
         return (card is null ? null : Label(card), savingsAccount is null ? savingsCategory : Label(savingsAccount));
     }
 
-    private static BudgetMonth NewRow(Guid householdId, BudgetMonthRange range, long income) => new()
+    private static BudgetMonth NewRow(Guid householdId, BudgetMonthRange range, long income, long partner) => new()
     {
-        Id = Guid.NewGuid(), HouseholdId = householdId, StartDate = range.Start, EndDate = range.End, IncomeExpectedCents = income,
+        Id = Guid.NewGuid(), HouseholdId = householdId, StartDate = range.Start, EndDate = range.End,
+        IncomeExpectedCents = income, PartnerExpectedCents = partner,
     };
 
     /// <summary>

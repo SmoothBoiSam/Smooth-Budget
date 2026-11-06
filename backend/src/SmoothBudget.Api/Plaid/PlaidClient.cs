@@ -40,7 +40,7 @@ public class PlaidException(string errorType, string errorCode, string message, 
 #pragma warning disable CA1812 // instantiated by System.Text.Json
 public record PlaidBalances(decimal? Current, decimal? Available, string? IsoCurrencyCode);
 public record PlaidAccount(string AccountId, PlaidBalances Balances, string? Mask, string Name, string? OfficialName, string Type, string? Subtype);
-public record PlaidCategory(string? Primary, string? Detailed);
+public record PlaidCategory(string? Primary, string? Detailed, string? ConfidenceLevel = null);
 public record PlaidTransaction(
     string TransactionId, string AccountId, decimal Amount, string? IsoCurrencyCode, DateOnly Date, DateOnly? AuthorizedDate,
     string Name, string? MerchantName, bool Pending, string? PendingTransactionId, PlaidCategory? PersonalFinanceCategory);

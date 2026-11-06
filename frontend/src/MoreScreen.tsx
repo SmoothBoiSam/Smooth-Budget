@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me, type Rule } from './api'
 import AppearanceSetting from './AppearanceSetting'
 import BankConnections from './BankConnections'
+import PartnerSetting from './PartnerSetting'
 import SweepSetting from './SweepSetting'
 import { formatTime } from './format'
 
@@ -121,6 +122,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         </h2>
         <AppearanceSetting />
         <SweepSetting />
+        <PartnerSetting onChanged={changed} />
         <div className="flex items-center justify-between rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
           <span className="truncate text-sm text-slate-500">{me.email}</span>
           <button type="button" onClick={signOut} className="text-sm font-medium text-slate-700">

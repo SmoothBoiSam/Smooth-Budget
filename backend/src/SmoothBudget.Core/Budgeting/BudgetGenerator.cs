@@ -18,9 +18,13 @@ public sealed record BudgetProposal(
     IReadOnlyList<long> MonthlyIncomeCents,
     IReadOnlyList<ProposedLimit> Categories,
     long AllocatedCents,
+    // Income plus partner contributions, minus everything allocated.
     long UnallocatedCents,
     bool SpendsMoreThanIncome,
-    int UncategorizedCount);
+    int UncategorizedCount,
+    // The partner's contributions, kept apart from the owner's income (median month).
+    long PartnerCents = 0,
+    IReadOnlyList<long>? MonthlyPartnerCents = null);
 
 /// <summary>
 /// Proposes a budget from the last few complete budget months (SPEC section 6.1):
@@ -31,7 +35,8 @@ public sealed record BudgetProposal(
 /// <item>Fixed bills: the median, to the cent. Spending categories: the median rounded up to the whole dollar,
 /// trimmed by <see cref="DiscretionaryTrimPercent"/>% for discretionary ones (eating out, shopping,
 /// entertainment) while there's card debt. Debt payments and savings: the median paid.</item>
-/// <item>Income is the median monthly income (paychecks and partner money). What isn't allocated is shown
+/// <item>Income is the median monthly income from paychecks and other deposits; partner contributions are a
+/// separate median. What isn't allocated (income plus partner money, minus the plan) is shown
 /// as an explicit remainder, never silently spread around.</item>
 /// </list>
 /// <para>
@@ -64,6 +69,12 @@ public static class BudgetGenerator
             .Where(t => m.Contains(t.Date) && !t.IsTransfer && t.Kind == TransactionKind.Income && t.AmountCents < 0)
             .Sum(t => -t.AmountCents)).ToList();
         var income = Median(incomeByMonth);
+
+        // Partner money is tracked on its own, not as the owner's income.
+        var partnerByMonth = months.Select(m => transactions
+            .Where(t => m.Contains(t.Date) && !t.IsTransfer && t.Kind == TransactionKind.PartnerContribution && t.AmountCents < 0)
+            .Sum(t => -t.AmountCents)).ToList();
+        var partner = Median(partnerByMonth);
 
         var proposals = categories.Select(c =>
         {
@@ -104,8 +115,9 @@ public static class BudgetGenerator
 
         return new BudgetProposal(
             n, income,
-            n == 0 ? "No complete months of history yet." : $"Median monthly income over {Months(n)}: paychecks and partner money.",
-            incomeByMonth, proposals, allocated, income - allocated, allocated > income, uncategorized);
+            n == 0 ? "No complete months of history yet." : $"Your median monthly income over {Months(n)}: paychecks and other deposits.",
+            incomeByMonth, proposals, allocated, income + partner - allocated, allocated > income + partner, uncategorized,
+            partner, partnerByMonth);
     }
 
     /// <summary>The middle value; for an even count, the average of the two middle values rounded half up.</summary>

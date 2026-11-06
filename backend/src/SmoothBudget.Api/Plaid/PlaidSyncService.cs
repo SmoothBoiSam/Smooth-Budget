@@ -24,7 +24,7 @@ public class PlaidItemLocks
 /// them. All pages are fetched before anything is saved, then applied in one database transaction with
 /// the new cursor, so a failure leaves the previous state and cursor intact.
 /// </summary>
-public class PlaidSyncService(
+public class PlaidSyncService(CategorizationService categorization,
     AppDbContext db, PlaidClient plaid, SecretBox secrets, TransferDetectionService transfers,
     PlaidItemLocks locks, TimeProvider clock, ILogger<PlaidSyncService> log)
 {
@@ -117,10 +117,7 @@ public class PlaidSyncService(
             stored.Select(t => new StoredPlaidRow(t.Id, t.PlaidTransactionId!, t.Pending)),
             addedTxns, modifiedTxns, removed);
 
-        var rules = await db.CategoryRules.Where(r => r.HouseholdId == item.HouseholdId)
-            .Select(r => new MerchantRule(r.CategoryId, r.Pattern, r.CreatedUtc)).ToListAsync(ct);
-        var categoryIds = await db.Categories.Where(c => c.HouseholdId == item.HouseholdId && !c.IsHidden)
-            .ToDictionaryAsync(c => c.Name, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var categorize = await categorization.ContextAsync(item.HouseholdId, ct);
 
         int inserted = 0, adopted = 0, skipped = 0, posted = 0;
         var touchedDates = new List<DateOnly>();
@@ -152,7 +149,7 @@ public class PlaidSyncService(
                         skipped++;
                         break;
                     default:
-                        db.Transactions.Add(NewTransaction(item.HouseholdId, account, d.Txn, rules, categoryIds, now));
+                        db.Transactions.Add(NewTransaction(item.HouseholdId, account, d.Txn, categorize, now));
                         touchedDates.Add(d.Txn.Date);
                         inserted++;
                         break;
@@ -165,7 +162,7 @@ public class PlaidSyncService(
             var row = storedById[u.RowId];
             var account = accounts[u.Data.AccountId];
             touchedDates.Add(row.Date);
-            Apply(row, account, u.Data, rules, categoryIds);
+            Apply(row, account, u.Data, categorize);
             touchedDates.Add(row.Date);
             if (u.ReplacesPending) posted++;
         }
@@ -199,7 +196,7 @@ public class PlaidSyncService(
         (long)Math.Round(t.Amount * 100m, 0, MidpointRounding.AwayFromZero), // Plaid: positive = money out, like the app
         t.AuthorizedDate ?? t.Date, // the purchase date, as for card CSVs (SPEC section 3)
         t.Name, t.MerchantName, t.Pending, t.PendingTransactionId,
-        t.PersonalFinanceCategory?.Primary, t.PersonalFinanceCategory?.Detailed);
+        t.PersonalFinanceCategory?.Primary, t.PersonalFinanceCategory?.Detailed, t.PersonalFinanceCategory?.ConfidenceLevel);
 
     public static long BalanceCents(AccountType type, decimal current)
     {
@@ -207,19 +204,18 @@ public class PlaidSyncService(
         return type == AccountType.CreditCard ? -cents : cents; // Plaid reports a card's balance owed as positive
     }
 
-    private static Transaction NewTransaction(Guid householdId, Account account, PlaidTxn t,
-        List<MerchantRule> rules, Dictionary<string, Guid> categoryIds, DateTime now)
+    private static Transaction NewTransaction(Guid householdId, Account account, PlaidTxn t, CategorizationContext categorize, DateTime now)
     {
         var row = new Transaction
         {
             Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = account.Id, Merchant = "",
             Source = DataSource.Plaid, CreatedUtc = now,
         };
-        Apply(row, account, t, rules, categoryIds);
+        Apply(row, account, t, categorize);
         return row;
     }
 
-    private static void Apply(Transaction row, Account account, PlaidTxn t, List<MerchantRule> rules, Dictionary<string, Guid> categoryIds)
+    private static void Apply(Transaction row, Account account, PlaidTxn t, CategorizationContext categorize)
     {
         var description = Core.Import.MerchantText.Sanitize(t.Name);
         row.PlaidTransactionId = t.TransactionId;
@@ -228,15 +224,15 @@ public class PlaidSyncService(
         row.Pending = t.Pending;
         row.Description = Truncate(description, 300);
         row.Merchant = Truncate(Core.Import.MerchantText.Normalize(Core.Import.MerchantText.Sanitize(t.MerchantName ?? t.Name)), 200);
-        var bankCategory = PlaidMapping.BankCategoryFor(t.CategoryPrimary, t.CategoryDetailed);
-        row.BankCategory = bankCategory is null ? null : Truncate(bankCategory, 100);
+        row.BankCategory = (t.CategoryDetailed ?? t.CategoryPrimary) is { } label ? Truncate(label, 100) : null;
+        row.BankCategoryPrimary = t.CategoryPrimary is { } p ? Truncate(p, 60) : null;
+        row.BankConfidence = t.CategoryConfidence is { } c ? Truncate(c, 20) : null;
 
         // Never override the user's own choices or what transfer detection already decided.
         if (row.CategorySource == CategorySource.User || row.IsTransfer)
             return;
         row.Kind = PlaidMapping.KindFor(account.Type == AccountType.CreditCard, t.AmountCents, t.CategoryPrimary, t.CategoryDetailed);
-        if (row.CategorySource is CategorySource.None or CategorySource.Bank or CategorySource.Rule)
-            (row.CategoryId, row.CategorySource) = Categorizer.Categorize(row.Merchant, row.BankCategory, rules, categoryIds);
+        categorize.Apply(row); // rules, your past choices, then Plaid's category (with its confidence); tags partner money
     }
 
     private static SyncResultDto Fail(PlaidItem item, string message) =>

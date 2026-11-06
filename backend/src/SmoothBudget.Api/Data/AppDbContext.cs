@@ -26,6 +26,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.TimeZoneId).HasMaxLength(64);
+            e.Property(x => x.PartnerName).HasMaxLength(100);
             e.HasMany(x => x.Users).WithOne(u => u.Household).HasForeignKey(u => u.HouseholdId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -62,6 +63,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Merchant).HasMaxLength(200);
             e.Property(x => x.Description).HasMaxLength(300);
             e.Property(x => x.BankCategory).HasMaxLength(100);
+            e.Property(x => x.BankCategoryPrimary).HasMaxLength(60);
+            e.Property(x => x.BankConfidence).HasMaxLength(20);
+            e.Property(x => x.CategoryReason).HasMaxLength(200);
             e.Property(x => x.Fingerprint).HasMaxLength(64);
             e.Property(x => x.SplitFactor).HasPrecision(5, 4);
             e.HasIndex(x => new { x.AccountId, x.Fingerprint });

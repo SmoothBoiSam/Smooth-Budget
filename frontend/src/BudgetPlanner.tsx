@@ -17,6 +17,7 @@ const groups: { type: Category['type']; label: string }[] = [
 export default function BudgetPlanner({ onApplied }: { onApplied: (message: string) => void }) {
   const [p, setP] = useState<GeneratorProposal | null>(null)
   const [income, setIncome] = useState('')
+  const [partner, setPartner] = useState('')
   const [limits, setLimits] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -27,6 +28,7 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
       .then((r) => {
         setP(r)
         setIncome(centsToInput(r.incomeCents))
+        setPartner(centsToInput(r.partnerCents))
         setLimits(Object.fromEntries(r.categories.map((c) => [c.categoryId, centsToInput(c.proposedCents)])))
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not build a proposal.'))
@@ -36,17 +38,18 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
   if (!p) return <p className="mt-10 text-center text-slate-400">Looking at your history…</p>
 
   const incomeCents = parseDollars(income)
+  const partnerCents = parseDollars(partner)
   const parsed = p.categories.map((c) => ({ c, cents: parseDollars(limits[c.categoryId] ?? '') }))
-  const invalid = incomeCents === null || parsed.some((x) => x.cents === null)
+  const invalid = incomeCents === null || partnerCents === null || parsed.some((x) => x.cents === null)
   const planned = parsed.reduce((sum, x) => sum + (x.cents ?? 0), 0)
-  const remainder = (incomeCents ?? 0) - planned
+  const remainder = (incomeCents ?? 0) + (partnerCents ?? 0) - planned
 
   async function apply() {
     if (invalid) return
     setBusy(true)
     setError(null)
     try {
-      await budgetEditApi.applyGenerator(incomeCents!, parsed.map((x) => ({ categoryId: x.c.categoryId, limitCents: x.cents! })))
+      await budgetEditApi.applyGenerator(incomeCents!, partnerCents!, parsed.map((x) => ({ categoryId: x.c.categoryId, limitCents: x.cents! })))
       onApplied('Your budget is set. Limits apply from this month on.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save.')
@@ -64,6 +67,22 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
       {p.createdStarterCategories && (
         <p className="mt-3 rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-700">Started you with a standard set of categories. Rename or hide any later.</p>
       )}
+      {p.categorization.filed + p.categorization.guesses > 0 && (
+        <p className="mt-3 rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-700">
+          Filed {p.categorization.filed} transactions automatically
+          {p.categorization.guesses > 0 && (
+            <>
+              {' '}
+              and made {p.categorization.guesses} guesses.{' '}
+              <a href="#/budget/inbox" className="font-medium underline">
+                Check the guesses
+              </a>{' '}
+              for a more accurate proposal
+            </>
+          )}
+          .
+        </p>
+      )}
       {p.uncategorizedCount > 0 && (
         <a href="#/budget/inbox" className="mt-3 block rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
           {p.uncategorizedCount} {p.uncategorizedCount === 1 ? 'purchase' : 'purchases'} in that period had no category and weren't counted. Categorize them for a better proposal ›
@@ -72,14 +91,23 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
 
       <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
         <label className="block">
-          <span className="text-sm font-medium">Expected income this month</span>
-          <MoneyInput value={income} onChange={setIncome} label="Expected income" />
+          <span className="text-sm font-medium">Your expected income this month</span>
+          <MoneyInput value={income} onChange={setIncome} label="Your expected income" />
           <span className="mt-1 block text-xs text-slate-500">{p.incomeExplanation}</span>
+        </label>
+        <label className="mt-3 block">
+          <span className="text-sm font-medium">{p.partnerName ? `From ${p.partnerName.split(' ')[0]}` : 'Partner contributions'}, expected</span>
+          <MoneyInput value={partner} onChange={setPartner} label="Partner contributions expected" />
+          <span className="mt-1 block text-xs text-slate-500">
+            {p.partnerName
+              ? `Median of what ${p.partnerName} sent each month.`
+              : 'Set your partner’s name in More so her transfers are tracked here instead of as your income.'}
+          </span>
         </label>
         <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-xl bg-slate-50 p-2">
-            <dt className="text-xs text-slate-500">Income</dt>
-            <dd className="text-sm font-semibold tabular-nums">{formatCents(incomeCents ?? 0)}</dd>
+            <dt className="text-xs text-slate-500">Money in</dt>
+            <dd className="text-sm font-semibold tabular-nums">{formatCents((incomeCents ?? 0) + (partnerCents ?? 0))}</dd>
           </div>
           <div className="rounded-xl bg-slate-50 p-2">
             <dt className="text-xs text-slate-500">Planned</dt>

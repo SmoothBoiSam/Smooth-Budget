@@ -82,6 +82,19 @@ public static class PlaidEndpoints
         plaidGroup.MapDelete("/items/{id:guid}", async (Guid id, HttpContext ctx, PlaidLinkService link, CancellationToken ct) =>
             await Guard(async () => await link.RemoveAsync(ctx.User.HouseholdId(), id, ct) ? Results.NoContent() : Results.NotFound()));
 
+        // Re-download everything Plaid has for this connection (resets the sync cursor). Existing rows are
+        // updated in place, never duplicated, and keep your own categories. Used to pick up Plaid's
+        // detailed categories and confidence for transactions synced before the app stored them.
+        plaidGroup.MapPost("/items/{id:guid}/resync", async (Guid id, HttpContext ctx, AppDbContext db, PlaidSyncService sync, CancellationToken ct) =>
+        {
+            var item = await db.PlaidItems.SingleOrDefaultAsync(i => i.Id == id && i.HouseholdId == ctx.User.HouseholdId(), ct);
+            if (item is null) return Results.NotFound();
+            if (item.Status == PlaidItemStatus.PendingSetup) return Results.Problem("Choose accounts first.", statusCode: StatusCodes.Status400BadRequest);
+            item.Cursor = null;
+            await db.SaveChangesAsync(ct);
+            return await Guard(async () => Results.Ok(await sync.SyncAsync(id, ct)));
+        });
+
         // After the user signs in again through Link's update mode.
         plaidGroup.MapPost("/items/{id:guid}/reconnected", async (Guid id, HttpContext ctx, AppDbContext db, PlaidSyncService sync, CancellationToken ct) =>
         {

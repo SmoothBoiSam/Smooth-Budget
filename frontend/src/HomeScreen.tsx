@@ -191,6 +191,16 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
             {s.overBudgetCategoryCount} {s.overBudgetCategoryCount === 1 ? 'category' : 'categories'}
           </li>
         )}
+        {s.reviewCount > 0 && (
+          <li>
+            <a href="#/budget/inbox" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
+              <span>
+                {s.reviewCount} category {s.reviewCount === 1 ? "guess" : "guesses"} this month to check
+              </span>
+              <span aria-hidden className="font-semibold">›</span>
+            </a>
+          </li>
+        )}
         {s.uncategorizedCount > 0 && (
           <li>
             <a href="#/budget/inbox" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">

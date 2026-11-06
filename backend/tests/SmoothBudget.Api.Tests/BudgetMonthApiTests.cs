@@ -252,20 +252,21 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
         var g = (await client.GetFromJsonAsync<GeneratorDto>("/api/budget/generator", Json))!;
 
         Assert.Equal(3, g.MonthsUsed);
-        Assert.Equal(1_700_86 + 760_00 + 800_00, g.IncomeCents); // every past month: two paychecks and the partner's 800
+        Assert.Equal(1_700_86 + 760_00, g.IncomeCents); // every past month: two paychecks
+        Assert.Equal((800_00L, "Partner"), (g.PartnerCents, g.PartnerName)); // her Zelle, kept separate
         Assert.True(g.HasCardDebt);
         Assert.Equal(1_650_00, g.Categories.Single(c => c.Name == "Rent").ProposedCents);
         var eating = g.Categories.Single(c => c.Name == "Eating out");
         Assert.Contains("trimmed 10%", eating.Explanation);
         Assert.Equal(3, eating.MonthlyCents.Count);
-        Assert.Equal(g.IncomeCents - g.AllocatedCents, g.UnallocatedCents);
+        Assert.Equal(g.IncomeCents + g.PartnerCents - g.AllocatedCents, g.UnallocatedCents); // money in = your income + partner
         Assert.Equal(3, g.UncategorizedCount); // the uncategorized farmers market purchase, once in each of the 3 months
 
         var res = await client.PostAsJsonAsync("/api/budget/generator/apply",
-            new ApplyBudgetRequest(g.IncomeCents, g.Categories.Select(c => new GeneratorLimit(c.CategoryId, c.ProposedCents)).ToList()), Json);
+            new ApplyBudgetRequest(g.IncomeCents, g.Categories.Select(c => new GeneratorLimit(c.CategoryId, c.ProposedCents)).ToList(), g.PartnerCents), Json);
         Assert.Equal(HttpStatusCode.NoContent, res.StatusCode);
         var b = await Budget(client);
-        Assert.Equal(g.IncomeCents, b.IncomeExpectedCents);
+        Assert.Equal((g.IncomeCents, g.PartnerCents), (b.IncomeExpectedCents, b.PartnerExpectedCents));
         Assert.Equal(eating.ProposedCents, Cat(b, "Eating out").LimitCents);
         Assert.Equal(g.AllocatedCents, b.PlannedCents);
     }

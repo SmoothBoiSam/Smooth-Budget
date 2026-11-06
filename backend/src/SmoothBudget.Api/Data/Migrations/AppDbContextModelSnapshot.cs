@@ -299,6 +299,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<long>("IncomeExpectedCents")
                         .HasColumnType("bigint");
 
+                    b.Property<long>("PartnerExpectedCents")
+                        .HasColumnType("bigint");
+
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date");
 
@@ -429,6 +432,10 @@ namespace SmoothBudget.Api.Data.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("PartnerName")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
@@ -598,8 +605,20 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("BankCategoryPrimary")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("BankConfidence")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("CategoryReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<int>("CategorySource")
                         .HasColumnType("integer");
@@ -635,6 +654,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("NeedsReview")
+                        .HasColumnType("boolean");
 
                     b.Property<long>("PartnerOffsetCents")
                         .HasColumnType("bigint");

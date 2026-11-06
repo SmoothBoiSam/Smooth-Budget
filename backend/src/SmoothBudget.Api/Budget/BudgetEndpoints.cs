@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Seeding;
+using SmoothBudget.Api.Transactions;
 using SmoothBudget.Core.Budgeting;
 
 namespace SmoothBudget.Api.Budget;
@@ -12,13 +13,14 @@ public record CategoryRequest(string Name, CategoryType Type, long LimitCents, b
 public record UpdateCategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, bool IsHidden, string ApplyTo);
 
 public record ReorderRequest(List<Guid> Ids);
-public record IncomeRequest(long IncomeCents);
+public record IncomeRequest(long IncomeCents, long? PartnerCents = null);
 public record GeneratorLimit(Guid CategoryId, long LimitCents);
-public record ApplyBudgetRequest(long IncomeCents, List<GeneratorLimit> Limits);
+public record ApplyBudgetRequest(long IncomeCents, List<GeneratorLimit> Limits, long PartnerCents = 0);
 public record BudgetSettingsDto(SweepTarget SweepTarget, int SweepSavingsPercent);
 
 public record GeneratorDto(
     int MonthsUsed, IReadOnlyList<BudgetMonthDtoLite> Months, long IncomeCents, string IncomeExplanation,
+    long PartnerCents, string? PartnerName, AutoCategorizeResult Categorization,
     IReadOnlyList<ProposedLimit> Categories, long AllocatedCents, long UnallocatedCents, bool SpendsMoreThanIncome,
     int UncategorizedCount, bool HasCardDebt, bool CreatedStarterCategories);
 
@@ -34,7 +36,7 @@ public static class BudgetEndpoints
 
         // ---- Categories (SPEC 4.3: add, edit, hide, reorder; a limit change can be this month only or permanent)
 
-        g.MapPost("/categories", async (CategoryRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        g.MapPost("/categories", async (CategoryRequest req, HttpContext ctx, AppDbContext db, CategorizationService categorization, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             if (Validate(req.Name, req.Type, req.LimitCents) is { } problem) return problem;
@@ -49,10 +51,11 @@ public static class BudgetEndpoints
             };
             db.Categories.Add(c);
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new { c.Id });
+            var filed = await categorization.RunAsync(householdId, ct); // file transactions that fit the new category
+            return Results.Ok(new { c.Id, Categorization = filed });
         });
 
-        g.MapPut("/categories/{id:guid}", async (Guid id, UpdateCategoryRequest req, HttpContext ctx, AppDbContext db, BudgetMonthService months, CancellationToken ct) =>
+        g.MapPut("/categories/{id:guid}", async (Guid id, UpdateCategoryRequest req, HttpContext ctx, AppDbContext db, BudgetMonthService months, CategorizationService categorization, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             var c = await db.Categories.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
@@ -85,6 +88,7 @@ public static class BudgetEndpoints
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["applyTo"] = ["Use \"month\" or \"permanent\"."] });
             }
             await db.SaveChangesAsync(ct);
+            await categorization.RunAsync(householdId, ct); // a renamed, retyped or hidden category changes what fits
             return Results.NoContent();
         });
 
@@ -116,6 +120,11 @@ public static class BudgetEndpoints
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["incomeCents"] = ["Income can't be negative."] });
             var row = await months.EnsureCurrentAsync(ctx.User.HouseholdId(), ct);
             row.IncomeExpectedCents = req.IncomeCents;
+            if (req.PartnerCents is { } p)
+            {
+                if (p < 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerCents"] = ["Can't be negative."] });
+                row.PartnerExpectedCents = p;
+            }
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
@@ -196,7 +205,7 @@ public static class BudgetEndpoints
 }
 
 /// <summary>Runs <see cref="BudgetGenerator"/> on the household's last complete budget months and applies the result.</summary>
-public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months)
+public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, CategorizationService categorization)
 {
     public async Task<GeneratorDto> ProposeAsync(Guid householdId, CancellationToken ct)
     {
@@ -212,6 +221,10 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months)
             await db.SaveChangesAsync(ct);
             created = true;
         }
+
+        // File everything that fits first: transactions synced before the categories existed (or before a
+        // category was added) would otherwise count as $0 in every category.
+        var filed = await categorization.RunAsync(householdId, ct);
 
         var current = await months.EnsureCurrentAsync(householdId, ct);
         var (_, _, calendar) = await months.ContextAsync(householdId, ct);
@@ -243,8 +256,9 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months)
             && a.Type == AccountType.CreditCard && a.CurrentBalanceCents < 0, ct);
 
         var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt);
+        var partnerName = await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct);
         return new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),
-            p.IncomeCents, p.IncomeExplanation, p.Categories, p.AllocatedCents, p.UnallocatedCents, p.SpendsMoreThanIncome,
+            p.IncomeCents, p.IncomeExplanation, p.PartnerCents, partnerName, filed, p.Categories, p.AllocatedCents, p.UnallocatedCents, p.SpendsMoreThanIncome,
             p.UncategorizedCount, hasCardDebt, created);
     }
 
@@ -261,6 +275,7 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months)
             foreach (var o in overrides.Where(o => o.CategoryId == c.Id)) o.LimitOverrideCents = null;
         }
         current.IncomeExpectedCents = req.IncomeCents;
+        current.PartnerExpectedCents = req.PartnerCents;
         await db.SaveChangesAsync(ct);
     }
 }

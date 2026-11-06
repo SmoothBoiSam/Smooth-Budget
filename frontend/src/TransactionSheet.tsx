@@ -76,6 +76,12 @@ export default function TransactionSheet({
           {t.description}
           {t.bankCategory && ` · Bank category: ${t.bankCategory}`}
         </p>
+        {t.categoryReason && t.categoryName && (
+          <p className={`mt-2 rounded-lg px-3 py-2 text-xs ${t.needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>
+            {t.needsReview ? `Guessed ${t.categoryName}: ` : `${t.categoryName}: `}
+            {t.categoryReason}
+          </p>
+        )}
 
         <label className="mt-5 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
           <input type="checkbox" checked={isTransfer} onChange={(e) => setIsTransfer(e.target.checked)} className="size-5" />

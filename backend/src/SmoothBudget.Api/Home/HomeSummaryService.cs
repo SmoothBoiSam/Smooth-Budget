@@ -24,7 +24,9 @@ public record HomeSummaryDto(
     DateTime? LastUpdatedUtc,
     DateTime ComputedUtc,
     SyncStatusDto Sync,
-    IReadOnlyList<PendingSweepDto> PendingSweeps);
+    IReadOnlyList<PendingSweepDto> PendingSweeps,
+    // Automatic category guesses this month waiting for you to confirm.
+    int ReviewCount = 0);
 
 /// <summary>A "send $X to …" item from a closed month that the user hasn't marked as sent yet.</summary>
 public record PendingSweepDto(Guid Id, string Kind, long AmountCents, string Destination, string FromMonth);
@@ -39,7 +41,8 @@ public sealed record CurrentMonthData(
     long CarriedInDeficitCents,
     DateTime? LastUpdatedUtc,
     IReadOnlyList<ItemSyncInfo> Connections,
-    IReadOnlyList<PendingSweepDto> PendingSweeps)
+    IReadOnlyList<PendingSweepDto> PendingSweeps,
+    int ReviewCount)
 {
     public IReadOnlyList<BudgetCategory> CalculatorCategories => Categories.Select(c => c.ForCalculator).ToList();
 
@@ -77,6 +80,8 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             .Select(s => new { s.Id, s.Kind, s.AmountCents, s.Destination, s.BudgetMonth.StartDate })
             .ToListAsync(ct);
         var calendar = new BudgetMonthCalendar(household.BudgetMonthStartDay);
+        var reviewCount = await db.Transactions.CountAsync(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null
+            && !t.IsTransfer && t.Date >= month.Range.Start && t.Date <= month.Range.End, ct);
 
         var lastUpdated = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId)
@@ -90,7 +95,8 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
         return new CurrentMonthData(today, month.Range, row, month.Categories, month.Transactions, month.CarriedInDeficitCents,
             lastUpdated, connections,
             pendingSweeps.Select(s => new PendingSweepDto(s.Id, s.Kind.ToString(), s.AmountCents, s.Destination,
-                calendar.MonthContaining(s.StartDate).Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture))).ToList());
+                calendar.MonthContaining(s.StartDate).Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture))).ToList(),
+            reviewCount);
     }
 }
 
@@ -118,7 +124,8 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock)
             LastUpdatedUtc: lastUpdated,
             ComputedUtc: clock.GetUtcNow().UtcDateTime,
             Sync: SyncStatus.For(data.Connections, clock.GetUtcNow().UtcDateTime),
-            PendingSweeps: data.PendingSweeps);
+            PendingSweeps: data.PendingSweeps,
+            ReviewCount: data.ReviewCount);
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

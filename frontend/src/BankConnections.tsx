@@ -116,6 +116,16 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
     onChanged()
   }
 
+  /** Re-downloads everything Plaid has (same rows, updated) to pick up its detailed categories and confidence. */
+  async function resync(item: PlaidItem) {
+    const r = await run('Re-downloading from your bank…', () => plaidApi.resync(item.id))
+    if (r) {
+      setMessage(`${describe(r)}. Categories were re-checked.`)
+      onChanged()
+    }
+    await load()
+  }
+
   async function refreshSandbox(item: PlaidItem) {
     await run('Asking Plaid for new activity…', () => plaidApi.sandboxRefresh(item.id))
     setMessage('Plaid is generating new test activity. Sync in a few seconds to see pending purchases post.')
@@ -159,6 +169,11 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                     {(i.status === 'LoginRequired' || i.status === 'Error') && (
                       <button type="button" onClick={() => connect(i.id)} className="text-slate-900 underline">
                         Reconnect
+                      </button>
+                    )}
+                    {i.status === 'Active' && (
+                      <button type="button" disabled={busy !== null} onClick={() => resync(i)} className="text-slate-600">
+                        Refresh categories from bank
                       </button>
                     )}
                     {config.sandboxShortcut && i.status === 'Active' && (

@@ -51,10 +51,17 @@ public record BudgetSummaryDto(
     int DaysRemaining,
     long SafeToSpendPerDayCents,
     int UncategorizedCount,
-    // SPEC section 3: income = all category limits + an explicit unallocated remainder.
+    // SPEC section 3: money in (your income + partner contributions) = all category limits + an explicit remainder.
     long IncomeExpectedCents,
     long PlannedCents,
     long UnallocatedCents,
+    // Your own income vs the partner's contributions, each expected and received so far this month.
+    long IncomeReceivedCents,
+    long PartnerExpectedCents,
+    long PartnerReceivedCents,
+    string? PartnerName,
+    // Automatic category guesses this month waiting for you to confirm.
+    int ReviewCount,
     IReadOnlyList<BudgetGroupDto> Groups,
     LastMonthDto? LastMonth,
     IReadOnlyList<PendingSweepDto> PendingSweeps);
@@ -95,11 +102,21 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         var planned = data.Categories.Sum(c => c.LimitCents);
         var last = await LastMonthAsync(householdId, data.Row, ct);
 
+        long Received(Core.Transactions.TransactionKind kind) =>
+            data.Transactions.Where(t => t.Kind == kind && !t.IsTransfer && t.AmountCents < 0).Sum(t => -t.AmountCents);
+        var row = data.Row;
+        var moneyIn = row.IncomeExpectedCents + row.PartnerExpectedCents;
+        var partnerName = db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).Single();
+        var reviewCount = db.Transactions.Count(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null && !t.IsTransfer
+                                                     && t.Date >= data.Month.Start && t.Date <= data.Month.End);
+
         return new BudgetSummaryDto(
             data.MonthDto, data.Today, lts.LeftToSpendCents, CurrentMonthData.StatusName(lts.Status),
             lts.TotalVariableLimitCents, lts.TotalVariableSpentCents, lts.CarriedInDeficitCents,
             lts.DaysRemaining, lts.SafeToSpendPerDayCents, lts.UncategorizedSpendingCount,
-            data.Row.IncomeExpectedCents, planned, data.Row.IncomeExpectedCents - planned,
+            row.IncomeExpectedCents, planned, moneyIn - planned,
+            Received(Core.Transactions.TransactionKind.Income), row.PartnerExpectedCents, Received(Core.Transactions.TransactionKind.PartnerContribution),
+            partnerName, reviewCount,
             groups, last, data.PendingSweeps);
     }
 

@@ -15,7 +15,8 @@ public sealed record PlaidTxn(
     bool Pending,
     string? PendingTransactionId,
     string? CategoryPrimary,
-    string? CategoryDetailed);
+    string? CategoryDetailed,
+    string? CategoryConfidence = null);
 
 /// <summary>A row the app already stores for a Plaid transaction.</summary>
 public sealed record StoredPlaidRow(Guid RowId, string PlaidTransactionId, bool Pending);

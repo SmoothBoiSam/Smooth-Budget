@@ -19,6 +19,7 @@ export interface HomeSummary {
   computedUtc: string
   sync: SyncStatus
   pendingSweeps: PendingSweep[]
+  reviewCount: number
 }
 
 export interface Me {
@@ -89,7 +90,7 @@ export interface Transaction {
   amountCents: number
   merchant: string
   description: string
-  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other'
+  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution'
   categoryId: string | null
   categoryName: string | null
   categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User'
@@ -98,6 +99,8 @@ export interface Transaction {
   accountId: string
   accountName: string
   bankCategory: string | null
+  needsReview: boolean
+  categoryReason: string | null
 }
 
 export interface ImportResult {
@@ -157,7 +160,11 @@ export const budgetApi = {
   categories: () => request<Category[]>('GET', '/budget/categories'),
   monthTransactions: () => request<{ from: string; to: string; items: Transaction[] }>('GET', '/transactions'),
   inbox: () => request<Transaction[]>('GET', '/transactions/inbox'),
-  inboxCount: () => request<{ count: number }>('GET', '/transactions/inbox/count'),
+  inboxCount: () => request<{ count: number; review: number }>('GET', '/transactions/inbox/count'),
+  review: () => request<Transaction[]>('GET', '/transactions/review'),
+  confirmGuesses: (ids: string[]) => request<{ confirmed: number }>('POST', '/transactions/review/confirm', { ids }),
+  autoCategorize: () => request<AutoCategorizeResult>('POST', '/transactions/auto-categorize'),
+  suggestedCategories: () => request<SuggestedCategory[]>('GET', '/transactions/suggested-categories'),
   updateTransaction: (id: string, categoryId: string | null, isTransfer: boolean, rulePattern: string | null) =>
     request<{ transaction: Transaction; ruleAppliedTo: number }>('PATCH', `/transactions/${id}`, {
       categoryId,
@@ -214,6 +221,11 @@ export interface BudgetSummary {
   incomeExpectedCents: number
   plannedCents: number
   unallocatedCents: number
+  incomeReceivedCents: number
+  partnerExpectedCents: number
+  partnerReceivedCents: number
+  partnerName: string | null
+  reviewCount: number
   groups: BudgetGroup[]
   lastMonth: LastMonth | null
   pendingSweeps: PendingSweep[]
@@ -293,6 +305,7 @@ export const plaidApi = {
   removeItem: (id: string) => request<void>('DELETE', `/plaid/items/${id}`),
   reconnected: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/reconnected`),
   syncAll: () => request<SyncResult[]>('POST', '/sync'),
+  resync: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/resync`),
 }
 
 export interface PendingSweep {
@@ -340,6 +353,9 @@ export interface GeneratorProposal {
   months: { start: string; end: string }[]
   incomeCents: number
   incomeExplanation: string
+  partnerCents: number
+  partnerName: string | null
+  categorization: AutoCategorizeResult
   categories: ProposedLimit[]
   allocatedCents: number
   unallocatedCents: number
@@ -360,14 +376,35 @@ export const budgetEditApi = {
   ) => request<void>('PUT', `/budget/categories/${id}`, body),
   reorder: (ids: string[]) => request<void>('POST', '/budget/categories/order', { ids }),
   hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
-  setIncome: (incomeCents: number) => request<void>('PUT', '/budget/months/current/income', { incomeCents }),
+  setIncome: (incomeCents: number, partnerCents?: number) =>
+    request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null }),
   closeMonth: (start: string) => request<void>('POST', `/budget/months/${start}/close`),
   sweepDone: (id: string) => request<void>('POST', `/budget/sweeps/${id}/done`),
   sweepUndo: (id: string) => request<void>('DELETE', `/budget/sweeps/${id}/done`),
   generator: () => request<GeneratorProposal>('GET', '/budget/generator'),
-  applyGenerator: (incomeCents: number, limits: { categoryId: string; limitCents: number }[]) =>
-    request<void>('POST', '/budget/generator/apply', { incomeCents, limits }),
+  applyGenerator: (incomeCents: number, partnerCents: number, limits: { categoryId: string; limitCents: number }[]) =>
+    request<void>('POST', '/budget/generator/apply', { incomeCents, partnerCents, limits }),
   settings: () => request<{ sweepTarget: SweepTarget; sweepSavingsPercent: number }>('GET', '/settings/budget'),
   saveSettings: (sweepTarget: SweepTarget, sweepSavingsPercent: number) =>
     request<void>('PUT', '/settings/budget', { sweepTarget, sweepSavingsPercent }),
+}
+
+export interface AutoCategorizeResult {
+  filed: number
+  guesses: number
+  stillUncategorized: number
+  partnerContributions: number
+}
+
+export interface SuggestedCategory {
+  name: string
+  type: Category['type']
+  isDiscretionary: boolean
+  transactionCount: number
+}
+
+export const partnerApi = {
+  get: () => request<{ partnerName: string | null }>('GET', '/settings/partner'),
+  save: (partnerName: string | null) => request<AutoCategorizeResult>('PUT', '/settings/partner', { partnerName }),
+  suggestions: () => request<{ name: string; count: number; totalCents: number }[]>('GET', '/settings/partner/suggestions'),
 }
