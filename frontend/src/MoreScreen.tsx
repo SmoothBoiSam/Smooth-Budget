@@ -184,7 +184,7 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
-                    {a.mask ? ` ••${a.mask}` : ''} ({accountTypeLabel[a.type]})
+                    {a.mask ? ` ••${a.mask}` : ''} ({accountTypeLabel[a.type]}{a.bankSynced ? ', bank-synced' : ''})
                   </option>
                 ))}
               </select>
@@ -223,6 +223,12 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
           <p className="font-semibold">
             {result.format}: {result.imported} new, {result.duplicates} already imported
           </p>
+          {(result.alreadySynced > 0 || result.coveredBySync > 0) && (
+            <p>
+              Skipped so nothing counts twice: {result.alreadySynced} already synced from your bank
+              {result.coveredBySync > 0 && `, ${result.coveredBySync} in a period bank sync already covers`}.
+            </p>
+          )}
           <p>
             {result.transfers} transfers or card payments, {result.categorized} categorized, {result.needsCategory} need a category
             {result.needsCategory > 0 && (

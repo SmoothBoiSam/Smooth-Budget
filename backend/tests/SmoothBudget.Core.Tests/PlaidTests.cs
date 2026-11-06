@@ -125,7 +125,7 @@ public class CsvOverlapMatcherTests
     {
         var early = Csv(8, 5_00);
         var close = Csv(11, 5_00);
-        var d = CsvOverlapMatcher.Match([T("a", 10, 5_00), T("b", 10, 5_00), T("c", 10, 5_00)], [early, close, Csv(30, 1_00)]);
+        var d = CsvOverlapMatcher.Match([T("a", 10, 5_00), T("b", 10, 5_00), T("c", 10, 5_00)], [Csv(1, 2_00), early, close, Csv(30, 1_00)]);
 
         Assert.Equal(close.RowId, d.Single(x => x.Txn.TransactionId == "a").AdoptRowId);
         Assert.Equal(early.RowId, d.Single(x => x.Txn.TransactionId == "b").AdoptRowId);
@@ -163,20 +163,83 @@ public class CsvOverlapMatcherTests
     }
 
     [Fact]
-    public void Unmatched_near_the_end_of_the_CSV_is_kept_but_older_unmatched_is_skipped()
+    public void Unmatched_near_the_end_is_kept_but_unmatched_well_inside_the_CSV_period_is_skipped()
     {
-        var csv = new[] { Csv(30, 1_00) };
-        var d = CsvOverlapMatcher.Match([T("recent", 27, 9_99), T("old", 1, 9_99)], csv);
+        var csv = new[] { Csv(1, 1_00), Csv(30, 1_00) };
+        var d = CsvOverlapMatcher.Match([T("recent", 27, 9_99), T("middle", 15, 9_99)], csv);
 
         Assert.Equal(OverlapAction.Insert, d.Single(x => x.Txn.TransactionId == "recent").Action);
-        Assert.Equal(OverlapAction.Skip, d.Single(x => x.Txn.TransactionId == "old").Action);
+        Assert.Equal(OverlapAction.Skip, d.Single(x => x.Txn.TransactionId == "middle").Action);
+    }
+
+    [Fact]
+    public void History_older_than_the_first_CSV_row_is_imported()
+    {
+        // The CSV only covers November; Plaid's history reaches back into October.
+        var d = CsvOverlapMatcher.Match([T("october", 10, 9_99, month: 10)], [Csv(1, 1_00), Csv(30, 1_00)]);
+        Assert.Equal(OverlapAction.Insert, d.Single().Action);
     }
 
     [Fact]
     public void Amounts_must_match_exactly_and_dates_within_the_window()
     {
-        var d = CsvOverlapMatcher.Match([T("a", 1, 5_00), T("b", 1, 7_00)], [Csv(1, 5_01), Csv(1 + CsvOverlapMatcher.MatchDays + 1, 7_00), Csv(30, 1)]);
+        var d = CsvOverlapMatcher.Match([T("a", 15, 5_00), T("b", 15, 7_00)],
+            [Csv(1, 1), Csv(15, 5_01), Csv(15 + CsvOverlapMatcher.MatchDays + 1, 7_00), Csv(30, 1)]);
         Assert.All(d, x => Assert.Equal(OverlapAction.Skip, x.Action));
+    }
+}
+
+/// <summary>The other direction: a CSV uploaded into an account Plaid already syncs.</summary>
+public class CsvIntoSyncedAccountTests
+{
+    private static OverlapItem<string> Line(string name, int day, long cents) => new(name, new DateOnly(2026, 11, day), cents, Pending: false);
+    private static CsvRow Synced(int day, long cents, int month = 11) => new(Guid.NewGuid(), new DateOnly(2026, month, day), cents);
+
+    private static IReadOnlyList<OverlapResult<string>> Match(IEnumerable<OverlapItem<string>> csv, IReadOnlyCollection<CsvRow> synced) =>
+        OverlapMatcher.Match(csv, synced, s => s);
+
+    [Fact]
+    public void A_CSV_line_Plaid_already_synced_is_recognized_and_not_added_again()
+    {
+        var synced = Synced(10, 64_30); // Plaid's purchase date
+        var r = Match([Line("king soopers", 12, 64_30)], [Synced(1, 5_00), synced, Synced(25, 5_00)]); // CSV posting date
+
+        Assert.Equal((OverlapAction.Adopt, synced.RowId), (r.Single().Action, r.Single().AdoptRowId));
+    }
+
+    [Fact]
+    public void CSV_lines_from_before_Plaid_history_starts_are_added()
+    {
+        var r = Match([Line("old", 1, 9_99)], [Synced(20, 5_00, month: 11), Synced(30, 5_00)]);
+        Assert.Equal(OverlapAction.Insert, r.Single().Action);
+    }
+
+    [Fact]
+    public void Unmatched_CSV_lines_well_inside_the_synced_period_are_skipped_and_near_the_end_added()
+    {
+        var synced = new[] { Synced(1, 1_00), Synced(30, 1_00) };
+        var r = Match([Line("middle", 15, 9_99), Line("end", 28, 9_99)], synced);
+
+        Assert.Equal(OverlapAction.Skip, r.Single(x => x.Item == "middle").Action);
+        Assert.Equal(OverlapAction.Insert, r.Single(x => x.Item == "end").Action);
+    }
+
+    [Fact]
+    public void The_covered_period_comes_from_all_synced_rows_not_just_the_unmatched_ones()
+    {
+        // Earlier imports already matched most synced rows; only the 28th is still free. The 13th is still
+        // well inside what bank sync covers (8th to 28th), so an unmatched line there is skipped, not added.
+        var r = OverlapMatcher.Match([Line("odd", 13, 20_00)], [Synced(28, 50_00)], s => s,
+            covered: (new DateOnly(2026, 11, 8), new DateOnly(2026, 11, 28)));
+        Assert.Equal(OverlapAction.Skip, r.Single().Action);
+    }
+
+    [Fact]
+    public void Two_identical_CSV_lines_need_two_synced_rows()
+    {
+        var r = Match([Line("coffee-a", 10, 5_00), Line("coffee-b", 10, 5_00)], [Synced(1, 1), Synced(10, 5_00), Synced(30, 1)]);
+        Assert.Equal(1, r.Count(x => x.Action == OverlapAction.Adopt));
+        Assert.Equal(1, r.Count(x => x.Action == OverlapAction.Skip));
     }
 }
 

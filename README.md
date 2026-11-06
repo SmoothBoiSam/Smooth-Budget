@@ -64,7 +64,7 @@ On a phone on the same Wi-Fi, run `npm --prefix frontend run dev -- --host` and 
 2. In the app, open **More → Import a CSV**, add the account once (name, type, optionally the last 4 digits), pick the file, and import.
 3. Card payments and transfers are detected automatically. Anything without a category shows up under **Budget → Needs a category**. Tap a transaction to set its category, and tick "Always use this category" to create a merchant rule.
 
-Re-importing an overlapping export is safe: rows already in the account are skipped. Each import can be undone from **Recent imports**.
+Re-importing an overlapping export is safe: rows already in the account are skipped, including ones your bank already synced through Plaid (in either order). Each import can be undone from **Recent imports**.
 
 ### Connecting banks with Plaid
 

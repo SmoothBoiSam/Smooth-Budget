@@ -208,6 +208,74 @@ public class PlaidApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Single(accounts); // the checking account was skipped
     }
 
+    private static async Task<ImportResultDto> ImportCsvAsync(HttpClient client, Guid accountId, string csv)
+    {
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(csv, Encoding.UTF8, "text/csv"), "file", "card.csv");
+        form.Add(new StringContent(accountId.ToString()), "accountId");
+        var res = await client.PostAsync("/api/import/csv", form);
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        return (await res.Content.ReadFromJsonAsync<ImportResultDto>(Json))!;
+    }
+
+    [Fact]
+    public async Task Plaid_first_then_a_CSV_for_the_same_account_is_not_counted_twice()
+    {
+        var (client, household) = await RegisterAsync();
+        await LinkAsync(client, household, async access => app.Plaid.QueueSync(access, added:
+        [
+            FakePlaid.Txn("s1", "acc-card", 18.45m, "2026-11-09", "TAQUERIA UNO", authorized: "2026-11-08"),
+            FakePlaid.Txn("s2", "acc-card", 44.10m, "2026-11-10", "FUEL STOP", primary: "TRANSPORTATION", detailed: "TRANSPORTATION_GAS"),
+            FakePlaid.Txn("s3", "acc-card", 36.99m, "2026-11-12", "BIG BOX STORE", primary: "GENERAL_MERCHANDISE", detailed: "GENERAL_MERCHANDISE_SUPERSTORES"),
+            FakePlaid.Txn("s4", "acc-card", 14.00m, "2026-11-16", "CINEMA 8", primary: "ENTERTAINMENT", detailed: "ENTERTAINMENT_TV_AND_MOVIES"),
+            FakePlaid.Txn("s5", "acc-card", 50.00m, "2026-11-28", "FRESH MARKET", primary: "FOOD_AND_DRINK", detailed: "FOOD_AND_DRINK_GROCERIES"),
+        ]), accounts: [Card]);
+        var card = (await client.GetFromJsonAsync<List<AccountDto>>("/api/accounts", Json))!.Single();
+        Assert.True(card.BankSynced);
+        var spentBefore = (await Home(client)).TotalVariableSpentCents;
+
+        // The user then uploads a Chase credit CSV for the same card (CSV uses purchase dates).
+        const string csv = """
+            Transaction Date,Post Date,Description,Category,Type,Amount,Memo
+            11/02/2026,11/03/2026,OLD PURCHASE,Shopping,Sale,-9.99,
+            11/08/2026,11/09/2026,TAQUERIA UNO,Food & Drink,Sale,-18.45,
+            11/10/2026,11/10/2026,FUEL STOP #123,Gas,Sale,-44.10,
+            11/11/2026,11/12/2026,BIG BOX STORE,Shopping,Sale,-36.99,
+            11/13/2026,11/14/2026,ODD CHARGE,Shopping,Sale,-20.00,
+            11/16/2026,11/17/2026,CINEMA 8,Entertainment,Sale,-14.00,
+            """;
+        var r = await ImportCsvAsync(client, card.Id, csv);
+
+        Assert.Equal(4, r.AlreadySynced);  // same purchases Plaid already brought in
+        Assert.Equal(1, r.CoveredBySync);  // no exact match, but well inside the synced period
+        Assert.Equal(1, r.Imported);       // from before the bank sync's history started
+        Assert.Equal(spentBefore, (await Home(client)).TotalVariableSpentCents); // nothing counted twice
+        var all = (await client.GetFromJsonAsync<TransactionListDto>("/api/transactions?from=2026-10-01&to=2026-12-31", Json))!.Items;
+        Assert.Equal(6, all.Count);
+
+        // Uploading the same file again adds nothing either.
+        var again = await ImportCsvAsync(client, card.Id, csv);
+        Assert.Equal(0, again.Imported);
+        Assert.Equal(6, (await client.GetFromJsonAsync<TransactionListDto>("/api/transactions?from=2026-10-01&to=2026-12-31", Json))!.Items.Count);
+    }
+
+    [Fact]
+    public async Task A_CSV_into_a_second_account_for_a_bank_synced_card_is_refused()
+    {
+        var (client, household) = await RegisterAsync();
+        await LinkAsync(client, household, accounts: [Card]); // syncs the card ••4321
+        var twin = (await (await client.PostAsJsonAsync("/api/accounts", new { name = "Chase Freedom (CSV)", type = "CreditCard", mask = "4321" }, Json))
+            .Content.ReadFromJsonAsync<AccountDto>(Json))!;
+
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent("Transaction Date,Post Date,Description,Category,Type,Amount,Memo\n11/08/2026,11/09/2026,TAQUERIA UNO,Food & Drink,Sale,-18.45,", Encoding.UTF8, "text/csv"), "file", "card.csv");
+        form.Add(new StringContent(twin.Id.ToString()), "accountId");
+        var res = await client.PostAsync("/api/import/csv", form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Contains("already syncs this account", await res.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task Only_checking_savings_and_cards_can_be_imported_and_masks_are_last_four_only()
     {

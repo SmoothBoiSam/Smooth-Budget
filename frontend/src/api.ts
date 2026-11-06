@@ -70,6 +70,7 @@ export interface Account {
   mask: string | null
   source: string
   includedInBudget: boolean
+  bankSynced: boolean
 }
 
 export interface Category {
@@ -108,6 +109,8 @@ export interface ImportResult {
   categorized: number
   needsCategory: number
   errors: { rowNumber: number; message: string }[]
+  alreadySynced: number
+  coveredBySync: number
 }
 
 export interface ImportBatch {

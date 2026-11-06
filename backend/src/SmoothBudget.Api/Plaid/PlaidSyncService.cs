@@ -133,8 +133,14 @@ public class PlaidSyncService(
                 .Where(t => t.AccountId == account.Id && t.PlaidTransactionId == null && t.Source == DataSource.Csv)
                 .ToDictionaryAsync(t => t.Id, ct);
             var csvRows = csvEntities.Values.Select(t => new CsvRow(t.Id, t.Date, t.AmountCents)).ToList();
+            // The CSV's period counts every CSV row, including ones matched to Plaid in earlier syncs.
+            var csvRange = await db.Transactions
+                .Where(t => t.AccountId == account.Id && t.Source == DataSource.Csv)
+                .GroupBy(_ => 1)
+                .Select(g => new { First = g.Min(t => t.Date), Last = g.Max(t => t.Date) })
+                .SingleOrDefaultAsync(ct);
 
-            foreach (var d in CsvOverlapMatcher.Match(group, csvRows))
+            foreach (var d in CsvOverlapMatcher.Match(group, csvRows, csvRange is null ? null : (csvRange.First, csvRange.Last)))
             {
                 switch (d.Action)
                 {

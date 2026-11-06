@@ -87,3 +87,11 @@ The three real exports (Chase checking, Chase credit, Apple Card; about a year, 
 | 57 | **Disconnecting a bank keeps its accounts and history;** they just stop syncing. "Reconnect" uses Plaid Link's update mode. | Removing history should be an explicit choice. |
 | 58 | **Sandbox helpers (Development + `PLAID_ENV=sandbox` only):** "Add Plaid's sandbox test bank" links Plaid's test institution server-side with the `user_transactions_dynamic` test user, so no credentials are typed anywhere. "Simulate new activity" calls `/transactions/refresh`, which makes pending sandbox purchases post. Neither exists in production. | Makes the pending-to-posted path easy to see and test. |
 | 59 | **Two levels of Plaid tests:** an in-process fake Plaid runs in every test run (CI included). An opt-in test runs against the real sandbox only when `.env` has sandbox keys, and is skipped in CI. | CI never needs or sees Plaid secrets. |
+
+## CSV and bank sync in either order (follow-up to milestone 3)
+
+| # | Decision | Why |
+|---|----------|-----|
+| 60 | **Uploading a CSV into an account Plaid already syncs skips the transactions Plaid already has.** A CSV line with the same amount within 5 days of a synced row that no CSV line has claimed yet is the same purchase: it isn't added, and the synced row is stamped with the line's fingerprint, so uploading the same file again is recognized too. The import result reports these separately ("already synced from your bank"). | Before this, CSV uploads only checked earlier CSV uploads, so Plaid-first then CSV double counted. |
+| 61 | **Both directions share one rule** (`OverlapMatcher`). The period the other source covers comes from all of its rows in the account, including ones matched earlier. Unmatched lines well inside that period are skipped; ones before it starts, or near its end, are added. This replaces decision 51's "older unmatched are skipped". Plaid history from before your first CSV row is now imported instead of dropped. | One rule, the same in both orders. |
+| 62 | **A CSV can't be uploaded into a second, unlinked account for a bank-synced one** (same type and last 4 digits). The message names the synced account to use instead. The account picker labels bank-synced accounts. | The same real card set up twice would count everything twice. |

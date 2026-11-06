@@ -6,7 +6,8 @@ using SmoothBudget.Api.Data;
 
 namespace SmoothBudget.Api.Import;
 
-public record AccountDto(Guid Id, string Name, string Type, string? Mask, string Source, bool IncludedInBudget);
+/// <param name="BankSynced">True when the account syncs from the bank through Plaid.</param>
+public record AccountDto(Guid Id, string Name, string Type, string? Mask, string Source, bool IncludedInBudget, bool BankSynced = false);
 public record CreateAccountRequest(string Name, AccountType Type, string? Mask);
 public record ImportBatchDto(Guid Id, Guid AccountId, string AccountName, string FileName, string Format, DateTime ImportedUtc,
     int RowCount, int ImportedCount, int DuplicateCount, int ErrorCount);
@@ -20,7 +21,7 @@ public static partial class ImportEndpoints
         accounts.MapGet("", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
             await db.Accounts.Where(a => a.HouseholdId == ctx.User.HouseholdId())
                 .OrderBy(a => a.Type).ThenBy(a => a.Name)
-                .Select(a => new AccountDto(a.Id, a.Name, a.Type.ToString(), a.Mask, a.Source.ToString(), a.IncludedInBudget))
+                .Select(a => new AccountDto(a.Id, a.Name, a.Type.ToString(), a.Mask, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null))
                 .ToListAsync(ct));
 
         accounts.MapPost("", async (CreateAccountRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>

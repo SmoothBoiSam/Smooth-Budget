@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Transactions;
 using SmoothBudget.Core.Import;
+using SmoothBudget.Core.Plaid;
 using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Import;
@@ -15,7 +16,11 @@ public record ImportResultDto(
     int Transfers,
     int Categorized,
     int NeedsCategory,
-    IReadOnlyList<RowError> Errors);
+    IReadOnlyList<RowError> Errors,
+    // Lines that are the same transaction as one your bank already synced through Plaid.
+    int AlreadySynced = 0,
+    // Lines with no exact match, dated well inside the period bank sync already covers.
+    int CoveredBySync = 0);
 
 public class ImportException(string message) : Exception(message);
 
@@ -41,6 +46,17 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
         if (parsed.Rows.Count == 0)
             throw new ImportException("No transactions found in the file." + (parsed.Errors.Count > 0 ? $" {parsed.Errors.Count} rows could not be read." : ""));
 
+        // The same real account set up twice (one CSV account, one synced from the bank) would count
+        // everything twice. Send the file to the synced account instead.
+        if (account.PlaidItemId is null && account.Mask is not null)
+        {
+            var twin = await db.Accounts.FirstOrDefaultAsync(a => a.HouseholdId == householdId && a.Id != account.Id
+                && a.PlaidItemId != null && a.Type == account.Type && a.Mask == account.Mask, ct);
+            if (twin is not null)
+                throw new ImportException(
+                    $"\"{twin.Name}\" ••{twin.Mask} already syncs this account from your bank. Import the file into \"{twin.Name}\" instead so nothing is counted twice.");
+        }
+
         var min = parsed.Rows.Min(r => r.Date);
         var max = parsed.Rows.Max(r => r.Date);
         var existing = await db.Transactions
@@ -48,7 +64,41 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
             .GroupBy(t => t.Fingerprint!)
             .Select(g => new { g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
-        var (fresh, duplicates) = ImportDeduplicator.SelectNew(parsed.Rows, existing);
+        var (notYetImported, duplicates) = ImportDeduplicator.SelectNew(parsed.Rows, existing);
+
+        // Rows Plaid already synced into this account (and no CSV line has claimed yet). A CSV line that
+        // is one of them is not added again; the synced row is stamped with the line's fingerprint so
+        // re-importing the same file later recognizes it too (DECISIONS.md 60).
+        var synced = await db.Transactions
+            .Where(t => t.AccountId == accountId && t.Source == DataSource.Plaid && t.Fingerprint == null)
+            .ToDictionaryAsync(t => t.Id, ct);
+        var syncedRange = await db.Transactions
+            .Where(t => t.AccountId == accountId && t.Source == DataSource.Plaid)
+            .GroupBy(_ => 1)
+            .Select(g => new { First = g.Min(t => t.Date), Last = g.Max(t => t.Date) })
+            .SingleOrDefaultAsync(ct);
+        var fresh = new List<ParsedRow>();
+        int alreadySynced = 0, coveredBySync = 0;
+        foreach (var o in OverlapMatcher.Match(
+                     notYetImported.Select(r => new OverlapItem<ParsedRow>(r, r.Date, r.AmountCents, Pending: false)),
+                     synced.Values.Select(t => new CsvRow(t.Id, t.Date, t.AmountCents)).ToList(),
+                     r => r.Fingerprint,
+                     syncedRange is null ? null : (syncedRange.First, syncedRange.Last)))
+        {
+            switch (o.Action)
+            {
+                case OverlapAction.Adopt:
+                    synced[o.AdoptRowId!.Value].Fingerprint = o.Item.Fingerprint;
+                    alreadySynced++;
+                    break;
+                case OverlapAction.Skip:
+                    coveredBySync++;
+                    break;
+                default:
+                    fresh.Add(o.Item);
+                    break;
+            }
+        }
 
         var rules = await db.CategoryRules.Where(r => r.HouseholdId == householdId)
             .Select(r => new MerchantRule(r.CategoryId, r.Pattern, r.CreatedUtc)).ToListAsync(ct);
@@ -61,7 +111,7 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
             Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = accountId,
             FileName = Path.GetFileName(fileName) is { Length: > 0 } n ? n[..Math.Min(n.Length, 200)] : "upload.csv",
             Format = parsed.Format, ImportedUtc = now, RowCount = parsed.Rows.Count + parsed.Errors.Count,
-            ImportedCount = fresh.Count, DuplicateCount = duplicates, ErrorCount = parsed.Errors.Count,
+            ImportedCount = fresh.Count, DuplicateCount = duplicates + alreadySynced + coveredBySync, ErrorCount = parsed.Errors.Count,
         };
         db.ImportBatches.Add(batch);
 
@@ -91,7 +141,7 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
             Transfers: created.Count(t => t.IsTransfer),
             Categorized: created.Count(t => t.CategoryId is not null && !t.IsTransfer),
             NeedsCategory: created.Count(t => TransactionRules.NeedsCategory(t.CategoryId is not null, t.IsTransfer, t.Kind, t.AmountCents)),
-            parsed.Errors);
+            parsed.Errors, alreadySynced, coveredBySync);
     }
 
     /// <summary>Removes everything one import added.</summary>

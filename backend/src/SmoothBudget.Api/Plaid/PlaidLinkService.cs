@@ -68,7 +68,7 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
         }).ToList();
 
         return new LinkResultDto(item.Id, item.InstitutionName, proposals,
-            existing.Select(a => new AccountDto(a.Id, a.Name, a.Type.ToString(), a.Mask, a.Source.ToString(), a.IncludedInBudget)).ToList());
+            existing.Select(a => new AccountDto(a.Id, a.Name, a.Type.ToString(), a.Mask, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null)).ToList());
     }
 
     public async Task<SyncResultDto> ConfirmAccountsAsync(Guid householdId, Guid itemId, IReadOnlyList<AccountMappingRequest> mappings, CancellationToken ct)
