@@ -170,3 +170,44 @@ export const budgetApi = {
   rules: () => request<Rule[]>('GET', '/rules'),
   deleteRule: (id: string) => request<void>('DELETE', `/rules/${id}`),
 }
+
+export type Health = 'onTrack' | 'low' | 'over'
+
+export interface BudgetCategoryLine {
+  id: string
+  name: string
+  type: Category['type']
+  isDiscretionary: boolean
+  limitCents: number
+  spentCents: number
+  remainingCents: number
+  health: Health
+  transactionCount: number
+}
+
+export interface BudgetGroup {
+  type: Category['type']
+  label: string
+  countsTowardLeftToSpend: boolean
+  limitCents: number
+  spentCents: number
+  categories: BudgetCategoryLine[]
+}
+
+export interface BudgetSummary {
+  budgetMonth: { start: string; end: string; label: string }
+  today: string
+  leftToSpendCents: number
+  status: Status
+  totalVariableLimitCents: number
+  totalVariableSpentCents: number
+  carriedInDeficitCents: number
+  daysRemaining: number
+  safeToSpendPerDayCents: number
+  uncategorizedCount: number
+  groups: BudgetGroup[]
+}
+
+export const budgetSummaryApi = {
+  get: () => request<BudgetSummary>('GET', '/budget/summary'),
+}

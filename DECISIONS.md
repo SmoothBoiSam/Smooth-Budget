@@ -46,3 +46,14 @@ Choices made where SPEC.md is silent. Newest at the bottom of each milestone.
 | 33 | **Every upload is an import batch that can be undone** (deletes exactly the rows it added). Undo doesn't revert transfer flags already set on rows from other imports. | A safe way to back out a wrong file or account. |
 | 34 | **Upload limit 5 MB; multipart uploads skip ASP.NET's antiforgery token.** The SameSite=Lax auth cookie isn't sent on cross-site POSTs, so a forged upload arrives unauthenticated. | Same reasoning as decision 10. |
 | 35 | **Navigation uses the URL hash** (`#/`, `#/budget`, `#/more`) instead of a router library. | Three screens don't need a dependency. |
+
+## Budget tab: per-category view (requested after milestone 2)
+
+| # | Decision | Why |
+|---|----------|-----|
+| 36 | **The Budget tab shows categories, not a ledger.** It's grouped as Spending, Bills & subscriptions, Debt payments and Savings. Each category shows its limit, spent or paid, remaining or over, and a progress bar, and you can tap it to see its transactions. The ledger moved to "All transactions this month", and the inbox has its own view. | You asked for it, and it's SPEC section 4.3. Pulled forward from milestone 4; budget editing, month close and rollover are still milestone 4. |
+| 37 | **Only Spending (variable) categories make up Left to Spend.** Bills & subscriptions, debt payments and savings are shown as "paid / to go" and are labeled "Not part of Left to Spend". Their remaining amounts plus the carried-over deficit add up to Left to Spend exactly, and a test checks it. | SPEC section 3 formula. |
+| 38 | **Debt-payment and savings categories count transfers toward "paid".** A card payment from checking, or a move to savings, is how those get paid. Spending and bill categories never count transfers. | Otherwise "Credit card payment" would always show $0 paid. |
+| 39 | **Category health:** spending categories are red when over, amber with under 15% left, and green otherwise (the same 15% rule as Home). Bills, debt and savings only show "over" or not, because a fully paid bill is good, not "low". | Consistent with decision 5. |
+| 40 | **Home and Budget load their data through one shared loader** (`CurrentMonthLoader`), so the two screens can't disagree. | One source of truth. |
+| 41 | **Known gap:** a subscription the bank labels as a spending category (e.g. a streaming service under "Entertainment") counts against that spending category until you move it. For now, set its category to Subscriptions with "Always use this category". Automatic recurring detection comes in milestone 6. | Bank categories don't distinguish subscriptions. |

@@ -134,7 +134,7 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
         )}
         {s.uncategorizedCount > 0 && (
           <li>
-            <a href="#/budget" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
+            <a href="#/budget/inbox" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
               <span>
                 {s.uncategorizedCount} {s.uncategorizedCount === 1 ? 'purchase' : 'purchases'} this month{' '}
                 {s.uncategorizedCount === 1 ? 'needs' : 'need'} a category and {s.uncategorizedCount === 1 ? "isn't" : "aren't"} counted yet

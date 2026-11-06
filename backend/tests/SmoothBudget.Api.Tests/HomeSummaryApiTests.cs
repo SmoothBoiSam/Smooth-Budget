@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using SmoothBudget.Api.Auth;
+using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Seeding;
 
@@ -119,6 +120,61 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(38_26, s.SafeToSpendPerDayCents);
         Assert.Equal(1, s.UncategorizedCount); // the farmers market purchase
         Assert.Equal("low", s.Status);
+    }
+
+    private static async Task<BudgetSummaryDto> BudgetAsync(HttpClient client)
+    {
+        var res = await client.GetAsync("/api/budget/summary");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        return (await res.Content.ReadFromJsonAsync<BudgetSummaryDto>(Json))!;
+    }
+
+    private static BudgetCategoryLineDto Cat(BudgetSummaryDto b, string name) =>
+        b.Groups.SelectMany(g => g.Categories).Single(c => c.Name == name);
+
+    [Fact]
+    public async Task Budget_summary_shows_every_category_grouped_with_spent_and_remaining()
+    {
+        SetDenverNoon(2026, 11, 20);
+        var (client, household) = await RegisterAsync();
+        await SeedAsync(household);
+
+        var b = await BudgetAsync(client);
+
+        Assert.Equal(["Variable", "FixedBill", "DebtPayment", "SavingsTransfer"], b.Groups.Select(g => g.Type));
+        Assert.Equal([true, false, false, false], b.Groups.Select(g => g.CountsTowardLeftToSpend));
+
+        // Spending: the same numbers Home uses.
+        var spending = b.Groups[0];
+        Assert.Equal((1_010_00L, 488_83L), (spending.LimitCents, spending.SpentCents));
+        Assert.Equal((237_92L, 212_08L, "onTrack"), (Cat(b, "Groceries").SpentCents, Cat(b, "Groceries").RemainingCents, Cat(b, "Groceries").Health));
+        Assert.Equal((104_50L, 45_50L, 4), (Cat(b, "Eating out").SpentCents, Cat(b, "Eating out").RemainingCents, Cat(b, "Eating out").TransactionCount));
+        Assert.Equal(24_99, Cat(b, "Shopping").SpentCents); // 36.99 purchase - 12.00 return
+        Assert.Equal(0, Cat(b, "Personal care").SpentCents);
+        Assert.Equal(478_67, b.LeftToSpendCents);
+        Assert.Equal(b.LeftToSpendCents, spending.Categories.Sum(c => c.RemainingCents) - b.CarriedInDeficitCents);
+
+        // Bills, debt and savings show what has been paid, and never touch Left to Spend.
+        Assert.Equal((1_650_00L, 0L), (Cat(b, "Rent").SpentCents, Cat(b, "Rent").RemainingCents));
+        Assert.Equal(70_00 + 68_40, Cat(b, "Utilities & internet").SpentCents);
+        Assert.Equal(15_49, Cat(b, "Subscriptions").SpentCents);
+        Assert.Equal(0, Cat(b, "Credit card payment").SpentCents); // not paid yet on 11-20
+        Assert.Equal(100_00, Cat(b, "Rainy-day fund").SpentCents);  // the transfer to savings counts here
+    }
+
+    [Fact]
+    public async Task Budget_summary_flags_low_and_over_categories_at_month_end()
+    {
+        SetDenverNoon(2026, 12, 5);
+        var (client, household) = await RegisterAsync();
+        await SeedAsync(household);
+
+        var b = await BudgetAsync(client);
+
+        Assert.Equal((-22_35L, "over"), (Cat(b, "Eating out").RemainingCents, Cat(b, "Eating out").Health));
+        Assert.Equal((30_48L, "low"), (Cat(b, "Groceries").RemainingCents, Cat(b, "Groceries").Health)); // 6.8% left
+        Assert.Equal(300_00, Cat(b, "Credit card payment").SpentCents); // the card payment, a transfer, counts as paid
+        Assert.Equal(76_53, b.LeftToSpendCents);
     }
 
     [Fact]

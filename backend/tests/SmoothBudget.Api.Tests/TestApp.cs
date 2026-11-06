@@ -2,10 +2,17 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Time.Testing;
 using Npgsql;
 
 namespace SmoothBudget.Api.Tests;
+
+/// <summary>A clock tests can set to any instant, forwards or backwards, in any test order.</summary>
+public sealed class SettableClock(DateTimeOffset start) : TimeProvider
+{
+    private DateTimeOffset _now = start;
+    public override DateTimeOffset GetUtcNow() => _now;
+    public void SetUtcNow(DateTimeOffset value) => _now = value;
+}
 
 /// <summary>
 /// Boots the real API against a throwaway PostgreSQL database (created from the
@@ -13,7 +20,7 @@ namespace SmoothBudget.Api.Tests;
 /// </summary>
 public sealed class TestApp : WebApplicationFactory<Program>
 {
-    public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
+    public SettableClock Clock { get; } = new(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; }
     private readonly string _databaseName = $"smoothbudget_test_{Guid.NewGuid():N}";
     private readonly string _adminConnectionString;

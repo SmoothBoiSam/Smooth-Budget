@@ -8,7 +8,7 @@ import MoreScreen from './MoreScreen'
 
 function currentRoute(): Route {
   const hash = window.location.hash.replace(/^#\/?/, '')
-  return hash === 'budget' || hash === 'more' ? hash : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'more' ? 'more' : 'home'
 }
 
 export default function App() {

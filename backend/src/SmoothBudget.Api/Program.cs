@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Auth;
+using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Import;
@@ -60,7 +61,9 @@ builder.Services.AddRateLimiter(o =>
 
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
+builder.Services.AddScoped<CurrentMonthLoader>();
 builder.Services.AddScoped<HomeSummaryService>();
+builder.Services.AddScoped<BudgetSummaryService>();
 builder.Services.AddScoped<DemoSeeder>();
 builder.Services.AddScoped<TransferDetectionService>();
 builder.Services.AddScoped<ImportService>();
@@ -101,6 +104,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
 app.MapImportEndpoints();
 app.MapTransactionEndpoints();
+BudgetSummaryService.Map(app);
 app.MapGet("/api/home/summary", (HttpContext ctx, HomeSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct))
     .RequireAuthorization();
 

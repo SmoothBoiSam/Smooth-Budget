@@ -109,6 +109,7 @@ In Development, migrations apply automatically on startup.
 | GET | `/api/transactions/inbox`, `/api/transactions/inbox/count` | Transactions that need a category |
 | PATCH | `/api/transactions/{id}` | `{ categoryId, isTransfer, rulePattern? }`. Your choice locks the row. |
 | GET | `/api/budget/categories` | |
+| GET | `/api/budget/summary` | Every category grouped by type, with limit, spent/paid, remaining and health, plus Left to Spend |
 | GET / DELETE | `/api/rules`, `/api/rules/{id}` | Merchant rules |
 | GET | `/api/health` | |
 

@@ -27,19 +27,53 @@ public record HomeSummaryDto(
 /// Loads one household's data for the current budget month and hands it to
 /// <see cref="LeftToSpendCalculator"/>. This class only does data access; the math lives in Core.
 /// </summary>
-public class HomeSummaryService(AppDbContext db, TimeProvider clock)
+/// <summary>Category as loaded for the current month: what the calculators see, plus display fields.</summary>
+public sealed record LoadedCategory(Guid Id, string Name, CategoryType Type, long MonthlyLimitCents, bool IsDiscretionary, int SortOrder)
 {
-    public async Task<HomeSummaryDto> GetAsync(Guid householdId, CancellationToken ct = default)
+    public BudgetCategory ForCalculator => new(Id, Type, MonthlyLimitCents);
+}
+
+/// <summary>Everything the money calculators need for one household's current budget month.</summary>
+public sealed record CurrentMonthData(
+    DateOnly Today,
+    BudgetMonthRange Month,
+    IReadOnlyList<LoadedCategory> Categories,
+    IReadOnlyList<BudgetTransaction> Transactions,
+    long CarriedInDeficitCents,
+    DateTime? LastUpdatedUtc)
+{
+    public IReadOnlyList<BudgetCategory> CalculatorCategories => Categories.Select(c => c.ForCalculator).ToList();
+
+    public LeftToSpendResult LeftToSpend() =>
+        LeftToSpendCalculator.Calculate(Month, Today, CalculatorCategories, Transactions, CarriedInDeficitCents);
+
+    public BudgetMonthDto MonthDto => new(Month.Start, Month.End, Month.Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture));
+
+    public static string StatusName(LeftToSpendStatus s) => s switch
+    {
+        LeftToSpendStatus.Healthy => "healthy",
+        LeftToSpendStatus.Low => "low",
+        _ => "overspent",
+    };
+}
+
+/// <summary>
+/// Loads one household's current budget month. Home and Budget both use this, so they always agree.
+/// Data access only; the math lives in Core.
+/// </summary>
+public class CurrentMonthLoader(AppDbContext db, TimeProvider clock)
+{
+    public async Task<CurrentMonthData> LoadAsync(Guid householdId, CancellationToken ct = default)
     {
         var household = await db.Households.AsNoTracking().SingleAsync(h => h.Id == householdId, ct);
 
-        var today = TodayIn(household.TimeZoneId, clock);
-        var calendar = new BudgetMonthCalendar(household.BudgetMonthStartDay);
-        var month = calendar.MonthContaining(today);
+        var today = HomeSummaryService.TodayIn(household.TimeZoneId, clock);
+        var month = new BudgetMonthCalendar(household.BudgetMonthStartDay).MonthContaining(today);
 
         var categories = await db.Categories.AsNoTracking()
             .Where(c => c.HouseholdId == householdId && !c.IsHidden)
-            .Select(c => new BudgetCategory(c.Id, c.Type, c.MonthlyLimitCents))
+            .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
+            .Select(c => new LoadedCategory(c.Id, c.Name, c.Type, c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder))
             .ToListAsync(ct);
 
         var transactions = await db.Transactions.AsNoTracking()
@@ -56,18 +90,23 @@ public class HomeSummaryService(AppDbContext db, TimeProvider clock)
             .Where(t => t.HouseholdId == householdId)
             .MaxAsync(t => (DateTime?)t.CreatedUtc, ct);
 
-        var r = LeftToSpendCalculator.Calculate(month, today, categories, transactions, carried);
+        return new CurrentMonthData(today, month, categories, transactions, carried, lastUpdated);
+    }
+}
+
+public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock)
+{
+    public async Task<HomeSummaryDto> GetAsync(Guid householdId, CancellationToken ct = default)
+    {
+        var data = await loader.LoadAsync(householdId, ct);
+        var (today, lastUpdated) = (data.Today, data.LastUpdatedUtc);
+        var r = data.LeftToSpend();
 
         return new HomeSummaryDto(
-            BudgetMonth: new BudgetMonthDto(month.Start, month.End, month.Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture)),
+            BudgetMonth: data.MonthDto,
             Today: today,
             LeftToSpendCents: r.LeftToSpendCents,
-            Status: r.Status switch
-            {
-                LeftToSpendStatus.Healthy => "healthy",
-                LeftToSpendStatus.Low => "low",
-                _ => "overspent",
-            },
+            Status: CurrentMonthData.StatusName(r.Status),
             TotalVariableLimitCents: r.TotalVariableLimitCents,
             TotalVariableSpentCents: r.TotalVariableSpentCents,
             CarriedInDeficitCents: r.CarriedInDeficitCents,
