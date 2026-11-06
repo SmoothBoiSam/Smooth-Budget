@@ -22,7 +22,7 @@ function systemPrefersDark(): boolean {
 export function applyTheme(choice: ThemeChoice): void {
   const dark = choice === 'dark' || (choice === 'system' && systemPrefersDark())
   document.documentElement.classList.toggle('dark', dark)
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b1120' : '#f8fafc')
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#000000' : '#f8fafc')
 }
 
 /** The current choice and a setter that saves and applies it. Follows the system live when set to "system". */

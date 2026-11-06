@@ -24,16 +24,17 @@ body {
 :root.dark {
   color-scheme: dark; /* native form controls, file pickers and scrollbars */
 
-  --color-white: #151c2c;       /* cards, sheets, inputs */
-  --color-slate-50: #0b1120;    /* page background */
-  --color-slate-100: #1d2638;   /* subtle fills, dividers */
-  --color-slate-200: #2a3549;   /* card outlines, track behind progress bars */
-  --color-slate-300: #3d4a60;   /* input borders, disabled tabs */
-  --color-slate-400: #7d8ba1;   /* faint text */
-  --color-slate-500: #98a5b9;   /* secondary text */
-  --color-slate-600: #b3bfd0;
-  --color-slate-700: #cad4e1;
-  --color-slate-900: #e9eef6;   /* primary text, primary buttons */
+  /* Neutral grays on true black (no blue tint). */
+  --color-white: #161616;       /* cards, sheets, inputs */
+  --color-slate-50: #000000;    /* page background */
+  --color-slate-100: #222222;   /* subtle fills, dividers */
+  --color-slate-200: #2e2e2e;   /* card outlines, track behind progress bars */
+  --color-slate-300: #444444;   /* input borders, disabled tabs */
+  --color-slate-400: #8a8a8a;   /* faint text */
+  --color-slate-500: #a3a3a3;   /* secondary text */
+  --color-slate-600: #bdbdbd;
+  --color-slate-700: #d4d4d4;
+  --color-slate-900: #f2f2f2;   /* primary text, primary buttons */
 
   --color-emerald-50: #0e2a21;
   --color-emerald-100: #11392b;
