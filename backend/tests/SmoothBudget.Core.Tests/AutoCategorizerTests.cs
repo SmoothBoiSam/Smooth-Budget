@@ -74,8 +74,8 @@ public class AutoCategorizerTests
     [Fact]
     public void Your_past_choices_for_a_merchant_are_learned()
     {
-        var consistent = G("BLINK CHARGING CO", "TRANSPORTATION_GAS", "TRANSPORTATION", "HIGH",
-            history: new MerchantHistory("BLINK CHARGING CO", new Dictionary<Guid, int> { [Shopping] = 3 }));
+        var consistent = G("VOLT CHARGERS CO", "TRANSPORTATION_GAS", "TRANSPORTATION", "HIGH",
+            history: new MerchantHistory("VOLT CHARGERS CO", new Dictionary<Guid, int> { [Shopping] = 3 }));
         Assert.Equal((Shopping, CategorySource.Learned, false), (consistent.CategoryId, consistent.Source, consistent.NeedsReview));
         Assert.Equal("You filed 3 earlier purchases here the same way.", consistent.Reason);
 
