@@ -24,7 +24,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Left to Spend</h1>
+      <h1 className="text-3xl font-bold tracking-tight">Smooth Budget</h1>
       <p className="mt-1 text-slate-500">Know what's safe to spend, right now.</p>
 
       <form onSubmit={submit} className="mt-8 space-y-4">

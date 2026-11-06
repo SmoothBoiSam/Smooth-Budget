@@ -1,4 +1,4 @@
-# Left to Spend (Smooth Budget)
+# Smooth Budget
 
 A phone-first budgeting app whose Home screen answers one question: **how much do I have left to spend this month?**
 The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. `DECISIONS.md` records the choices made where the spec is silent.
