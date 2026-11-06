@@ -14,6 +14,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BudgetMonth> BudgetMonths => Set<BudgetMonth>();
     public DbSet<CategoryRule> CategoryRules => Set<CategoryRule>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
+    public DbSet<PlaidItem> PlaidItems => Set<PlaidItem>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -30,7 +31,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.Mask).HasMaxLength(4);
+            e.Property(x => x.PlaidAccountId).HasMaxLength(100);
             e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.PlaidItem).WithMany().HasForeignKey(x => x.PlaidItemId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(x => x.PlaidAccountId).IsUnique().HasFilter("\"PlaidAccountId\" IS NOT NULL");
+        });
+
+        b.Entity<PlaidItem>(e =>
+        {
+            e.Property(x => x.PlaidItemId).HasMaxLength(100);
+            e.Property(x => x.InstitutionId).HasMaxLength(50);
+            e.Property(x => x.InstitutionName).HasMaxLength(200);
+            e.Property(x => x.StatusMessage).HasMaxLength(500);
+            e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.PlaidItemId).IsUnique();
         });
 
         b.Entity<Category>(e =>
@@ -49,6 +63,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Fingerprint).HasMaxLength(64);
             e.Property(x => x.SplitFactor).HasPrecision(5, 4);
             e.HasIndex(x => new { x.AccountId, x.Fingerprint });
+            e.Property(x => x.PlaidTransactionId).HasMaxLength(100);
+            e.HasIndex(x => x.PlaidTransactionId).IsUnique().HasFilter("\"PlaidTransactionId\" IS NOT NULL");
             // No cascade: undoing an import deletes its rows explicitly (and keeps SQL Server's single-cascade-path rule happy).
             e.HasOne<ImportBatch>().WithMany().HasForeignKey(x => x.ImportBatchId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);

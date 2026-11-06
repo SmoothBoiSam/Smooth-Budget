@@ -3,9 +3,10 @@
 A phone-first budgeting app whose Home screen answers one question: **how much do I have left to spend this month?**
 The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. `DECISIONS.md` records the choices made where the spec is silent.
 
-**Status:** Milestone 2 (data in):
+**Status:** Milestone 3 (Plaid):
 - **Milestone 1:** auth, database, CI, fake-data seed, and a Home screen showing Left to Spend.
 - **Milestone 2:** CSV import for Chase checking, Chase credit and Apple Card; categorization by bank category and merchant rules; card payment and transfer detection; and an inbox for transactions that still need a category.
+- **Milestone 3:** Plaid Link, cursor-based sync, verified webhooks, background sync, pending-to-posted handling, CSV/Plaid overlap matching, and sync health on Home.
 
 ## Stack
 
@@ -64,6 +65,18 @@ On a phone on the same Wi-Fi, run `npm --prefix frontend run dev -- --host` and 
 3. Card payments and transfers are detected automatically. Anything without a category shows up under **Budget → Needs a category**. Tap a transaction to set its category, and tick "Always use this category" to create a merchant rule.
 
 Re-importing an overlapping export is safe: rows already in the account are skipped. Each import can be undone from **Recent imports**.
+
+### Connecting banks with Plaid
+
+1. Put your Plaid keys in `.env`: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV=sandbox`, and a `PLAID_TOKEN_KEY` (see `.env.example` for the one-line command that generates it).
+2. Open **More → Bank connections**:
+   - **Connect a bank** opens Plaid Link. In sandbox, sign in with Plaid's test login `user_good` / `pass_good`.
+   - **Add Plaid's sandbox test bank (dev only)** links Plaid's test bank without the Link screen.
+3. Choose, for each account at the bank, **Import as a new account**, **Same as …** (pick the account you already imported CSVs into, so nothing is counted twice), or **Don't import**.
+4. Pull down on Home (or tap **Refresh**, or **Sync now**) to sync. A background sweep also syncs every 6 hours.
+
+In sandbox, **Simulate new activity** makes Plaid post pending purchases, so you can watch them post without being counted twice.
+Webhooks need a public HTTPS URL. Set `PLAID_WEBHOOK_URL` when the app is hosted.
 Keep your real exports outside the repo (or under `/private/`, which is git-ignored).
 
 ## Test
@@ -81,6 +94,12 @@ npm --prefix frontend run build
 ```
 
 The API tests need PostgreSQL. They read `ConnectionStrings__Default` from `.env` (or the environment), and create and drop their own `smoothbudget_test_*` database. The role needs `CREATEDB`.
+
+Plaid is replaced by an in-process fake in every test, except `PlaidSandboxLiveTests`. That one talks to the real Plaid sandbox, runs only when `.env` has sandbox keys (it's skipped in CI), and takes about 1–2 minutes:
+
+```bash
+dotnet test SmoothBudget.slnx --filter "FullyQualifiedName~PlaidSandboxLiveTests"
+```
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push and PR, with Postgres as a service container. It also fails if the EF model has changes that no migration covers.
 
@@ -100,7 +119,7 @@ In Development, migrations apply automatically on startup.
 | POST | `/api/auth/login` | `{ email, password }`. Sets the auth cookie. |
 | POST | `/api/auth/logout` | |
 | GET | `/api/auth/me` | |
-| GET | `/api/home/summary` | Left to Spend, status, days left, safe per day, carried over, over-budget line, uncategorized count |
+| GET | `/api/home/summary` | Left to Spend, status, days left, safe per day, carried over, over-budget line, uncategorized count, sync health |
 | GET / POST | `/api/accounts` | List, or add `{ name, type: Checking\|Savings\|CreditCard, mask: "1234" }` |
 | POST | `/api/import/csv` | Multipart: `file` and `accountId`. Returns counts and any unreadable rows. |
 | GET | `/api/import/batches` | Recent imports |
@@ -111,6 +130,15 @@ In Development, migrations apply automatically on startup.
 | GET | `/api/budget/categories` | |
 | GET | `/api/budget/summary` | Every category grouped by type, with limit, spent/paid, remaining and health, plus Left to Spend |
 | GET / DELETE | `/api/rules`, `/api/rules/{id}` | Merchant rules |
+| GET | `/api/plaid/config` | Whether Plaid is set up, and the environment |
+| POST | `/api/plaid/link-token` | `{ itemId? }`. Pass an item id for update mode (reconnect). |
+| POST | `/api/plaid/exchange` | `{ publicToken }` from Link. Returns the bank's accounts with suggested matches. |
+| POST | `/api/plaid/items/{id}/accounts` | `{ mappings: [{ plaidAccountId, action: new\|existing\|skip, accountId? }] }`, then the first sync |
+| GET / DELETE | `/api/plaid/items`, `/api/plaid/items/{id}` | Connections and their status; disconnect (history is kept) |
+| POST | `/api/plaid/items/{id}/reconnected` | After update-mode Link: mark active and sync |
+| POST | `/api/sync` | Sync every connection now (pull to refresh) |
+| POST | `/api/plaid/webhook` | Plaid only; signature-verified |
+| POST | `/api/plaid/sandbox/link`, `/api/plaid/sandbox/items/{id}/refresh` | Development + sandbox only |
 | GET | `/api/health` | |
 
 ## Data safety

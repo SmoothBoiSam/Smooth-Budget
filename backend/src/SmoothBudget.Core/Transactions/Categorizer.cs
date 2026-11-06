@@ -31,6 +31,18 @@ public static class Categorizer
             ["Health & Wellness"] = "Personal care",
             ["Bills & Utilities"] = "Utilities & internet",
             ["Utilities"] = "Utilities & internet",
+
+            // Plaid personal-finance categories (detailed first, then primary).
+            ["FOOD_AND_DRINK_GROCERIES"] = "Groceries",
+            ["FOOD_AND_DRINK"] = "Eating out",
+            ["TRANSPORTATION_GAS"] = "Gas",
+            ["GENERAL_MERCHANDISE"] = "Shopping",
+            ["ENTERTAINMENT"] = "Entertainment",
+            ["HOME_IMPROVEMENT"] = "Household",
+            ["PERSONAL_CARE"] = "Personal care",
+            ["RENT_AND_UTILITIES_RENT"] = "Rent",
+            ["RENT_AND_UTILITIES_TELEPHONE"] = "Phone",
+            ["RENT_AND_UTILITIES"] = "Utilities & internet",
         };
 
     public static (Guid? CategoryId, CategorySource Source) Categorize(

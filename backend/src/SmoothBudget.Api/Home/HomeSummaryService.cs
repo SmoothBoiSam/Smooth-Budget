@@ -21,7 +21,8 @@ public record HomeSummaryDto(
     long SafeToSpendPerDayCents,
     int UncategorizedCount,
     DateTime? LastUpdatedUtc,
-    DateTime ComputedUtc);
+    DateTime ComputedUtc,
+    SyncStatusDto Sync);
 
 /// <summary>
 /// Loads one household's data for the current budget month and hands it to
@@ -40,7 +41,8 @@ public sealed record CurrentMonthData(
     IReadOnlyList<LoadedCategory> Categories,
     IReadOnlyList<BudgetTransaction> Transactions,
     long CarriedInDeficitCents,
-    DateTime? LastUpdatedUtc)
+    DateTime? LastUpdatedUtc,
+    IReadOnlyList<ItemSyncInfo> Connections)
 {
     public IReadOnlyList<BudgetCategory> CalculatorCategories => Categories.Select(c => c.ForCalculator).ToList();
 
@@ -90,7 +92,12 @@ public class CurrentMonthLoader(AppDbContext db, TimeProvider clock)
             .Where(t => t.HouseholdId == householdId)
             .MaxAsync(t => (DateTime?)t.CreatedUtc, ct);
 
-        return new CurrentMonthData(today, month, categories, transactions, carried, lastUpdated);
+        var connections = await db.PlaidItems.AsNoTracking()
+            .Where(i => i.HouseholdId == householdId)
+            .Select(i => new ItemSyncInfo(i.InstitutionName, i.Status, i.StatusMessage, i.LastSyncedUtc))
+            .ToListAsync(ct);
+
+        return new CurrentMonthData(today, month, categories, transactions, carried, lastUpdated, connections);
     }
 }
 
@@ -116,7 +123,8 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock)
             SafeToSpendPerDayCents: r.SafeToSpendPerDayCents,
             UncategorizedCount: r.UncategorizedSpendingCount,
             LastUpdatedUtc: lastUpdated,
-            ComputedUtc: clock.GetUtcNow().UtcDateTime);
+            ComputedUtc: clock.GetUtcNow().UtcDateTime,
+            Sync: SyncStatus.For(data.Connections, clock.GetUtcNow().UtcDateTime));
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

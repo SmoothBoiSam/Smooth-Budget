@@ -46,9 +46,47 @@ public class Account
     /// <summary>Last four digits only. Full account numbers are never stored.</summary>
     public string? Mask { get; set; }
 
+    /// <summary>From the owner's point of view: money in a bank account is positive, a card balance owed is negative.</summary>
     public long CurrentBalanceCents { get; set; }
     public bool IncludedInBudget { get; set; } = true;
     public DataSource Source { get; set; }
+    public DateTime CreatedUtc { get; set; }
+
+    /// <summary>Set when the account is linked through Plaid. An account can start as CSV and be linked later.</summary>
+    public string? PlaidAccountId { get; set; }
+    public Guid? PlaidItemId { get; set; }
+    public PlaidItem? PlaidItem { get; set; }
+}
+
+public enum PlaidItemStatus
+{
+    /// <summary>Linked, waiting for the user to say which accounts to import.</summary>
+    PendingSetup = 0,
+    Active = 1,
+    /// <summary>The bank needs the user to sign in again (Plaid update mode).</summary>
+    LoginRequired = 2,
+    Error = 3,
+}
+
+/// <summary>One Plaid connection to one bank login.</summary>
+public class PlaidItem
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string PlaidItemId { get; set; }
+    public string? InstitutionId { get; set; }
+    public string? InstitutionName { get; set; }
+
+    /// <summary>AES-GCM encrypted with PLAID_TOKEN_KEY. Never logged, never returned by the API.</summary>
+    public required string AccessTokenEncrypted { get; set; }
+
+    /// <summary>Plaid /transactions/sync cursor; null until the first sync.</summary>
+    public string? Cursor { get; set; }
+
+    public PlaidItemStatus Status { get; set; }
+    public string? StatusMessage { get; set; }
+    public DateTime? LastSyncedUtc { get; set; }
+    public DateTime? LastAttemptUtc { get; set; }
     public DateTime CreatedUtc { get; set; }
 }
 
@@ -105,6 +143,9 @@ public class Transaction
     public string? Fingerprint { get; set; }
 
     public Guid? ImportBatchId { get; set; }
+
+    /// <summary>Plaid's transaction_id. When a pending transaction posts, this changes to the posted id on the same row.</summary>
+    public string? PlaidTransactionId { get; set; }
 
     /// <summary>Owner's share, 0..1. 1 = all of it.</summary>
     public decimal SplitFactor { get; set; } = 1m;

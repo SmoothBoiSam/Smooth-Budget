@@ -17,6 +17,7 @@ export interface HomeSummary {
   uncategorizedCount: number
   lastUpdatedUtc: string | null
   computedUtc: string
+  sync: SyncStatus
 }
 
 export interface Me {
@@ -210,4 +211,76 @@ export interface BudgetSummary {
 
 export const budgetSummaryApi = {
   get: () => request<BudgetSummary>('GET', '/budget/summary'),
+}
+
+export interface SyncStatus {
+  state: 'none' | 'ok' | 'stale' | 'error'
+  lastSyncedUtc: string | null
+  message: string | null
+}
+
+export interface PlaidConfig {
+  enabled: boolean
+  environment: string
+  sandboxShortcut: boolean
+  webhooks: boolean
+}
+
+export interface PlaidAccountProposal {
+  plaidAccountId: string
+  name: string
+  mask: string | null
+  type: string
+  subtype: string | null
+  accountType: Account['type'] | null
+  suggestedAccountId: string | null
+}
+
+export interface LinkResult {
+  itemId: string
+  institutionName: string | null
+  accounts: PlaidAccountProposal[]
+  existingAccounts: Account[]
+}
+
+export interface AccountMapping {
+  plaidAccountId: string
+  action: 'new' | 'existing' | 'skip'
+  accountId: string | null
+}
+
+export interface SyncResult {
+  itemId: string
+  institutionName: string | null
+  ok: boolean
+  added: number
+  updated: number
+  removed: number
+  pendingPosted: number
+  matchedToCsv: number
+  skippedAsCsvHistory: number
+  error: string | null
+}
+
+export interface PlaidItem {
+  id: string
+  institutionName: string | null
+  status: 'PendingSetup' | 'Active' | 'LoginRequired' | 'Error'
+  statusMessage: string | null
+  lastSyncedUtc: string | null
+  accounts: string[]
+}
+
+export const plaidApi = {
+  config: () => request<PlaidConfig>('GET', '/plaid/config'),
+  linkToken: (itemId?: string) => request<{ linkToken: string }>('POST', '/plaid/link-token', { itemId: itemId ?? null }),
+  exchange: (publicToken: string) => request<LinkResult>('POST', '/plaid/exchange', { publicToken }),
+  sandboxLink: (dynamic: boolean) => request<LinkResult>('POST', '/plaid/sandbox/link', { dynamic }),
+  sandboxRefresh: (itemId: string) => request<void>('POST', `/plaid/sandbox/items/${itemId}/refresh`),
+  confirmAccounts: (itemId: string, mappings: AccountMapping[]) =>
+    request<SyncResult>('POST', `/plaid/items/${itemId}/accounts`, { mappings }),
+  items: () => request<PlaidItem[]>('GET', '/plaid/items'),
+  removeItem: (id: string) => request<void>('DELETE', `/plaid/items/${id}`),
+  reconnected: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/reconnected`),
+  syncAll: () => request<SyncResult[]>('POST', '/sync'),
 }

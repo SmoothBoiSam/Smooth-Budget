@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me, type Rule } from './api'
+import BankConnections from './BankConnections'
 import { formatTime } from './format'
 
 const accountTypeLabel: Record<Account['type'], string> = { Checking: 'Checking', Savings: 'Savings', CreditCard: 'Credit card' }
@@ -55,6 +56,8 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
           {error}
         </p>
       )}
+
+      <BankConnections onChanged={changed} />
 
       <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
 

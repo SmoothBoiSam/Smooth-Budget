@@ -50,6 +50,13 @@ public class CategoryBreakdownCalculatorTests
     }
 
     [Fact]
+    public void A_category_never_goes_below_zero_spent()
+    {
+        var lines = CategoryBreakdownCalculator.Calculate(Nov, Categories, [T(EatingOut, 30_00), T(EatingOut, -810_00)]);
+        Assert.Equal((0L, 150_00L, 2), (Line(lines, EatingOut).SpentCents, Line(lines, EatingOut).RemainingCents, Line(lines, EatingOut).TransactionCount));
+    }
+
+    [Fact]
     public void Transfers_never_count_toward_spending_or_bills()
     {
         var lines = CategoryBreakdownCalculator.Calculate(Nov, Categories, [T(Groceries, 50_00, transfer: true), T(Rent, 50_00, transfer: true)]);

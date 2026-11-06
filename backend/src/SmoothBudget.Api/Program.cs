@@ -7,6 +7,8 @@ using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Import;
+using SmoothBudget.Api.Plaid;
+using SmoothBudget.Core.Security;
 using SmoothBudget.Api.Seeding;
 using SmoothBudget.Api.Transactions;
 
@@ -67,6 +69,31 @@ builder.Services.AddScoped<BudgetSummaryService>();
 builder.Services.AddScoped<DemoSeeder>();
 builder.Services.AddScoped<TransferDetectionService>();
 builder.Services.AddScoped<ImportService>();
+
+// Plaid (milestone 3). Credentials and the token-encryption key come only from environment variables.
+var plaidOptions = new PlaidOptions
+{
+    ClientId = config["PLAID_CLIENT_ID"],
+    Secret = config["PLAID_SECRET"],
+    Environment = config["PLAID_ENV"] ?? "sandbox",
+    WebhookUrl = config["PLAID_WEBHOOK_URL"],
+    TokenKey = config["PLAID_TOKEN_KEY"],
+};
+builder.Services.AddSingleton(plaidOptions);
+builder.Services.AddSingleton(sp => new SecretBox(sp.GetRequiredService<PlaidOptions>().TokenKey
+    ?? throw new InvalidOperationException("Set PLAID_TOKEN_KEY (see .env.example).")));
+builder.Services.AddHttpClient<PlaidClient>((sp, http) =>
+{
+    http.BaseAddress = sp.GetRequiredService<PlaidOptions>().BaseAddress;
+    http.Timeout = TimeSpan.FromSeconds(60);
+});
+builder.Services.AddSingleton<PlaidItemLocks>();
+builder.Services.AddSingleton<PlaidSyncQueue>();
+builder.Services.AddScoped<PlaidSyncService>();
+builder.Services.AddScoped<PlaidLinkService>();
+builder.Services.AddScoped<IPlaidWebhookKeySource, PlaidApiKeySource>();
+builder.Services.AddScoped<PlaidWebhookVerifier>();
+builder.Services.AddHostedService<PlaidBackgroundSync>();
 // Leave headroom over the 5 MB CSV limit for multipart framing.
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = ImportService.MaxFileBytes + 64 * 1024);
 
@@ -105,6 +132,7 @@ app.MapAuthEndpoints();
 app.MapImportEndpoints();
 app.MapTransactionEndpoints();
 BudgetSummaryService.Map(app);
+app.MapPlaidEndpoints();
 app.MapGet("/api/home/summary", (HttpContext ctx, HomeSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct))
     .RequireAuthorization();
 

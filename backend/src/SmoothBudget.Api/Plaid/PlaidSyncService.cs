@@ -1,0 +1,240 @@
+using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
+using SmoothBudget.Api.Data;
+using SmoothBudget.Api.Transactions;
+using SmoothBudget.Core.Plaid;
+using SmoothBudget.Core.Security;
+using SmoothBudget.Core.Transactions;
+
+namespace SmoothBudget.Api.Plaid;
+
+public record SyncResultDto(
+    Guid ItemId, string? InstitutionName, bool Ok, int Added, int Updated, int Removed,
+    int PendingPosted, int MatchedToCsv, int SkippedAsCsvHistory, string? Error);
+
+/// <summary>One sync at a time per Plaid item, so two syncs never race on the same cursor.</summary>
+public class PlaidItemLocks
+{
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _locks = new();
+    public SemaphoreSlim For(Guid itemId) => _locks.GetOrAdd(itemId, _ => new SemaphoreSlim(1, 1));
+}
+
+/// <summary>
+/// Pulls new, changed and removed transactions for one Plaid item with /transactions/sync and stores
+/// them. All pages are fetched before anything is saved, then applied in one database transaction with
+/// the new cursor, so a failure leaves the previous state and cursor intact.
+/// </summary>
+public class PlaidSyncService(
+    AppDbContext db, PlaidClient plaid, SecretBox secrets, TransferDetectionService transfers,
+    PlaidItemLocks locks, TimeProvider clock, ILogger<PlaidSyncService> log)
+{
+    public async Task<SyncResultDto> SyncAsync(Guid itemId, CancellationToken ct = default)
+    {
+        var gate = locks.For(itemId);
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await SyncLockedAsync(itemId, ct);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<SyncResultDto> SyncLockedAsync(Guid itemId, CancellationToken ct)
+    {
+        var item = await db.PlaidItems.SingleAsync(i => i.Id == itemId, ct);
+        if (item.Status == PlaidItemStatus.PendingSetup)
+            return Fail(item, "Choose which accounts to import first.");
+
+        var now = clock.GetUtcNow().UtcDateTime;
+        item.LastAttemptUtc = now;
+        var accessToken = secrets.Decrypt(item.AccessTokenEncrypted);
+
+        List<PlaidTransaction> added = [], modified = [];
+        List<string> removed = [];
+        List<PlaidAccount>? accountsSeen = null;
+        string? cursor = item.Cursor;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                added.Clear(); modified.Clear(); removed.Clear();
+                cursor = item.Cursor;
+                while (true)
+                {
+                    var page = await plaid.SyncTransactionsAsync(accessToken, cursor, ct);
+                    added.AddRange(page.Added);
+                    modified.AddRange(page.Modified);
+                    removed.AddRange(page.Removed.Select(r => r.TransactionId));
+                    accountsSeen = page.Accounts ?? accountsSeen;
+                    cursor = page.NextCursor;
+                    if (!page.HasMore)
+                        break;
+                }
+                break;
+            }
+            catch (PlaidException ex) when (ex.ErrorCode == "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION" && attempt < 3)
+            {
+                // Plaid's guidance: restart the whole pagination from the original cursor.
+            }
+            catch (PlaidException ex)
+            {
+                item.Status = ex.LoginRequired ? PlaidItemStatus.LoginRequired : PlaidItemStatus.Error;
+                item.StatusMessage = ex.LoginRequired
+                    ? "Your bank needs you to sign in again."
+                    : Truncate(ex.DisplayMessage ?? $"Sync failed ({ex.ErrorCode}).", 500);
+                await db.SaveChangesAsync(ct);
+                log.LogWarning("Plaid sync failed for item {ItemId}: {ErrorType}/{ErrorCode}", item.Id, ex.ErrorType, ex.ErrorCode);
+                return Fail(item, item.StatusMessage);
+            }
+        }
+
+        var accounts = await db.Accounts.Where(a => a.PlaidItemId == item.Id && a.PlaidAccountId != null)
+            .ToDictionaryAsync(a => a.PlaidAccountId!, ct);
+
+        foreach (var pa in accountsSeen ?? [])
+        {
+            if (accounts.TryGetValue(pa.AccountId, out var acct) && pa.Balances.Current is { } current)
+                acct.CurrentBalanceCents = BalanceCents(acct.Type, current);
+        }
+
+        // Only accounts the user chose to import.
+        PlaidTxn? Map(PlaidTransaction t) => accounts.TryGetValue(t.AccountId, out var a) ? ToPlaidTxn(t) : null;
+        var addedTxns = added.Select(Map).OfType<PlaidTxn>().ToList();
+        var modifiedTxns = modified.Select(Map).OfType<PlaidTxn>().ToList();
+
+        var referenced = addedTxns.Concat(modifiedTxns)
+            .SelectMany(t => t.PendingTransactionId is null ? [t.TransactionId] : new[] { t.TransactionId, t.PendingTransactionId })
+            .Concat(removed).Distinct().ToList();
+        var stored = await db.Transactions
+            .Where(t => t.PlaidTransactionId != null && referenced.Contains(t.PlaidTransactionId) && t.HouseholdId == item.HouseholdId)
+            .ToListAsync(ct);
+        var storedById = stored.ToDictionary(t => t.Id);
+
+        var plan = PlaidSyncPlanner.Plan(
+            stored.Select(t => new StoredPlaidRow(t.Id, t.PlaidTransactionId!, t.Pending)),
+            addedTxns, modifiedTxns, removed);
+
+        var rules = await db.CategoryRules.Where(r => r.HouseholdId == item.HouseholdId)
+            .Select(r => new MerchantRule(r.CategoryId, r.Pattern, r.CreatedUtc)).ToListAsync(ct);
+        var categoryIds = await db.Categories.Where(c => c.HouseholdId == item.HouseholdId && !c.IsHidden)
+            .ToDictionaryAsync(c => c.Name, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+
+        int inserted = 0, adopted = 0, skipped = 0, posted = 0;
+        var touchedDates = new List<DateOnly>();
+
+        // New transactions: in accounts with CSV history, match against it first so nothing is counted twice.
+        foreach (var group in plan.Inserts.GroupBy(t => t.AccountId))
+        {
+            var account = accounts[group.Key];
+            var csvEntities = await db.Transactions
+                .Where(t => t.AccountId == account.Id && t.PlaidTransactionId == null && t.Source == DataSource.Csv)
+                .ToDictionaryAsync(t => t.Id, ct);
+            var csvRows = csvEntities.Values.Select(t => new CsvRow(t.Id, t.Date, t.AmountCents)).ToList();
+
+            foreach (var d in CsvOverlapMatcher.Match(group, csvRows))
+            {
+                switch (d.Action)
+                {
+                    case OverlapAction.Adopt:
+                        csvEntities[d.AdoptRowId!.Value].PlaidTransactionId = d.Txn.TransactionId; // keep the CSV row and its category
+                        adopted++;
+                        break;
+                    case OverlapAction.Skip:
+                        skipped++;
+                        break;
+                    default:
+                        db.Transactions.Add(NewTransaction(item.HouseholdId, account, d.Txn, rules, categoryIds, now));
+                        touchedDates.Add(d.Txn.Date);
+                        inserted++;
+                        break;
+                }
+            }
+        }
+
+        foreach (var u in plan.Updates)
+        {
+            var row = storedById[u.RowId];
+            var account = accounts[u.Data.AccountId];
+            touchedDates.Add(row.Date);
+            Apply(row, account, u.Data, rules, categoryIds);
+            touchedDates.Add(row.Date);
+            if (u.ReplacesPending) posted++;
+        }
+
+        foreach (var id in plan.Deletes)
+        {
+            touchedDates.Add(storedById[id].Date);
+            db.Transactions.Remove(storedById[id]);
+        }
+
+        await using (var tx = await db.Database.BeginTransactionAsync(ct))
+        {
+            await db.SaveChangesAsync(ct);
+            if (touchedDates.Count > 0)
+                await transfers.RunAsync(item.HouseholdId, touchedDates.Min(), touchedDates.Max(), ct);
+            item.Cursor = cursor;
+            item.LastSyncedUtc = now;
+            item.Status = PlaidItemStatus.Active;
+            item.StatusMessage = null;
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+
+        log.LogInformation("Plaid sync for item {ItemId}: {Inserted} new, {Updated} updated ({Posted} posted), {Deleted} removed, {Adopted} matched to CSV, {Skipped} skipped",
+            item.Id, inserted, plan.Updates.Count, posted, plan.Deletes.Count, adopted, skipped);
+        return new SyncResultDto(item.Id, item.InstitutionName, true, inserted, plan.Updates.Count, plan.Deletes.Count, posted, adopted, skipped, null);
+    }
+
+    public static PlaidTxn ToPlaidTxn(PlaidTransaction t) => new(
+        t.TransactionId, t.AccountId,
+        (long)Math.Round(t.Amount * 100m, 0, MidpointRounding.AwayFromZero), // Plaid: positive = money out, like the app
+        t.AuthorizedDate ?? t.Date, // the purchase date, as for card CSVs (SPEC section 3)
+        t.Name, t.MerchantName, t.Pending, t.PendingTransactionId,
+        t.PersonalFinanceCategory?.Primary, t.PersonalFinanceCategory?.Detailed);
+
+    public static long BalanceCents(AccountType type, decimal current)
+    {
+        var cents = (long)Math.Round(current * 100m, 0, MidpointRounding.AwayFromZero);
+        return type == AccountType.CreditCard ? -cents : cents; // Plaid reports a card's balance owed as positive
+    }
+
+    private static Transaction NewTransaction(Guid householdId, Account account, PlaidTxn t,
+        List<MerchantRule> rules, Dictionary<string, Guid> categoryIds, DateTime now)
+    {
+        var row = new Transaction
+        {
+            Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = account.Id, Merchant = "",
+            Source = DataSource.Plaid, CreatedUtc = now,
+        };
+        Apply(row, account, t, rules, categoryIds);
+        return row;
+    }
+
+    private static void Apply(Transaction row, Account account, PlaidTxn t, List<MerchantRule> rules, Dictionary<string, Guid> categoryIds)
+    {
+        var description = Core.Import.MerchantText.Sanitize(t.Name);
+        row.PlaidTransactionId = t.TransactionId;
+        row.Date = t.Date;
+        row.AmountCents = t.AmountCents;
+        row.Pending = t.Pending;
+        row.Description = Truncate(description, 300);
+        row.Merchant = Truncate(Core.Import.MerchantText.Normalize(Core.Import.MerchantText.Sanitize(t.MerchantName ?? t.Name)), 200);
+        var bankCategory = PlaidMapping.BankCategoryFor(t.CategoryPrimary, t.CategoryDetailed);
+        row.BankCategory = bankCategory is null ? null : Truncate(bankCategory, 100);
+
+        // Never override the user's own choices or what transfer detection already decided.
+        if (row.CategorySource == CategorySource.User || row.IsTransfer)
+            return;
+        row.Kind = PlaidMapping.KindFor(account.Type == AccountType.CreditCard, t.AmountCents, t.CategoryPrimary, t.CategoryDetailed);
+        if (row.CategorySource is CategorySource.None or CategorySource.Bank or CategorySource.Rule)
+            (row.CategoryId, row.CategorySource) = Categorizer.Categorize(row.Merchant, row.BankCategory, rules, categoryIds);
+    }
+
+    private static SyncResultDto Fail(PlaidItem item, string message) =>
+        new(item.Id, item.InstitutionName, false, 0, 0, 0, 0, 0, 0, message);
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
+}

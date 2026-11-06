@@ -63,6 +63,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         await db.CategoryRules.Where(r => r.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.Categories.Where(c => c.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.Accounts.Where(a => a.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.PlaidItems.Where(i => i.HouseholdId == householdId).ExecuteDeleteAsync(ct); // demo only; sandbox items are disposable
         await db.BudgetMonths.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct);
 
         Account NewAccount(string name, AccountType type, string mask, long balance) => new()

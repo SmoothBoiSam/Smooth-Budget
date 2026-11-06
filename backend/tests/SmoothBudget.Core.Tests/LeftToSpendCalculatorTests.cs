@@ -81,6 +81,17 @@ public class LeftToSpendCalculatorTests
     }
 
     [Fact]
+    public void Refunds_never_push_a_category_below_zero_so_Left_to_Spend_is_never_inflated()
+    {
+        // A mislabeled $810 deposit in Eating out must not add $810 to what's left to spend.
+        var r = Calc([Spend(EatingOut, 30_00), Spend(EatingOut, -810_00), Spend(Groceries, 100_00)]);
+        Assert.Equal(0, r.Categories.Single(c => c.CategoryId == EatingOut).SpentCents);
+        Assert.Equal(150_00, r.Categories.Single(c => c.CategoryId == EatingOut).RemainingCents);
+        Assert.Equal(760_00 - 100_00, r.LeftToSpendCents);
+        Assert.Equal(100_00, r.TotalVariableSpentCents);
+    }
+
+    [Fact]
     public void Only_transactions_inside_the_budget_month_count_and_the_boundaries_are_inclusive()
     {
         var r = Calc(

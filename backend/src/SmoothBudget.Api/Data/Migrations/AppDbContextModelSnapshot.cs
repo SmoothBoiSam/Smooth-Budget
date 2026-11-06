@@ -179,6 +179,13 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("PlaidAccountId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("PlaidItemId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Source")
                         .HasColumnType("integer");
 
@@ -188,6 +195,12 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("HouseholdId");
+
+                    b.HasIndex("PlaidAccountId")
+                        .IsUnique()
+                        .HasFilter("\"PlaidAccountId\" IS NOT NULL");
+
+                    b.HasIndex("PlaidItemId");
 
                     b.ToTable("Accounts");
                 });
@@ -446,6 +459,61 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("ImportBatches");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.PlaidItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccessTokenEncrypted")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Cursor")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InstitutionId")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("InstitutionName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("LastAttemptUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastSyncedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PlaidItemId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StatusMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId");
+
+                    b.HasIndex("PlaidItemId")
+                        .IsUnique();
+
+                    b.ToTable("PlaidItems");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.Transaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -506,6 +574,10 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<bool>("Pending")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("PlaidTransactionId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<int>("Source")
                         .HasColumnType("integer");
 
@@ -521,6 +593,10 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasIndex("CategoryId");
 
                     b.HasIndex("ImportBatchId");
+
+                    b.HasIndex("PlaidTransactionId")
+                        .IsUnique()
+                        .HasFilter("\"PlaidTransactionId\" IS NOT NULL");
 
                     b.HasIndex("AccountId", "Fingerprint");
 
@@ -587,6 +663,13 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasForeignKey("HouseholdId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("SmoothBudget.Api.Data.PlaidItem", "PlaidItem")
+                        .WithMany()
+                        .HasForeignKey("PlaidItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("PlaidItem");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.AppUser", b =>
@@ -650,6 +733,15 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.PlaidItem", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.Household", null)
+                        .WithMany()
+                        .HasForeignKey("HouseholdId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.Transaction", b =>

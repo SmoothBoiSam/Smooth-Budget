@@ -110,7 +110,7 @@ public static class LeftToSpendCalculator
         }
 
         var lines = variable.Values
-            .Select(c => new CategorySpend(c.Id, c.MonthlyLimitCents, spentByCategory[c.Id]))
+            .Select(c => new CategorySpend(c.Id, c.MonthlyLimitCents, FloorAtZero(spentByCategory[c.Id])))
             .ToList();
 
         var totalLimit = lines.Sum(l => l.LimitCents);
@@ -133,6 +133,12 @@ public static class LeftToSpendCalculator
             UncategorizedSpendingCount: uncategorized,
             Categories: lines);
     }
+
+    /// <summary>
+    /// Refunds can bring a category's spending down to zero but never below: a large or mislabeled credit
+    /// must not create extra money to spend beyond the category's limit (DECISIONS.md 47).
+    /// </summary>
+    public static long FloorAtZero(long spentCents) => Math.Max(0, spentCents);
 
     /// <summary>The owner's share of a transaction, rounded half away from zero to the cent.</summary>
     public static long OwnerShare(BudgetTransaction t)

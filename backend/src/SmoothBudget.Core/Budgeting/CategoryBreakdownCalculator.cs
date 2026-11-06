@@ -49,7 +49,7 @@ public static class CategoryBreakdownCalculator
             count[id]++;
         }
 
-        return cats.Select(c => new CategoryStatus(c.Id, c.Type, c.MonthlyLimitCents, spent[c.Id], count[c.Id])).ToList();
+        return cats.Select(c => new CategoryStatus(c.Id, c.Type, c.MonthlyLimitCents, LeftToSpendCalculator.FloorAtZero(spent[c.Id]), count[c.Id])).ToList();
     }
 
     /// <summary>Whether a transaction already filed under a category of this type counts toward it this month.</summary>

@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using SmoothBudget.Api.Plaid;
+using SmoothBudget.Core.Security;
 
 namespace SmoothBudget.Api.Tests;
 
@@ -17,13 +19,18 @@ public sealed class SettableClock(DateTimeOffset start) : TimeProvider
 /// <summary>
 /// Boots the real API against a throwaway PostgreSQL database (created from the
 /// ConnectionStrings__Default server, dropped afterwards) with a controllable clock.
+/// Plaid is replaced by <see cref="FakePlaid"/> unless <see cref="UseRealPlaid"/> is overridden.
 /// </summary>
-public sealed class TestApp : WebApplicationFactory<Program>
+public class TestApp : WebApplicationFactory<Program>
 {
     public SettableClock Clock { get; } = new(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
+    public FakePlaid Plaid { get; } = new();
+    public FakeWebhookKeys WebhookKeys { get; } = new();
     public string ConnectionString { get; }
     private readonly string _databaseName = $"smoothbudget_test_{Guid.NewGuid():N}";
     private readonly string _adminConnectionString;
+
+    protected virtual bool UseRealPlaid => false;
 
     public TestApp()
     {
@@ -46,16 +53,30 @@ public sealed class TestApp : WebApplicationFactory<Program>
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);
+
+            if (UseRealPlaid)
+                return;
+            // Never touch the real Plaid from ordinary tests, even when .env has real sandbox keys.
+            services.RemoveAll<PlaidOptions>();
+            services.AddSingleton(new PlaidOptions
+            {
+                ClientId = "test-client-id", Secret = "test-secret", Environment = "sandbox", TokenKey = SecretBox.NewKey(),
+            });
+            services.AddHttpClient<PlaidClient>().ConfigurePrimaryHttpMessageHandler(() => Plaid);
+            services.RemoveAll<IPlaidWebhookKeySource>();
+            services.AddSingleton<IPlaidWebhookKeySource>(WebhookKeys);
         });
     }
 
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
+        WebhookKeys.Dispose();
         NpgsqlConnection.ClearAllPools();
         await using var conn = new NpgsqlConnection(_adminConnectionString);
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE)", conn);
         await cmd.ExecuteNonQueryAsync();
+        GC.SuppressFinalize(this);
     }
 }

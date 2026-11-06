@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ApiError, api, type HomeSummary, type Me, type Status } from './api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ApiError, api, plaidApi, type HomeSummary, type Me, type Status } from './api'
 import { formatCents, formatDay, formatTime } from './format'
 
 const statusStyles: Record<Status, { number: string; badge: string; label: string }> = {
@@ -29,9 +29,29 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
     void load()
   }, [load])
 
-  function refresh() {
+  // Pull to refresh (SPEC section 4.2) and the Refresh link both sync connected banks, then reload.
+  async function refresh() {
     setLoading(true)
-    void load()
+    await plaidApi.syncAll().catch(() => undefined) // a failed sync shows up in summary.sync
+    await load()
+  }
+
+  const startY = useRef<number | null>(null)
+  const [pull, setPull] = useState(0)
+  const PULL_TRIGGER = 70
+
+  function onTouchStart(e: React.TouchEvent) {
+    startY.current = window.scrollY <= 0 && !loading ? e.touches[0].clientY : null
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (startY.current === null) return
+    const dy = e.touches[0].clientY - startY.current
+    setPull(dy > 0 ? Math.min(dy * 0.6, 100) : 0)
+  }
+  function onTouchEnd() {
+    if (pull >= PULL_TRIGGER) void refresh()
+    setPull(0)
+    startY.current = null
   }
 
   async function signOut() {
@@ -40,7 +60,21 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col bg-slate-50">
+    <div
+      className="mx-auto flex min-h-screen max-w-md flex-col bg-slate-50"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {(pull > 0 || (loading && summary)) && (
+        <div
+          aria-live="polite"
+          className="flex items-end justify-center overflow-hidden text-xs font-medium text-slate-500 transition-[height]"
+          style={{ height: loading ? 32 : pull }}
+        >
+          <span className="pb-1">{loading ? 'Syncing…' : pull >= PULL_TRIGGER ? 'Release to sync' : 'Pull to sync'}</span>
+        </div>
+      )}
       <header className="flex items-center justify-between px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -75,16 +109,31 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
 
         {!summary && !error && <div className="mt-16 text-center text-slate-400">Loading…</div>}
 
+        {summary && (summary.sync.state === 'stale' || summary.sync.state === 'error') && (
+          <a
+            href="#/more"
+            role="alert"
+            className={`mt-4 block rounded-xl px-4 py-3 text-sm ${summary.sync.state === 'error' ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-900'}`}
+          >
+            <span className="font-semibold">{summary.sync.state === 'error' ? 'Bank sync problem. ' : 'Data may be out of date. '}</span>
+            {summary.sync.message}
+          </a>
+        )}
+
         {summary && <Summary summary={summary} />}
 
         {summary && (
           <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-400">
             <span>
-              {summary.lastUpdatedUtc ? `Data updated ${formatTime(summary.lastUpdatedUtc)}` : 'No transactions yet'}
+              {summary.sync.state !== 'none' && summary.sync.lastSyncedUtc
+                ? `Synced ${formatTime(summary.sync.lastSyncedUtc)}`
+                : summary.lastUpdatedUtc
+                  ? `Data updated ${formatTime(summary.lastUpdatedUtc)}`
+                  : 'No transactions yet'}
             </span>
             <span aria-hidden>·</span>
             <button type="button" onClick={refresh} disabled={loading} className="font-medium text-slate-600 underline disabled:opacity-50">
-              {loading ? 'Refreshing…' : 'Refresh'}
+              {loading ? 'Syncing…' : 'Refresh'}
             </button>
           </div>
         )}
