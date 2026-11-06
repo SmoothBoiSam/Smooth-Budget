@@ -175,6 +175,16 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
             <span className="font-semibold tabular-nums text-red-600">−{formatCents(s.carriedInDeficitCents)}</span>
           </li>
         )}
+        {s.pendingSweeps.map((p) => (
+          <li key={p.id}>
+            <a href="#/budget" className="flex justify-between gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-emerald-900">
+              <span>
+                Leftover from {p.fromMonth.split(" ")[0]}: send <span className="font-semibold tabular-nums">{formatCents(p.amountCents)}</span> to {p.destination}
+              </span>
+              <span aria-hidden className="font-semibold">›</span>
+            </a>
+          </li>
+        ))}
         {s.overBudgetCategoryCount > 0 && (
           <li className="rounded-xl bg-red-50 px-4 py-3 text-red-800">
             Over budget by <span className="font-semibold tabular-nums">{formatCents(s.overBudgetCents)}</span> in{' '}

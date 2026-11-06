@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Core.Budgeting;
 
@@ -22,27 +23,23 @@ public record HomeSummaryDto(
     int UncategorizedCount,
     DateTime? LastUpdatedUtc,
     DateTime ComputedUtc,
-    SyncStatusDto Sync);
+    SyncStatusDto Sync,
+    IReadOnlyList<PendingSweepDto> PendingSweeps);
 
-/// <summary>
-/// Loads one household's data for the current budget month and hands it to
-/// <see cref="LeftToSpendCalculator"/>. This class only does data access; the math lives in Core.
-/// </summary>
-/// <summary>Category as loaded for the current month: what the calculators see, plus display fields.</summary>
-public sealed record LoadedCategory(Guid Id, string Name, CategoryType Type, long MonthlyLimitCents, bool IsDiscretionary, int SortOrder)
-{
-    public BudgetCategory ForCalculator => new(Id, Type, MonthlyLimitCents);
-}
+/// <summary>A "send $X to …" item from a closed month that the user hasn't marked as sent yet.</summary>
+public record PendingSweepDto(Guid Id, string Kind, long AmountCents, string Destination, string FromMonth);
 
 /// <summary>Everything the money calculators need for one household's current budget month.</summary>
 public sealed record CurrentMonthData(
     DateOnly Today,
     BudgetMonthRange Month,
-    IReadOnlyList<LoadedCategory> Categories,
+    BudgetMonth Row,
+    IReadOnlyList<MonthCategory> Categories,
     IReadOnlyList<BudgetTransaction> Transactions,
     long CarriedInDeficitCents,
     DateTime? LastUpdatedUtc,
-    IReadOnlyList<ItemSyncInfo> Connections)
+    IReadOnlyList<ItemSyncInfo> Connections,
+    IReadOnlyList<PendingSweepDto> PendingSweeps)
 {
     public IReadOnlyList<BudgetCategory> CalculatorCategories => Categories.Select(c => c.ForCalculator).ToList();
 
@@ -63,30 +60,23 @@ public sealed record CurrentMonthData(
 /// Loads one household's current budget month. Home and Budget both use this, so they always agree.
 /// Data access only; the math lives in Core.
 /// </summary>
-public class CurrentMonthLoader(AppDbContext db, TimeProvider clock)
+public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, TimeProvider clock)
 {
     public async Task<CurrentMonthData> LoadAsync(Guid householdId, CancellationToken ct = default)
     {
         var household = await db.Households.AsNoTracking().SingleAsync(h => h.Id == householdId, ct);
-
         var today = HomeSummaryService.TodayIn(household.TimeZoneId, clock);
-        var month = new BudgetMonthCalendar(household.BudgetMonthStartDay).MonthContaining(today);
 
-        var categories = await db.Categories.AsNoTracking()
-            .Where(c => c.HouseholdId == householdId && !c.IsHidden)
-            .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
-            .Select(c => new LoadedCategory(c.Id, c.Name, c.Type, c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder))
+        // Creates this month's row if needed, and closes months past their grace period.
+        var row = await months.EnsureCurrentAsync(householdId, ct);
+        var month = await months.LoadAsync(householdId, row, ct);
+
+        var pendingSweeps = await db.SweepTasks.AsNoTracking()
+            .Where(s => s.HouseholdId == householdId && s.DoneUtc == null)
+            .OrderBy(s => s.BudgetMonth.StartDate)
+            .Select(s => new { s.Id, s.Kind, s.AmountCents, s.Destination, s.BudgetMonth.StartDate })
             .ToListAsync(ct);
-
-        var transactions = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.Date >= month.Start && t.Date <= month.End && t.Account.IncludedInBudget)
-            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind))
-            .ToListAsync(ct);
-
-        var carried = await db.BudgetMonths.AsNoTracking()
-            .Where(b => b.HouseholdId == householdId && b.StartDate == month.Start)
-            .Select(b => (long?)b.CarriedInDeficitCents)
-            .SingleOrDefaultAsync(ct) ?? 0;
+        var calendar = new BudgetMonthCalendar(household.BudgetMonthStartDay);
 
         var lastUpdated = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId)
@@ -97,7 +87,10 @@ public class CurrentMonthLoader(AppDbContext db, TimeProvider clock)
             .Select(i => new ItemSyncInfo(i.InstitutionName, i.Status, i.StatusMessage, i.LastSyncedUtc))
             .ToListAsync(ct);
 
-        return new CurrentMonthData(today, month, categories, transactions, carried, lastUpdated, connections);
+        return new CurrentMonthData(today, month.Range, row, month.Categories, month.Transactions, month.CarriedInDeficitCents,
+            lastUpdated, connections,
+            pendingSweeps.Select(s => new PendingSweepDto(s.Id, s.Kind.ToString(), s.AmountCents, s.Destination,
+                calendar.MonthContaining(s.StartDate).Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture))).ToList());
     }
 }
 
@@ -124,7 +117,8 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock)
             UncategorizedCount: r.UncategorizedSpendingCount,
             LastUpdatedUtc: lastUpdated,
             ComputedUtc: clock.GetUtcNow().UtcDateTime,
-            Sync: SyncStatus.For(data.Connections, clock.GetUtcNow().UtcDateTime));
+            Sync: SyncStatus.For(data.Connections, clock.GetUtcNow().UtcDateTime),
+            PendingSweeps: data.PendingSweeps);
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

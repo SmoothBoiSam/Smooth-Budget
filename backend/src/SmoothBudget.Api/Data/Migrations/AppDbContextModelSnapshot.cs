@@ -284,6 +284,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<long>("CarriedInDeficitCents")
                         .HasColumnType("bigint");
 
+                    b.Property<DateTime?>("ClosedUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<long?>("ClosingNetCents")
                         .HasColumnType("bigint");
 
@@ -299,19 +302,43 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date");
 
-                    b.Property<long?>("SweepAmountCents")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("SweepDestination")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
                     b.HasKey("Id");
 
                     b.HasIndex("HouseholdId", "StartDate")
                         .IsUnique();
 
                     b.ToTable("BudgetMonths");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.BudgetMonthCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BudgetMonthId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("ClosingLimitCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ClosingSpentCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("LimitOverrideCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("BudgetMonthId", "CategoryId")
+                        .IsUnique();
+
+                    b.ToTable("BudgetMonthCategories");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.Category", b =>
@@ -404,6 +431,12 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<int>("SweepSavingsPercent")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SweepTarget")
+                        .HasColumnType("integer");
 
                     b.Property<string>("TimeZoneId")
                         .IsRequired()
@@ -512,6 +545,41 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("PlaidItems");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.SweepTask", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("BudgetMonthId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime?>("DoneUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BudgetMonthId");
+
+                    b.HasIndex("HouseholdId", "DoneUtc");
+
+                    b.ToTable("SweepTasks");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.Transaction", b =>
@@ -692,6 +760,23 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.BudgetMonthCategory", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.BudgetMonth", null)
+                        .WithMany("Categories")
+                        .HasForeignKey("BudgetMonthId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmoothBudget.Api.Data.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.Category", b =>
                 {
                     b.HasOne("SmoothBudget.Api.Data.Household", null)
@@ -744,6 +829,17 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.SweepTask", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.BudgetMonth", "BudgetMonth")
+                        .WithMany()
+                        .HasForeignKey("BudgetMonthId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BudgetMonth");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.Transaction", b =>
                 {
                     b.HasOne("SmoothBudget.Api.Data.Account", "Account")
@@ -771,6 +867,11 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Navigation("Account");
 
                     b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.BudgetMonth", b =>
+                {
+                    b.Navigation("Categories");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.Household", b =>

@@ -15,6 +15,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<CategoryRule> CategoryRules => Set<CategoryRule>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
     public DbSet<PlaidItem> PlaidItems => Set<PlaidItem>();
+    public DbSet<BudgetMonthCategory> BudgetMonthCategories => Set<BudgetMonthCategory>();
+    public DbSet<SweepTask> SweepTasks => Set<SweepTask>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -91,9 +93,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
 
         b.Entity<BudgetMonth>(e =>
         {
-            e.Property(x => x.SweepDestination).HasMaxLength(100);
             e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.HouseholdId, x.StartDate }).IsUnique();
+            e.HasMany(x => x.Categories).WithOne().HasForeignKey(x => x.BudgetMonthId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<BudgetMonthCategory>(e =>
+        {
+            // NoAction: categories and months both cascade from the household; one path is enough.
+            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.NoAction);
+            e.HasIndex(x => new { x.BudgetMonthId, x.CategoryId }).IsUnique();
+        });
+
+        b.Entity<SweepTask>(e =>
+        {
+            e.Property(x => x.Destination).HasMaxLength(120);
+            e.HasOne(x => x.BudgetMonth).WithMany().HasForeignKey(x => x.BudgetMonthId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.HouseholdId, x.DoneUtc });
         });
     }
 }

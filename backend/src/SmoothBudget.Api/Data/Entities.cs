@@ -26,6 +26,12 @@ public class Household
     /// <summary>IANA time zone used to decide what "today" is. The owner is Denver-based.</summary>
     public string TimeZoneId { get; set; } = "America/Denver";
 
+    /// <summary>Where a month's leftover money goes (SPEC section 3): debt by default, savings, or a split.</summary>
+    public SweepTarget SweepTarget { get; set; } = SweepTarget.Debt;
+
+    /// <summary>For <see cref="SweepTarget.Split"/>: the share that goes to savings, 0 to 100.</summary>
+    public int SweepSavingsPercent { get; set; } = 50;
+
     public DateTime CreatedUtc { get; set; }
 
     public List<AppUser> Users { get; set; } = [];
@@ -190,11 +196,47 @@ public class BudgetMonth
     public DateOnly EndDate { get; set; }
     public long IncomeExpectedCents { get; set; }
 
-    /// <summary>Net overspend carried in from the previous month, as a positive number of cents.</summary>
+    /// <summary>
+    /// Net overspend carried in, as a positive number of cents. For the first month on record this is the
+    /// starting value; for later months it's derived from the previous month's close and frozen when this
+    /// month closes.
+    /// </summary>
     public long CarriedInDeficitCents { get; set; }
 
-    // Filled in when the month closes (milestone 4).
+    /// <summary>The month's final Left to Spend; set when the month closes. Negative = deficit carried forward.</summary>
     public long? ClosingNetCents { get; set; }
-    public long? SweepAmountCents { get; set; }
-    public string? SweepDestination { get; set; }
+
+    /// <summary>When the month was closed (frozen). Null while it's open or still in its grace period.</summary>
+    public DateTime? ClosedUtc { get; set; }
+
+    public List<BudgetMonthCategory> Categories { get; set; } = [];
+}
+
+/// <summary>
+/// One category in one budget month: a "this month only" limit override while the month runs; the limit
+/// frozen when the month ends (<see cref="ClosingLimitCents"/>, so later limit changes never rewrite it);
+/// and the amount spent, frozen when it closes (so each category's own over/under stays on record).
+/// </summary>
+public class BudgetMonthCategory
+{
+    public Guid Id { get; set; }
+    public Guid BudgetMonthId { get; set; }
+    public Guid CategoryId { get; set; }
+    public Category Category { get; set; } = null!;
+    public long? LimitOverrideCents { get; set; }
+    public long? ClosingLimitCents { get; set; }
+    public long? ClosingSpentCents { get; set; }
+}
+
+/// <summary>A "send $X to …" item from a month's surplus. The app can't move money, so the user marks it done.</summary>
+public class SweepTask
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public Guid BudgetMonthId { get; set; }
+    public BudgetMonth BudgetMonth { get; set; } = null!;
+    public SweepKind Kind { get; set; }
+    public long AmountCents { get; set; }
+    public required string Destination { get; set; }
+    public DateTime? DoneUtc { get; set; }
 }

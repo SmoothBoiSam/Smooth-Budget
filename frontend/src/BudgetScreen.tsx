@@ -2,15 +2,19 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ApiError,
   budgetApi,
+  budgetEditApi,
   budgetSummaryApi,
   type BudgetCategoryLine,
   type BudgetGroup,
   type BudgetSummary,
   type Category,
   type Health,
+  type LastMonth,
   type Transaction,
 } from './api'
-import { formatCents, formatDay, formatSigned, titleCase } from './format'
+import BudgetPlanner from './BudgetPlanner'
+import CategoryEditSheet from './CategoryEditSheet'
+import { centsToInput, formatCents, formatDay, formatSigned, parseDollars, titleCase } from './format'
 import TransactionSheet from './TransactionSheet'
 
 // Sub-views of the Budget tab, from the URL hash:
@@ -18,12 +22,14 @@ import TransactionSheet from './TransactionSheet'
 //   #/budget/inbox      transactions that need a category
 //   #/budget/all        every transaction this month
 //   #/budget/c/<id>     one category's transactions
-type View = { kind: 'overview' } | { kind: 'inbox' } | { kind: 'all' } | { kind: 'category'; id: string }
+//   #/budget/plan       the budget generator
+type View = { kind: 'overview' } | { kind: 'inbox' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'category'; id: string }
 
 function viewFromHash(): View {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
   if (parts[1] === 'inbox') return { kind: 'inbox' }
   if (parts[1] === 'all') return { kind: 'all' }
+  if (parts[1] === 'plan') return { kind: 'plan' }
   if (parts[1] === 'c' && parts[2]) return { kind: 'category', id: parts[2] }
   return { kind: 'overview' }
 }
@@ -42,6 +48,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [inbox, setInbox] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [selected, setSelected] = useState<Transaction | null>(null)
+  const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -80,9 +87,33 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   function saved(message: string) {
     setSelected(null)
+    setEditing(undefined)
     setNotice(message)
     onChanged()
     void load()
+  }
+
+  async function act(action: () => Promise<unknown>, message: string) {
+    try {
+      await action()
+      saved(message)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.')
+    }
+  }
+
+  /** Moves a category one place up or down within its group, keeping every other category's order. */
+  async function move(l: BudgetCategoryLine, direction: -1 | 1) {
+    if (!summary) return
+    const group = summary.groups.find((g) => g.categories.some((c) => c.id === l.id))!
+    const ids = group.categories.map((c) => c.id)
+    const i = ids.indexOf(l.id)
+    const j = i + direction
+    if (j < 0 || j >= ids.length) return
+    ;[ids[i], ids[j]] = [ids[j], ids[i]]
+    const all = summary.groups.flatMap((g) => (g === group ? ids : g.categories.map((c) => c.id)))
+    await budgetEditApi.reorder(all)
+    await load()
   }
 
   const line =
@@ -104,9 +135,22 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           <a href="#/budget" className="text-sm font-medium text-slate-500">
             ‹ Budget
           </a>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">
-            {view.kind === 'inbox' ? 'Needs a category' : view.kind === 'all' ? 'All transactions' : (line?.name ?? 'Category')}
-          </h1>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <h1 className="truncate text-2xl font-bold tracking-tight">
+              {view.kind === 'inbox'
+                ? 'Needs a category'
+                : view.kind === 'all'
+                  ? 'All transactions'
+                  : view.kind === 'plan'
+                    ? 'Build your budget'
+                    : (line?.name ?? 'Category')}
+            </h1>
+            {view.kind === 'category' && line && (
+              <button type="button" onClick={() => setEditing(line)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-slate-200">
+                Edit
+              </button>
+            )}
+          </div>
         </header>
       )}
 
@@ -122,7 +166,25 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
       {!summary && !error && <p className="mt-10 text-center text-slate-400">Loading…</p>}
 
-      {summary && view.kind === 'overview' && <Overview summary={summary} inboxCount={inbox.length} />}
+      {summary && view.kind === 'overview' && (
+        <Overview
+          summary={summary}
+          inboxCount={inbox.length}
+          onAdd={() => setEditing(null)}
+          onCloseMonth={(start) => act(() => budgetEditApi.closeMonth(start), 'Month closed.')}
+          onSweep={(id, done) => act(() => (done ? budgetEditApi.sweepDone(id) : budgetEditApi.sweepUndo(id)), done ? 'Marked as sent.' : 'Marked as not sent.')}
+          onIncome={(cents) => act(() => budgetEditApi.setIncome(cents), 'Expected income updated.')}
+        />
+      )}
+
+      {view.kind === 'plan' && (
+        <BudgetPlanner
+          onApplied={(message) => {
+            window.location.hash = '#/budget'
+            saved(message)
+          }}
+        />
+      )}
 
       {summary && view.kind === 'category' && line && (
         <>
@@ -154,13 +216,54 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {selected && (
         <TransactionSheet transaction={selected} categories={categories} onClose={() => setSelected(null)} onSaved={saved} />
       )}
+
+      {editing !== undefined && (
+        <CategoryEditSheet
+          line={editing}
+          usualLimitCents={editing ? categories.find((c) => c.id === editing.id)?.monthlyLimitCents : undefined}
+          onClose={() => setEditing(undefined)}
+          onSaved={(message) => {
+            if (editing && message.endsWith('is hidden.')) window.location.hash = '#/budget'
+            saved(message)
+          }}
+          onMove={editing ? (d) => move(editing, d) : undefined}
+        />
+      )}
     </div>
   )
 }
 
-function Overview({ summary: s, inboxCount }: { summary: BudgetSummary; inboxCount: number }) {
+function Overview({
+  summary: s,
+  inboxCount,
+  onAdd,
+  onCloseMonth,
+  onSweep,
+  onIncome,
+}: {
+  summary: BudgetSummary
+  inboxCount: number
+  onAdd: () => void
+  onCloseMonth: (start: string) => void
+  onSweep: (id: string, done: boolean) => void
+  onIncome: (cents: number) => void
+}) {
+  const lastMonthSweepIds = new Set(s.lastMonth?.sweeps.map((x) => x.id) ?? [])
+  const olderSweeps = s.pendingSweeps.filter((p) => !lastMonthSweepIds.has(p.id))
   return (
     <>
+      {s.lastMonth && <LastMonthCard last={s.lastMonth} onClose={onCloseMonth} onSweep={onSweep} />}
+      {olderSweeps.map((p) => (
+        <div key={p.id} className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
+          <span>
+            From {p.fromMonth}: send <span className="font-semibold tabular-nums">{formatCents(p.amountCents)}</span> to {p.destination}
+          </span>
+          <button type="button" onClick={() => onSweep(p.id, true)} className="shrink-0 font-medium text-slate-700 underline">
+            Mark sent
+          </button>
+        </div>
+      ))}
+
       <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-sm font-medium text-slate-500">Left to Spend</h2>
@@ -187,9 +290,20 @@ function Overview({ summary: s, inboxCount }: { summary: BudgetSummary; inboxCou
         </a>
       )}
 
+      <IncomeCard summary={s} onIncome={onIncome} />
+
       {s.groups.map((g) => (
         <Group key={g.type} group={g} />
       ))}
+
+      <div className="mt-6 grid grid-cols-2 gap-3">
+        <button type="button" onClick={onAdd} className="rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
+          + Add category
+        </button>
+        <a href="#/budget/plan" className="rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
+          Build from history
+        </a>
+      </div>
 
       <a
         href="#/budget/all"
@@ -243,6 +357,7 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
       </div>
       <p className="mt-1 text-xs tabular-nums text-slate-500">
         {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
+        {c.hasMonthOverride && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">this month only</span>}
       </p>
     </>
   )
@@ -307,4 +422,138 @@ function Tag({ t }: { t: Transaction }) {
   if (t.categoryName) return <span className="text-xs text-slate-500">{t.categoryName}</span>
   if (t.kind === 'Income') return <span className="text-xs text-emerald-600">Income</span>
   return <span className="text-xs font-medium text-amber-600">Needs category</span>
+}
+
+/**
+ * The month that just ended (SPEC section 3): a surplus becomes "send $X to …" items; a deficit carries
+ * into this month as "Carried over". Until it closes (a few days after it ends, or "Close now"),
+ * late transactions can still change it.
+ */
+function LastMonthCard({ last, onClose, onSweep }: { last: LastMonth; onClose: (start: string) => void; onSweep: (id: string, done: boolean) => void }) {
+  const name = last.month.label.split(' ')[0]
+  return (
+    <section aria-labelledby="last-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="last-h" className="text-sm font-semibold">
+          {last.month.label}
+        </h2>
+        <span className="text-xs text-slate-500">{last.closed ? 'Closed' : `Closes ${formatDay(last.closesOn)}`}</span>
+      </div>
+
+      {last.deficitCents > 0 ? (
+        <p className="mt-1 text-sm">
+          Ended <span className="font-semibold tabular-nums text-red-600">{formatCents(last.deficitCents)} over</span>. That's carried into this
+          month and comes out of Left to Spend.
+        </p>
+      ) : last.surplusCents > 0 ? (
+        <p className="mt-1 text-sm">
+          Ended <span className="font-semibold tabular-nums text-emerald-700">{formatCents(last.surplusCents)} under</span>. Leftover money
+          isn't added to this month; {last.closed ? 'send it here:' : 'once it closes, send it here:'}
+        </p>
+      ) : (
+        <p className="mt-1 text-sm">Ended exactly on budget.</p>
+      )}
+      {last.carriedInDeficitCents > 0 && (
+        <p className="mt-1 text-xs text-slate-500">Includes {formatCents(last.carriedInDeficitCents)} carried in from the month before.</p>
+      )}
+
+      {last.sweeps.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {last.sweeps.map((s, i) => (
+            <li key={s.id === '00000000-0000-0000-0000-000000000000' ? i : s.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm">
+              <span className={s.done ? 'text-slate-400 line-through' : ''}>
+                Send <span className="font-semibold tabular-nums">{formatCents(s.amountCents)}</span> to {s.destination}
+              </span>
+              {last.closed && (
+                <button type="button" onClick={() => onSweep(s.id, !s.done)} className="shrink-0 font-medium text-slate-700 underline">
+                  {s.done ? 'Undo' : 'Mark sent'}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!last.closed && (
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm(`Close ${name} now? Transactions that arrive later won't change its result.`)) onClose(last.month.start)
+          }}
+          className="mt-3 text-sm font-medium text-slate-700 underline"
+        >
+          Close {name} now
+        </button>
+      )}
+    </section>
+  )
+}
+
+/** SPEC section 3: income = all limits + an explicit unallocated remainder. */
+function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome: (cents: number) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(centsToInput(s.incomeExpectedCents))
+  const cents = parseDollars(value)
+  const over = s.unallocatedCents < 0
+  return (
+    <section aria-labelledby="income-h" className="mt-6 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="income-h" className="text-sm font-semibold">
+          This month's plan
+        </h2>
+        {!editing && (
+          <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-slate-600 underline">
+            Edit income
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <form
+          className="mt-2 flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (cents !== null) {
+              onIncome(cents)
+              setEditing(false)
+            }
+          }}
+        >
+          <div className="flex flex-1 items-center rounded-lg border border-slate-300 bg-white px-3">
+            <span className="text-sm text-slate-500">$</span>
+            <input
+              aria-label="Expected income this month"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              inputMode="decimal"
+              autoFocus
+              className="block w-full bg-transparent px-1 py-2 tabular-nums outline-none"
+            />
+          </div>
+          <button type="submit" disabled={cents === null} className="rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-50">
+            Save
+          </button>
+        </form>
+      ) : (
+        <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl bg-slate-50 p-2">
+            <dt className="text-xs text-slate-500">Income</dt>
+            <dd className="text-sm font-semibold tabular-nums">{formatCents(s.incomeExpectedCents)}</dd>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-2">
+            <dt className="text-xs text-slate-500">Planned</dt>
+            <dd className="text-sm font-semibold tabular-nums">{formatCents(s.plannedCents)}</dd>
+          </div>
+          <div className={`rounded-xl p-2 ${over ? 'bg-red-50' : 'bg-slate-50'}`}>
+            <dt className="text-xs text-slate-500">{over ? 'Over income' : 'Unallocated'}</dt>
+            <dd className={`text-sm font-semibold tabular-nums ${over ? 'text-red-600' : ''}`}>{formatCents(Math.abs(s.unallocatedCents))}</dd>
+          </div>
+        </dl>
+      )}
+      {s.incomeExpectedCents === 0 && !editing && (
+        <p className="mt-2 text-xs text-slate-500">
+          Set your expected income, or <a href="#/budget/plan" className="underline">build a budget from your history</a>.
+        </p>
+      )}
+    </section>
+  )
 }

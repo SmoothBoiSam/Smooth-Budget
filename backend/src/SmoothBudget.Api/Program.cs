@@ -66,6 +66,8 @@ builder.Services.AddProblemDetails();
 builder.Services.AddScoped<CurrentMonthLoader>();
 builder.Services.AddScoped<HomeSummaryService>();
 builder.Services.AddScoped<BudgetSummaryService>();
+builder.Services.AddScoped<BudgetMonthService>();
+builder.Services.AddScoped<BudgetGeneratorService>();
 builder.Services.AddScoped<DemoSeeder>();
 builder.Services.AddScoped<TransferDetectionService>();
 builder.Services.AddScoped<ImportService>();
@@ -131,7 +133,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
 app.MapImportEndpoints();
 app.MapTransactionEndpoints();
-BudgetSummaryService.Map(app);
+app.MapBudgetEndpoints();
 app.MapPlaidEndpoints();
 app.MapGet("/api/home/summary", (HttpContext ctx, HomeSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct))
     .RequireAuthorization();

@@ -3,10 +3,11 @@
 A phone-first budgeting app whose Home screen answers one question: **how much do I have left to spend this month?**
 The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. `DECISIONS.md` records the choices made where the spec is silent.
 
-**Status:** Milestone 3 (Plaid):
+**Status:** Milestone 4 (budget):
 - **Milestone 1:** auth, database, CI, fake-data seed, and a Home screen showing Left to Spend.
 - **Milestone 2:** CSV import for Chase checking, Chase credit and Apple Card; categorization by bank category and merchant rules; card payment and transfer detection; and an inbox for transactions that still need a category.
 - **Milestone 3:** Plaid Link, cursor-based sync, verified webhooks, background sync, pending-to-posted handling, CSV/Plaid overlap matching, and sync health on Home.
+- **Milestone 4:** editable categories (this month only or from now on, hide, reorder), income vs planned, the budget generator, and month close with sweeps and carry-forward.
 - **Also:** dark mode (More → Settings → Appearance: System, Light or Dark).
 
 ## Stack
@@ -129,7 +130,14 @@ In Development, migrations apply automatically on startup.
 | GET | `/api/transactions/inbox`, `/api/transactions/inbox/count` | Transactions that need a category |
 | PATCH | `/api/transactions/{id}` | `{ categoryId, isTransfer, rulePattern? }`. Your choice locks the row. |
 | GET | `/api/budget/categories` | |
-| GET | `/api/budget/summary` | Every category grouped by type, with limit, spent/paid, remaining and health, plus Left to Spend |
+| GET | `/api/budget/summary` | Every category grouped by type (limit, spent/paid, remaining, health), Left to Spend, income vs planned, last month's close and pending sweeps |
+| POST / PUT | `/api/budget/categories`, `/api/budget/categories/{id}` | Add; edit with `applyTo: month|permanent`, `isHidden` |
+| POST | `/api/budget/categories/order` | `{ ids }` |
+| PUT | `/api/budget/months/current/income` | `{ incomeCents }` |
+| POST | `/api/budget/months/{start}/close` | Close an ended month now |
+| POST / DELETE | `/api/budget/sweeps/{id}/done` | Mark a sweep as sent, or undo |
+| GET / POST | `/api/budget/generator`, `/api/budget/generator/apply` | Propose a budget from history; apply `{ incomeCents, limits }` |
+| GET / PUT | `/api/settings/budget` | `{ sweepTarget: Debt|Savings|Split, sweepSavingsPercent }` |
 | GET / DELETE | `/api/rules`, `/api/rules/{id}` | Merchant rules |
 | GET | `/api/plaid/config` | Whether Plaid is set up, and the environment |
 | POST | `/api/plaid/link-token` | `{ itemId? }`. Pass an item id for update mode (reconnect). |

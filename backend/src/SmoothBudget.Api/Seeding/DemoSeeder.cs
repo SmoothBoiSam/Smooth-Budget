@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Core.Budgeting;
@@ -9,12 +10,12 @@ using SmoothBudget.Core.Transactions;
 namespace SmoothBudget.Api.Seeding;
 
 /// <summary>
-/// Fills a household with FAKE data for the budget month that contains "today", so the Home screen
-/// always has something realistic to show. Every merchant, account and amount here is invented.
+/// Fills a household with FAKE data: the budget month that contains "today" plus three complete months
+/// before it (history for the budget generator and month closing). Every merchant, account and amount is invented.
 /// Transactions are laid out by day offset from the budget month start; only those dated on or
 /// before today are created, and anything dated today or yesterday is marked pending.
 /// </summary>
-public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvider clock, ILogger<DemoSeeder> log)
+public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvider clock, BudgetMonthService months, ILogger<DemoSeeder> log)
 {
     public const string DemoEmail = "demo@smoothbudget.test";
 
@@ -61,10 +62,12 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         await db.Transactions.Where(t => t.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.ImportBatches.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.CategoryRules.Where(r => r.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.BudgetMonths.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct); // also removes per-month categories and sweeps
         await db.Categories.Where(c => c.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.Accounts.Where(a => a.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.PlaidItems.Where(i => i.HouseholdId == householdId).ExecuteDeleteAsync(ct); // demo only; sandbox items are disposable
-        await db.BudgetMonths.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        household.SweepTarget = SweepTarget.Debt;
+        household.SweepSavingsPercent = 50;
 
         Account NewAccount(string name, AccountType type, string mask, long balance) => new()
         {
@@ -135,33 +138,57 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             (27, visa, gas, "Fuel Stop", 28_40, false),
         };
 
-        foreach (var p in plan)
+        // Four budget months: three complete ones (history for the budget generator) and the current one.
+        //  -3 and -2: the plan with variable spending scaled to 92% and 104%; closed, each with a surplus to sweep
+        //             (the older sweep already marked as sent).
+        //  -1:        the plan plus a one-off splurge, so it ends exactly DemoCarriedInDeficitCents over: that
+        //             deficit shows as "Carried over" this month. Left open; it closes after its grace period.
+        //   0:        the plan up to today; today's and yesterday's purchases are pending.
+        var calendar = new BudgetMonthCalendar(household.BudgetMonthStartDay);
+        var rows = new List<BudgetMonth>();
+        for (var back = 3; back >= 0; back--)
         {
-            var date = month.Start.AddDays(p.Day);
-            if (date > today || date > month.End)
-                continue;
-            db.Transactions.Add(new Transaction
+            var label = month.Label.AddMonths(-back);
+            var m = calendar.MonthOf(label.Year, label.Month);
+            var scale = back switch { 3 => 92, 2 => 104, _ => 100 };
+            var monthPlan = back == 1
+                ? plan.Append((Day: 6, Account: mastercard, Category: (Category?)entertainment, Merchant: "Concert Tickets", Cents: 1_010_00 - 890_97 + DemoCarriedInDeficitCents, Transfer: false)) // 161.53: variable limits minus the plan's spending, plus the deficit
+                : plan.AsEnumerable();
+
+            foreach (var p in monthPlan)
             {
-                Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = p.Account.Id, CategoryId = p.Category?.Id,
-                Date = date, AmountCents = p.Cents, Merchant = MerchantText.Normalize(p.Merchant), Description = p.Merchant, IsTransfer = p.Transfer,
-                Kind = p.Transfer
-                    ? (p.Merchant.Contains("Payment", StringComparison.OrdinalIgnoreCase) ? TransactionKind.CardPayment : TransactionKind.Transfer)
-                    : p.Cents < 0
-                        ? (p.Merchant.Contains("return", StringComparison.OrdinalIgnoreCase) ? TransactionKind.Refund : TransactionKind.Income)
-                        : TransactionKind.Purchase,
-                CategorySource = p.Category is null ? CategorySource.None : p.Transfer ? CategorySource.Transfer : CategorySource.Bank,
-                Pending = date >= today.AddDays(-1), Source = DataSource.Seed, CreatedUtc = now,
-            });
+                var date = m.Start.AddDays(p.Day);
+                if (date > today || date > m.End)
+                    continue;
+                var scalable = !p.Transfer && p.Category?.Type == CategoryType.Variable && p.Cents > 0;
+                var cents = scalable ? (long)Math.Round(p.Cents * scale / 100m, MidpointRounding.AwayFromZero) : p.Cents;
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = p.Account.Id, CategoryId = p.Category?.Id,
+                    Date = date, AmountCents = cents, Merchant = MerchantText.Normalize(p.Merchant), Description = p.Merchant, IsTransfer = p.Transfer,
+                    Kind = p.Transfer
+                        ? (p.Merchant.Contains("Payment", StringComparison.OrdinalIgnoreCase) ? TransactionKind.CardPayment : TransactionKind.Transfer)
+                        : p.Cents < 0
+                            ? (p.Merchant.Contains("return", StringComparison.OrdinalIgnoreCase) ? TransactionKind.Refund : TransactionKind.Income)
+                            : TransactionKind.Purchase,
+                    CategorySource = p.Category is null ? CategorySource.None : p.Transfer ? CategorySource.Transfer : CategorySource.Bank,
+                    Pending = back == 0 && date >= today.AddDays(-1), Source = DataSource.Seed, CreatedUtc = now,
+                });
+            }
+
+            rows.Add(db.BudgetMonths.Add(new BudgetMonth
+            {
+                Id = Guid.NewGuid(), HouseholdId = householdId, StartDate = m.Start, EndDate = m.End,
+                IncomeExpectedCents = 1_700_86 + 760_00 + 800_00,
+            }).Entity);
         }
-
-        db.BudgetMonths.Add(new BudgetMonth
-        {
-            Id = Guid.NewGuid(), HouseholdId = householdId, StartDate = month.Start, EndDate = month.End,
-            IncomeExpectedCents = 1_700_86 + 760_00 + 800_00, CarriedInDeficitCents = DemoCarriedInDeficitCents,
-        });
-
         await db.SaveChangesAsync(ct);
-        log.LogInformation("Seeded household {HouseholdId} for budget month {Start}..{End} (today {Today})", householdId, month.Start, month.End, today);
+
+        await months.CloseAsync(householdId, rows[0], ct);
+        await months.CloseAsync(householdId, rows[1], ct);
+        await db.SweepTasks.Where(s => s.BudgetMonthId == rows[0].Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.DoneUtc, now), ct);
+
+        log.LogInformation("Seeded household {HouseholdId}: budget months {First}..{Last} (today {Today})", householdId, rows[0].StartDate, month.End, today);
     }
 
     /// <summary>A starter set of categories with made-up limits. Variable limits total $1,010.00.</summary>

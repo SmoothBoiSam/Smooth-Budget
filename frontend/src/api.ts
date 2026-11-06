@@ -18,6 +18,7 @@ export interface HomeSummary {
   lastUpdatedUtc: string | null
   computedUtc: string
   sync: SyncStatus
+  pendingSweeps: PendingSweep[]
 }
 
 export interface Me {
@@ -183,6 +184,7 @@ export interface BudgetCategoryLine {
   type: Category['type']
   isDiscretionary: boolean
   limitCents: number
+  hasMonthOverride: boolean
   spentCents: number
   remainingCents: number
   health: Health
@@ -209,7 +211,12 @@ export interface BudgetSummary {
   daysRemaining: number
   safeToSpendPerDayCents: number
   uncategorizedCount: number
+  incomeExpectedCents: number
+  plannedCents: number
+  unallocatedCents: number
   groups: BudgetGroup[]
+  lastMonth: LastMonth | null
+  pendingSweeps: PendingSweep[]
 }
 
 export const budgetSummaryApi = {
@@ -286,4 +293,81 @@ export const plaidApi = {
   removeItem: (id: string) => request<void>('DELETE', `/plaid/items/${id}`),
   reconnected: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/reconnected`),
   syncAll: () => request<SyncResult[]>('POST', '/sync'),
+}
+
+export interface PendingSweep {
+  id: string
+  kind: 'Debt' | 'Savings'
+  amountCents: number
+  destination: string
+  fromMonth: string
+}
+
+export interface SweepItem {
+  id: string
+  kind: 'Debt' | 'Savings'
+  amountCents: number
+  destination: string
+  done: boolean
+}
+
+export interface LastMonth {
+  month: { start: string; end: string; label: string }
+  closed: boolean
+  closesOn: string
+  totalUnspentCents: number
+  totalOverspentCents: number
+  carriedInDeficitCents: number
+  closingNetCents: number
+  surplusCents: number
+  deficitCents: number
+  sweeps: SweepItem[]
+}
+
+export interface ProposedLimit {
+  categoryId: string
+  name: string
+  type: Category['type']
+  currentLimitCents: number
+  medianCents: number
+  proposedCents: number
+  explanation: string
+  monthlyCents: number[]
+}
+
+export interface GeneratorProposal {
+  monthsUsed: number
+  months: { start: string; end: string }[]
+  incomeCents: number
+  incomeExplanation: string
+  categories: ProposedLimit[]
+  allocatedCents: number
+  unallocatedCents: number
+  spendsMoreThanIncome: boolean
+  uncategorizedCount: number
+  hasCardDebt: boolean
+  createdStarterCategories: boolean
+}
+
+export type SweepTarget = 'Debt' | 'Savings' | 'Split'
+
+export const budgetEditApi = {
+  createCategory: (name: string, type: Category['type'], limitCents: number, isDiscretionary: boolean) =>
+    request<{ id: string }>('POST', '/budget/categories', { name, type, limitCents, isDiscretionary }),
+  updateCategory: (
+    id: string,
+    body: { name: string; type: Category['type']; limitCents: number; isDiscretionary: boolean; isHidden: boolean; applyTo: 'month' | 'permanent' },
+  ) => request<void>('PUT', `/budget/categories/${id}`, body),
+  reorder: (ids: string[]) => request<void>('POST', '/budget/categories/order', { ids }),
+  hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
+  setIncome: (incomeCents: number) => request<void>('PUT', '/budget/months/current/income', { incomeCents }),
+  closeMonth: (start: string) => request<void>('POST', `/budget/months/${start}/close`),
+  sweepDone: (id: string) => request<void>('POST', `/budget/sweeps/${id}/done`),
+  sweepUndo: (id: string) => request<void>('DELETE', `/budget/sweeps/${id}/done`),
+  generator: () => request<GeneratorProposal>('GET', '/budget/generator'),
+  applyGenerator: (incomeCents: number, limits: { categoryId: string; limitCents: number }[]) =>
+    request<void>('POST', '/budget/generator/apply', { incomeCents, limits }),
+  settings: () => request<{ sweepTarget: SweepTarget; sweepSavingsPercent: number }>('GET', '/settings/budget'),
+  saveSettings: (sweepTarget: SweepTarget, sweepSavingsPercent: number) =>
+    request<void>('PUT', '/settings/budget', { sweepTarget, sweepSavingsPercent }),
 }
