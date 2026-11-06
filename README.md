@@ -7,6 +7,7 @@ The full spec (`SPEC.md`) stays out of the repo because its appendices contain r
 - **Milestone 1:** auth, database, CI, fake-data seed, and a Home screen showing Left to Spend.
 - **Milestone 2:** CSV import for Chase checking, Chase credit and Apple Card; categorization by bank category and merchant rules; card payment and transfer detection; and an inbox for transactions that still need a category.
 - **Milestone 3:** Plaid Link, cursor-based sync, verified webhooks, background sync, pending-to-posted handling, CSV/Plaid overlap matching, and sync health on Home.
+- **Also:** dark mode (More → Settings → Appearance: System, Light or Dark).
 
 ## Stack
 
