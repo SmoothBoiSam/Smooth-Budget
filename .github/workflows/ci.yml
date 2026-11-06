@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: smoothbudget
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: smoothbudget
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U smoothbudget"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Throwaway CI database; not a secret.
+      ConnectionStrings__Default: Host=localhost;Port=5432;Database=smoothbudget;Username=smoothbudget;Password=ci-only-password
+      DOTNET_NOLOGO: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore SmoothBudget.slnx
+      - run: dotnet build SmoothBudget.slnx --no-restore -c Release -warnaserror
+      - run: dotnet test SmoothBudget.slnx --no-build -c Release --logger "console;verbosity=normal"
+      - name: Migrations are up to date with the model
+        run: |
+          dotnet tool restore
+          dotnet ef migrations has-pending-model-changes --project backend/src/SmoothBudget.Api --no-build --configuration Release
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/backend/" />
+  <Folder Name="/backend/src/">
+    <Project Path="backend/src/SmoothBudget.Api/SmoothBudget.Api.csproj" />
+    <Project Path="backend/src/SmoothBudget.Core/SmoothBudget.Core.csproj" />
+  </Folder>
+  <Folder Name="/backend/tests/">
+    <Project Path="backend/tests/SmoothBudget.Api.Tests/SmoothBudget.Api.Tests.csproj" />
+    <Project Path="backend/tests/SmoothBudget.Core.Tests/SmoothBudget.Core.Tests.csproj" />
+  </Folder>
+</Solution>

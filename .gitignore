@@ -1,0 +1,48 @@
+# Secrets and local config (never commit these)
+.env
+.env.*
+!.env.example
+appsettings.Development.json
+appsettings.Local.json
+secrets.json
+*.pem
+*.key
+
+# Real financial and personal data
+/data/
+/private/
+*.csv
+*.xlsx
+*.pdf
+*.txt.private
+
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.log
+publish/
+
+# Node and React (Vite)
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+npm-debug.log*
+.eslintcache
+
+# Local databases and uploads
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
