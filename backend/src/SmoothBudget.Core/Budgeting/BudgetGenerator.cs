@@ -34,6 +34,12 @@ public sealed record BudgetProposal(
 /// <item>Income is the median monthly income (paychecks and partner money). What isn't allocated is shown
 /// as an explicit remainder, never silently spread around.</item>
 /// </list>
+/// <para>
+/// PLANNED (DECISIONS.md, "Planned: budget generator hookups by milestone"): later milestones replace parts
+/// of this with better inputs: card minimums plus extra to the highest-APR card (5), detected recurring
+/// bills (6), partner offsets and split shares with partner money removed from income (7), savings goals
+/// (8), and the Payday forecast as income plus the shortfall adjustment (9). Each comes with its own test.
+/// </para>
 /// </summary>
 public static class BudgetGenerator
 {
