@@ -1,3 +1,5 @@
+using SmoothBudget.Core.Transactions;
+
 namespace SmoothBudget.Core.Budgeting;
 
 /// <summary>A category as the calculator sees it. Money is integer cents.</summary>
@@ -15,7 +17,8 @@ public sealed record BudgetTransaction(
     long AmountCents,
     bool IsTransfer = false,
     bool Pending = false,
-    decimal SplitFactor = 1m);
+    decimal SplitFactor = 1m,
+    TransactionKind Kind = TransactionKind.Purchase);
 
 public enum LeftToSpendStatus
 {
@@ -97,7 +100,7 @@ public static class LeftToSpendCalculator
 
             if (t.CategoryId is null || !knownCategoryIds.Contains(t.CategoryId.Value))
             {
-                if (t.AmountCents > 0)
+                if (TransactionRules.NeedsCategory(hasKnownCategory: false, t.IsTransfer, t.Kind, t.AmountCents))
                     uncategorized++;
                 continue;
             }

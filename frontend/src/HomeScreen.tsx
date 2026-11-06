@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, api, type HomeSummary, type Me, type Status } from './api'
-import BottomNav from './BottomNav'
 import { formatCents, formatDay, formatTime } from './format'
 
 const statusStyles: Record<Status, { number: string; badge: string; label: string }> = {
@@ -91,7 +90,6 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
         )}
       </main>
 
-      <BottomNav />
     </div>
   )
 }
@@ -135,9 +133,14 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
           </li>
         )}
         {s.uncategorizedCount > 0 && (
-          <li className="rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
-            {s.uncategorizedCount} {s.uncategorizedCount === 1 ? 'purchase needs' : 'purchases need'} a category and{' '}
-            {s.uncategorizedCount === 1 ? "isn't" : "aren't"} counted yet
+          <li>
+            <a href="#/budget" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
+              <span>
+                {s.uncategorizedCount} {s.uncategorizedCount === 1 ? 'purchase' : 'purchases'} this month{' '}
+                {s.uncategorizedCount === 1 ? 'needs' : 'need'} a category and {s.uncategorizedCount === 1 ? "isn't" : "aren't"} counted yet
+              </span>
+              <span aria-hidden className="font-semibold">›</span>
+            </a>
           </li>
         )}
         <li className="flex justify-between rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">

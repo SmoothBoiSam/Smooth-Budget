@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using SmoothBudget.Core.Budgeting;
+using SmoothBudget.Core.Import;
+using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Data;
 
@@ -81,9 +83,28 @@ public class Transaction
     /// <summary>Integer cents. Positive = money out (purchase), negative = money in (refund, paycheck, transfer in).</summary>
     public long AmountCents { get; set; }
 
+    /// <summary>Normalized merchant key used for rules and display (e.g. "KING SOOPERS DENVER CO").</summary>
     public required string Merchant { get; set; }
+
+    /// <summary>The bank's description, with long digit runs masked.</summary>
+    public string Description { get; set; } = "";
+
+    public TransactionKind Kind { get; set; }
+    public CategorySource CategorySource { get; set; }
+
+    /// <summary>The bank's own category label, if the export has one (Chase credit, Apple Card).</summary>
+    public string? BankCategory { get; set; }
+
     public bool Pending { get; set; }
     public bool IsTransfer { get; set; }
+
+    /// <summary>Shared by the two sides of a detected card payment or own-account transfer.</summary>
+    public Guid? TransferGroupId { get; set; }
+
+    /// <summary>Date|amount|description key used to skip rows already imported into this account.</summary>
+    public string? Fingerprint { get; set; }
+
+    public Guid? ImportBatchId { get; set; }
 
     /// <summary>Owner's share, 0..1. 1 = all of it.</summary>
     public decimal SplitFactor { get; set; } = 1m;
@@ -91,6 +112,33 @@ public class Transaction
     public long PartnerOffsetCents { get; set; }
     public DataSource Source { get; set; }
     public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>Merchant pattern to category (SPEC section 6.2). Matches any merchant containing the pattern.</summary>
+public class CategoryRule
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string Pattern { get; set; }
+    public Guid CategoryId { get; set; }
+    public Category Category { get; set; } = null!;
+    public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>One CSV upload. Lets the user see what an import did and undo it.</summary>
+public class ImportBatch
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public Guid AccountId { get; set; }
+    public Account Account { get; set; } = null!;
+    public required string FileName { get; set; }
+    public BankCsvFormat Format { get; set; }
+    public DateTime ImportedUtc { get; set; }
+    public int RowCount { get; set; }
+    public int ImportedCount { get; set; }
+    public int DuplicateCount { get; set; }
+    public int ErrorCount { get; set; }
 }
 
 public class BudgetMonth

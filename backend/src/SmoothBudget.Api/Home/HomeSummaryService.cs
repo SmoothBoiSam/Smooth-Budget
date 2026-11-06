@@ -44,7 +44,7 @@ public class HomeSummaryService(AppDbContext db, TimeProvider clock)
 
         var transactions = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.Date >= month.Start && t.Date <= month.End && t.Account.IncludedInBudget)
-            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor))
+            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind))
             .ToListAsync(ct);
 
         var carried = await db.BudgetMonths.AsNoTracking()

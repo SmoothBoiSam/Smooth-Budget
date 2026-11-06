@@ -61,3 +61,112 @@ export const api = {
   logout: () => request<void>('POST', '/auth/logout'),
   homeSummary: () => request<HomeSummary>('GET', '/home/summary'),
 }
+
+export interface Account {
+  id: string
+  name: string
+  type: 'Checking' | 'Savings' | 'CreditCard'
+  mask: string | null
+  source: string
+  includedInBudget: boolean
+}
+
+export interface Category {
+  id: string
+  name: string
+  type: 'FixedBill' | 'Variable' | 'DebtPayment' | 'SavingsTransfer'
+  monthlyLimitCents: number
+  isDiscretionary: boolean
+  sortOrder: number
+}
+
+export interface Transaction {
+  id: string
+  date: string
+  amountCents: number
+  merchant: string
+  description: string
+  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other'
+  categoryId: string | null
+  categoryName: string | null
+  categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User'
+  isTransfer: boolean
+  pending: boolean
+  accountId: string
+  accountName: string
+  bankCategory: string | null
+}
+
+export interface ImportResult {
+  batchId: string
+  format: string
+  rowCount: number
+  imported: number
+  duplicates: number
+  transfers: number
+  categorized: number
+  needsCategory: number
+  errors: { rowNumber: number; message: string }[]
+}
+
+export interface ImportBatch {
+  id: string
+  accountId: string
+  accountName: string
+  fileName: string
+  format: string
+  importedUtc: string
+  rowCount: number
+  importedCount: number
+  duplicateCount: number
+  errorCount: number
+}
+
+export interface Rule {
+  id: string
+  pattern: string
+  categoryId: string
+  categoryName: string
+  createdUtc: string
+}
+
+async function upload<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: 'POST', credentials: 'same-origin', body: form })
+  if (!res.ok) {
+    let message = `Upload failed (${res.status})`
+    try {
+      const problem = await res.json()
+      message = problem.detail ?? problem.title ?? message
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(res.status, message)
+  }
+  return (await res.json()) as T
+}
+
+export const budgetApi = {
+  accounts: () => request<Account[]>('GET', '/accounts'),
+  createAccount: (name: string, type: Account['type'], mask: string | null) =>
+    request<Account>('POST', '/accounts', { name, type, mask }),
+  categories: () => request<Category[]>('GET', '/budget/categories'),
+  monthTransactions: () => request<{ from: string; to: string; items: Transaction[] }>('GET', '/transactions'),
+  inbox: () => request<Transaction[]>('GET', '/transactions/inbox'),
+  inboxCount: () => request<{ count: number }>('GET', '/transactions/inbox/count'),
+  updateTransaction: (id: string, categoryId: string | null, isTransfer: boolean, rulePattern: string | null) =>
+    request<{ transaction: Transaction; ruleAppliedTo: number }>('PATCH', `/transactions/${id}`, {
+      categoryId,
+      isTransfer,
+      rulePattern,
+    }),
+  importCsv: (accountId: string, file: File) => {
+    const form = new FormData()
+    form.append('accountId', accountId)
+    form.append('file', file)
+    return upload<ImportResult>('/import/csv', form)
+  },
+  batches: () => request<ImportBatch[]>('GET', '/import/batches'),
+  undoBatch: (id: string) => request<void>('DELETE', `/import/batches/${id}`),
+  rules: () => request<Rule[]>('GET', '/rules'),
+  deleteRule: (id: string) => request<void>('DELETE', `/rules/${id}`),
+}

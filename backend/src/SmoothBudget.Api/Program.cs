@@ -5,7 +5,9 @@ using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
+using SmoothBudget.Api.Import;
 using SmoothBudget.Api.Seeding;
+using SmoothBudget.Api.Transactions;
 
 // Local development reads secrets from the git-ignored .env at the repo root. In CI and hosting,
 // real environment variables are used instead and no .env file exists.
@@ -60,6 +62,10 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 builder.Services.AddProblemDetails();
 builder.Services.AddScoped<HomeSummaryService>();
 builder.Services.AddScoped<DemoSeeder>();
+builder.Services.AddScoped<TransferDetectionService>();
+builder.Services.AddScoped<ImportService>();
+// Leave headroom over the 5 MB CSV limit for multipart framing.
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = ImportService.MaxFileBytes + 64 * 1024);
 
 var app = builder.Build();
 
@@ -93,6 +99,8 @@ app.UseAuthorization();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
+app.MapImportEndpoints();
+app.MapTransactionEndpoints();
 app.MapGet("/api/home/summary", (HttpContext ctx, HomeSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct))
     .RequireAuthorization();
 

@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Core.Budgeting;
+using SmoothBudget.Core.Import;
+using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Seeding;
 
@@ -57,6 +59,8 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         var month = new BudgetMonthCalendar(household.BudgetMonthStartDay).MonthContaining(today);
 
         await db.Transactions.Where(t => t.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.ImportBatches.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.CategoryRules.Where(r => r.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.Categories.Where(c => c.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.Accounts.Where(a => a.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.BudgetMonths.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct);
@@ -72,28 +76,13 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         var savings = NewAccount("Demo Savings", AccountType.Savings, "0004", 250_00);
         db.Accounts.AddRange(checking, visa, mastercard, savings);
 
-        var order = 0;
-        Category NewCategory(string name, CategoryType type, long limit, bool discretionary = false) => new()
-        {
-            Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = type,
-            MonthlyLimitCents = limit, IsDiscretionary = discretionary, SortOrder = order++,
-        };
-        var rent = NewCategory("Rent", CategoryType.FixedBill, 1_650_00);
-        var phone = NewCategory("Phone", CategoryType.FixedBill, 65_00);
-        var insurance = NewCategory("Car insurance", CategoryType.FixedBill, 120_00);
-        var utilities = NewCategory("Utilities & internet", CategoryType.FixedBill, 140_00);
-        var subscriptions = NewCategory("Subscriptions", CategoryType.FixedBill, 35_00);
-        var cardPayment = NewCategory("Credit card payment", CategoryType.DebtPayment, 300_00);
-        var rainyDay = NewCategory("Rainy-day fund", CategoryType.SavingsTransfer, 100_00);
-        var groceries = NewCategory("Groceries", CategoryType.Variable, 450_00);
-        var eatingOut = NewCategory("Eating out", CategoryType.Variable, 150_00, discretionary: true);
-        var gas = NewCategory("Gas", CategoryType.Variable, 160_00);
-        var shopping = NewCategory("Shopping", CategoryType.Variable, 100_00, discretionary: true);
-        var entertainment = NewCategory("Entertainment", CategoryType.Variable, 60_00, discretionary: true);
-        var household_ = NewCategory("Household", CategoryType.Variable, 50_00);
-        var personal = NewCategory("Personal care", CategoryType.Variable, 40_00);
-        db.Categories.AddRange(rent, phone, insurance, utilities, subscriptions, cardPayment, rainyDay,
-            groceries, eatingOut, gas, shopping, entertainment, household_, personal);
+        var categories = DefaultCategories(householdId);
+        db.Categories.AddRange(categories);
+        Category C(string name) => categories.Single(c => c.Name == name);
+        var (rent, phone, insurance, utilities, subscriptions, cardPayment, rainyDay) =
+            (C("Rent"), C("Phone"), C("Car insurance"), C("Utilities & internet"), C("Subscriptions"), C("Credit card payment"), C("Rainy-day fund"));
+        var (groceries, eatingOut, gas, shopping, entertainment, household_, personal) =
+            (C("Groceries"), C("Eating out"), C("Gas"), C("Shopping"), C("Entertainment"), C("Household"), C("Personal care"));
 
         // (day offset from month start, account, category, merchant, cents, isTransfer)
         var plan = new (int Day, Account Account, Category? Category, string Merchant, long Cents, bool Transfer)[]
@@ -153,7 +142,13 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             db.Transactions.Add(new Transaction
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = p.Account.Id, CategoryId = p.Category?.Id,
-                Date = date, AmountCents = p.Cents, Merchant = p.Merchant, IsTransfer = p.Transfer,
+                Date = date, AmountCents = p.Cents, Merchant = MerchantText.Normalize(p.Merchant), Description = p.Merchant, IsTransfer = p.Transfer,
+                Kind = p.Transfer
+                    ? (p.Merchant.Contains("Payment", StringComparison.OrdinalIgnoreCase) ? TransactionKind.CardPayment : TransactionKind.Transfer)
+                    : p.Cents < 0
+                        ? (p.Merchant.Contains("return", StringComparison.OrdinalIgnoreCase) ? TransactionKind.Refund : TransactionKind.Income)
+                        : TransactionKind.Purchase,
+                CategorySource = p.Category is null ? CategorySource.None : p.Transfer ? CategorySource.Transfer : CategorySource.Bank,
                 Pending = date >= today.AddDays(-1), Source = DataSource.Seed, CreatedUtc = now,
             });
         }
@@ -166,5 +161,33 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
 
         await db.SaveChangesAsync(ct);
         log.LogInformation("Seeded household {HouseholdId} for budget month {Start}..{End} (today {Today})", householdId, month.Start, month.End, today);
+    }
+
+    /// <summary>A starter set of categories with made-up limits. Variable limits total $1,010.00.</summary>
+    public static List<Category> DefaultCategories(Guid householdId)
+    {
+        var order = 0;
+        Category New(string name, CategoryType type, long limit, bool discretionary = false) => new()
+        {
+            Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = type,
+            MonthlyLimitCents = limit, IsDiscretionary = discretionary, SortOrder = order++,
+        };
+        return
+        [
+            New("Rent", CategoryType.FixedBill, 1_650_00),
+            New("Phone", CategoryType.FixedBill, 65_00),
+            New("Car insurance", CategoryType.FixedBill, 120_00),
+            New("Utilities & internet", CategoryType.FixedBill, 140_00),
+            New("Subscriptions", CategoryType.FixedBill, 35_00),
+            New("Credit card payment", CategoryType.DebtPayment, 300_00),
+            New("Rainy-day fund", CategoryType.SavingsTransfer, 100_00),
+            New("Groceries", CategoryType.Variable, 450_00),
+            New("Eating out", CategoryType.Variable, 150_00, discretionary: true),
+            New("Gas", CategoryType.Variable, 160_00),
+            New("Shopping", CategoryType.Variable, 100_00, discretionary: true),
+            New("Entertainment", CategoryType.Variable, 60_00, discretionary: true),
+            New("Household", CategoryType.Variable, 50_00),
+            New("Personal care", CategoryType.Variable, 40_00),
+        ];
     }
 }
