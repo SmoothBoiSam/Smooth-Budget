@@ -64,6 +64,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         await db.CategoryRules.Where(r => r.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.BudgetMonths.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct); // also removes per-month categories and sweeps
         await db.Categories.Where(c => c.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.DebtAccounts.Where(d => d.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.Accounts.Where(a => a.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.PlaidItems.Where(i => i.HouseholdId == householdId).ExecuteDeleteAsync(ct); // demo only; sandbox items are disposable
         household.SweepTarget = SweepTarget.Debt;
@@ -80,6 +81,17 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         var mastercard = NewAccount("Demo Mastercard", AccountType.CreditCard, "0003", -1_455_10);
         var savings = NewAccount("Demo Savings", AccountType.Savings, "0004", 250_00);
         db.Accounts.AddRange(checking, visa, mastercard, savings);
+
+        // Card details for the Debt tab (invented): tracked since August, so there's progress to show.
+        DebtAccount Debt(Account card, int aprBps, long minimum, int dueDay, long limit, long starting) => new()
+        {
+            Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = card.Id, Name = card.Name, BalanceCents = -card.CurrentBalanceCents,
+            AprBps = aprBps, MinimumPaymentCents = minimum, DueDay = dueDay, CreditLimitCents = limit, StartingBalanceCents = starting,
+            StartedOn = today.AddMonths(-3), CreatedUtc = now,
+        };
+        db.DebtAccounts.AddRange(Debt(visa, 2499, 115_00, 3, 7_500_00, 4_600_00), Debt(mastercard, 1999, 45_00, 18, 3_000_00, 1_900_00));
+        household.DebtStrategy = SmoothBudget.Core.Debt.DebtStrategy.Avalanche;
+        household.ExtraDebtPaymentCents = null;
 
         var categories = DefaultCategories(householdId);
         db.Categories.AddRange(categories);

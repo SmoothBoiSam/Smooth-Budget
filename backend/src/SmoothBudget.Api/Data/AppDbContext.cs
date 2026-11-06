@@ -17,6 +17,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<PlaidItem> PlaidItems => Set<PlaidItem>();
     public DbSet<BudgetMonthCategory> BudgetMonthCategories => Set<BudgetMonthCategory>();
     public DbSet<SweepTask> SweepTasks => Set<SweepTask>();
+    public DbSet<DebtAccount> DebtAccounts => Set<DebtAccount>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -114,6 +115,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Destination).HasMaxLength(120);
             e.HasOne(x => x.BudgetMonth).WithMany().HasForeignKey(x => x.BudgetMonthId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.HouseholdId, x.DoneUtc });
+        });
+
+        b.Entity<DebtAccount>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.HasOne(x => x.Account).WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.HouseholdId);
+            e.HasIndex(x => x.AccountId).IsUnique();
         });
     }
 }

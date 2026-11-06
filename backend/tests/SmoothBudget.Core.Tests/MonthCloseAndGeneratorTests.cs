@@ -182,6 +182,31 @@ public class BudgetGeneratorTests
     }
 
     [Fact]
+    public void With_known_cards_debt_is_the_minimums_plus_whats_left_to_the_highest_APR()
+    {
+        var visa = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);
+        var mc = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Mastercard", 800_00, 1999, 35_00);
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [mc, visa]);
+
+        // Everything else: groceries 438 + eating out 136 (trimmed) + rent 1,650 + savings 100 = 2,324.00.
+        // Income 3,432.86 − 2,324.00 − minimums 95.00 = 1,013.86 extra.
+        var card = p.Categories.Single(c => c.CategoryId == Card);
+        Assert.Equal(95_00 + 1_013_86, card.ProposedCents);
+        Assert.Equal("Your card minimums add up to $95.00, plus $1,013.86 left over after everything else, as extra to Visa (24.99% APR, the highest).", card.Explanation);
+        Assert.Equal(0, p.UnallocatedCents);
+    }
+
+    [Fact]
+    public void When_nothing_is_left_the_debt_proposal_is_just_the_minimums()
+    {
+        var visa = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);
+        var lowIncome = History().Where(t => t.Kind != TransactionKind.Income).ToList();
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, lowIncome, hasCardDebt: true, cardDebts: [visa]);
+        Assert.Equal(60_00, p.Categories.Single(c => c.CategoryId == Card).ProposedCents);
+        Assert.True(p.SpendsMoreThanIncome);
+    }
+
+    [Fact]
     public void Warns_when_the_budget_spends_more_than_income()
     {
         var lowIncome = History().Where(t => t.Kind != TransactionKind.Income).ToList();

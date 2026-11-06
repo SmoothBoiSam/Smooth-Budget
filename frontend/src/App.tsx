@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, budgetApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
+import DebtScreen from './DebtScreen'
 import HomeScreen from './HomeScreen'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
@@ -14,7 +15,7 @@ function currentRoute(): Route {
     window.history.replaceState(null, '', '#/review')
     return 'review'
   }
-  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'more' ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'more' ? 'more' : 'home'
 }
 
 export default function App() {
@@ -57,6 +58,7 @@ export default function App() {
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
       {route === 'budget' && <BudgetScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
       {route === 'review' && <ReviewScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
+      {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
       <BottomNav route={route} inboxCount={inboxCount} />
     </>

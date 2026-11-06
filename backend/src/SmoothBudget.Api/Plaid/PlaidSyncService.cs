@@ -97,7 +97,11 @@ public class PlaidSyncService(CategorizationService categorization,
         foreach (var pa in accountsSeen ?? [])
         {
             if (accounts.TryGetValue(pa.AccountId, out var acct) && pa.Balances.Current is { } current)
+            {
                 acct.CurrentBalanceCents = BalanceCents(acct.Type, current);
+                if (pa.Balances.Limit is { } limit)
+                    acct.CreditLimitCents = (long)Math.Round(limit * 100m, 0, MidpointRounding.AwayFromZero);
+            }
         }
 
         // Only accounts the user chose to import.

@@ -15,7 +15,10 @@ namespace SmoothBudget.Api.Tests;
 /// </summary>
 public sealed class FakePlaid : HttpMessageHandler
 {
-    public sealed record Account(string Id, string Name, string Mask, string Type, string Subtype, decimal Balance = 100m);
+    public sealed record Account(string Id, string Name, string Mask, string Type, string Subtype, decimal Balance = 100m, decimal? Limit = null);
+
+    /// <summary>Card details for /liabilities/get, by access token. A login without an entry answers like a bank that doesn't share them.</summary>
+    public ConcurrentDictionary<string, List<(string AccountShortName, decimal Apr, decimal Minimum, string DueDate)>> Liabilities { get; } = new();
 
     private int _items;
     private readonly ConcurrentDictionary<string, List<Account>> _accounts = new();
@@ -125,6 +128,23 @@ public sealed class FakePlaid : HttpMessageHandler
                 page["next_cursor"] = cursor + "+";
                 page["accounts"] = AccountsJson(token);
                 return Ok(page);
+            case "liabilities/get":
+                var lt = Str("access_token")!;
+                if (!Liabilities.TryGetValue(lt, out var cards))
+                    return Error("INVALID_REQUEST", "PRODUCTS_NOT_SUPPORTED");
+                return Ok(new JsonObject
+                {
+                    ["liabilities"] = new JsonObject
+                    {
+                        ["credit"] = new JsonArray([.. cards.Select(c => (JsonNode)new JsonObject
+                        {
+                            ["account_id"] = Id(lt, c.AccountShortName),
+                            ["aprs"] = new JsonArray(new JsonObject { ["apr_percentage"] = c.Apr, ["apr_type"] = "purchase_apr" }),
+                            ["minimum_payment_amount"] = c.Minimum,
+                            ["next_payment_due_date"] = c.DueDate,
+                        })]),
+                    },
+                });
             default:
                 return Error("INVALID_REQUEST", "UNKNOWN_FAKE_PATH");
         }
@@ -133,7 +153,7 @@ public sealed class FakePlaid : HttpMessageHandler
     private JsonArray AccountsJson(string accessToken) => new([.. _accounts[accessToken].Select(a => (JsonNode)new JsonObject
     {
         ["account_id"] = a.Id,
-        ["balances"] = new JsonObject { ["current"] = a.Balance, ["available"] = a.Balance, ["iso_currency_code"] = "USD" },
+        ["balances"] = new JsonObject { ["current"] = a.Balance, ["available"] = a.Balance, ["iso_currency_code"] = "USD", ["limit"] = a.Limit },
         ["mask"] = a.Mask, ["name"] = a.Name, ["official_name"] = null, ["type"] = a.Type, ["subtype"] = a.Subtype,
     })]);
 

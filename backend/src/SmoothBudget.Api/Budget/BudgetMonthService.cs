@@ -201,22 +201,28 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
     }
 
     /// <summary>
-    /// Debt: the card with the largest balance owed (APRs arrive with the Debt milestone, which will switch
-    /// this to highest APR first, the owner's chosen strategy). Savings: the first savings account, else
+    /// Debt: the debt with the highest APR that's still owed (Avalanche, the owner's strategy; DECISIONS.md 90), else
+    /// the card with the largest balance owed while APRs aren't filled in. Savings: the first savings account, else
     /// the first savings category.
     /// </summary>
     public async Task<(string? Debt, string? Savings)> SweepDestinationsAsync(Guid householdId, CancellationToken ct)
     {
         var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
         static string Label(Account a) => a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}";
+        var highestApr = await db.DebtAccounts.AsNoTracking().Include(d => d.Account)
+            .Where(d => d.HouseholdId == householdId && !d.IsHidden && d.AprBps != null
+                        && (d.Account == null ? d.BalanceCents > 0 : d.Account.IncludedInBudget && d.Account.CurrentBalanceCents < 0))
+            .OrderByDescending(d => d.AprBps).ThenByDescending(d => d.BalanceCents).FirstOrDefaultAsync(ct);
         var card = accounts.Where(a => a.Type == AccountType.CreditCard && a.CurrentBalanceCents < 0).OrderBy(a => a.CurrentBalanceCents).FirstOrDefault()
                    ?? accounts.FirstOrDefault(a => a.Type == AccountType.CreditCard);
+        var debt = highestApr is not null ? highestApr.Account is { } a ? Label(a) : highestApr.Name
+            : card is null ? null : Label(card);
         var savingsAccount = accounts.FirstOrDefault(a => a.Type == AccountType.Savings);
         var savingsCategory = savingsAccount is null
             ? await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer && !c.IsHidden)
                 .OrderBy(c => c.SortOrder).Select(c => c.Name).FirstOrDefaultAsync(ct)
             : null;
-        return (card is null ? null : Label(card), savingsAccount is null ? savingsCategory : Label(savingsAccount));
+        return (debt, savingsAccount is null ? savingsCategory : Label(savingsAccount));
     }
 
     private static BudgetMonth NewRow(Guid householdId, BudgetMonthRange range, long income, long partner) => new()

@@ -1,11 +1,11 @@
 // Bottom tab bar from SPEC section 4, plus Review (DECISIONS.md 87). Bills, Partner and Settings live under More.
-export type Route = 'home' | 'budget' | 'review' | 'more'
+export type Route = 'home' | 'budget' | 'review' | 'debt' | 'more'
 
 const tabs: { label: string; route?: Route }[] = [
   { label: 'Home', route: 'home' },
   { label: 'Budget', route: 'budget' },
   { label: 'Review', route: 'review' },
-  { label: 'Debt' },
+  { label: 'Debt', route: 'debt' },
   { label: 'Savings' },
   { label: 'Payday' },
   { label: 'More', route: 'more' },

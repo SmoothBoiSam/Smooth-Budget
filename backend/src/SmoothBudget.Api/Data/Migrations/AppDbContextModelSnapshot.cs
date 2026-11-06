@@ -161,6 +161,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long?>("CreditLimitCents")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("CurrentBalanceCents")
                         .HasColumnType("bigint");
 
@@ -421,6 +424,63 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("CategoryRules");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.DebtAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("AprBps")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("BalanceCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("CreditLimitCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("DueDay")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("FromBank")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsHidden")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("MinimumPaymentCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateOnly>("StartedOn")
+                        .HasColumnType("date");
+
+                    b.Property<long>("StartingBalanceCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId")
+                        .IsUnique();
+
+                    b.HasIndex("HouseholdId");
+
+                    b.ToTable("DebtAccounts");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.Household", b =>
                 {
                     b.Property<Guid>("Id")
@@ -432,6 +492,12 @@ namespace SmoothBudget.Api.Data.Migrations
 
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DebtStrategy")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("ExtraDebtPaymentCents")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -835,6 +901,16 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.DebtAccount", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Account");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.ImportBatch", b =>

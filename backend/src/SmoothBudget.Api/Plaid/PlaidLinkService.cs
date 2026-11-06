@@ -116,6 +116,8 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
             account.Mask ??= Last4(pa.Mask);
             if (pa.Balances.Current is { } current)
                 account.CurrentBalanceCents = PlaidSyncService.BalanceCents(type, current);
+            if (pa.Balances.Limit is { } limit)
+                account.CreditLimitCents = (long)Math.Round(limit * 100m, 0, MidpointRounding.AwayFromZero);
         }
 
         item.Status = PlaidItemStatus.Active;

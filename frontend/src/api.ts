@@ -496,3 +496,89 @@ export interface CategoryDiscovery {
   unused: { id: string; name: string; reason: string }[]
   unmatched: number
 }
+
+export type DebtStrategy = 'Avalanche' | 'Snowball'
+
+export interface Debt {
+  id: string
+  name: string
+  mask: string | null
+  isCard: boolean
+  balanceCents: number
+  /** APR in basis points: 2499 = 24.99%. */
+  aprBps: number | null
+  minimumCents: number | null
+  dueDay: number | null
+  nextDueDate: string | null
+  creditLimitCents: number | null
+  utilizationPercent: number | null
+  startingBalanceCents: number
+  startedOn: string
+  fromBank: boolean
+  isHidden: boolean
+  /** APR or minimum missing, so it isn't in the plan yet. */
+  needsDetails: boolean
+  paidOffBy: string | null
+  interestCents: number
+  /** A bank-linked card: its balance comes from the bank. */
+  balanceFromBank: boolean
+}
+
+export interface DebtPlan {
+  strategy: DebtStrategy
+  minimumsCents: number
+  extraCents: number
+  extraSource: 'budget' | 'you'
+  monthlyPaymentCents: number
+  months: number
+  debtFreeBy: string | null
+  neverPaysOff: boolean
+  totalInterestCents: number
+  firstTarget: string | null
+  chart: { month: string; balanceCents: number }[]
+}
+
+export interface DebtSummary {
+  owedCents: number
+  startingCents: number
+  paidDownCents: number
+  minimumsCents: number
+  needsDetailsCount: number
+  debts: Debt[]
+  plan: DebtPlan | null
+  comparison: {
+    strategy: DebtStrategy
+    months: number
+    debtFreeBy: string | null
+    neverPaysOff: boolean
+    totalInterestCents: number
+    interestDifferenceCents: number
+    monthsDifference: number
+  } | null
+}
+
+export interface DebtFields {
+  name: string
+  balanceCents: number | null
+  aprBps: number | null
+  minimumCents: number | null
+  dueDay: number | null
+  creditLimitCents: number | null
+  startingBalanceCents: number | null
+  isHidden?: boolean
+}
+
+export const debtApi = {
+  summary: (opts: { extraCents?: number; strategy?: DebtStrategy } = {}) => {
+    const q = new URLSearchParams()
+    if (opts.extraCents !== undefined) q.set('extra', String(opts.extraCents))
+    if (opts.strategy) q.set('strategy', opts.strategy)
+    const s = q.toString()
+    return request<DebtSummary>('GET', `/debt${s ? `?${s}` : ''}`)
+  },
+  add: (d: DebtFields) => request<{ id: string }>('POST', '/debt', d),
+  update: (id: string, d: DebtFields) => request<void>('PUT', `/debt/${id}`, d),
+  remove: (id: string) => request<void>('DELETE', `/debt/${id}`),
+  saveSettings: (strategy: DebtStrategy, extraCents: number | null) => request<void>('PUT', '/debt/settings', { strategy, extraCents }),
+  fromBank: () => request<{ updated: number; message: string | null }>('POST', '/debt/from-bank'),
+}

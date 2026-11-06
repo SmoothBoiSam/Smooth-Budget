@@ -56,7 +56,8 @@ public static class BudgetGenerator
         IReadOnlyList<BudgetMonthRange> history,
         IReadOnlyList<GeneratorCategory> categories,
         IReadOnlyList<BudgetTransaction> transactions,
-        bool hasCardDebt)
+        bool hasCardDebt,
+        IReadOnlyList<Debt.DebtInput>? cardDebts = null)
     {
         var months = history.OrderBy(m => m.Start).TakeLast(MaxMonths).ToList();
         var n = months.Count;
@@ -108,6 +109,21 @@ public static class BudgetGenerator
             }
             return new ProposedLimit(c.Id, c.Name, c.Type, c.CurrentLimitCents, median, proposed, why, monthly);
         }).ToList();
+
+        // Milestone 5 (DECISIONS.md 89): with your cards' minimums known, the card-payment category is the sum of the
+        // minimums plus whatever is left after everything else, sent to the highest-APR card.
+        var owed = (cardDebts ?? []).Where(d => d.BalanceCents > 0).ToList();
+        var cardCategory = proposals.FirstOrDefault(p => p.Type == CategoryType.DebtPayment);
+        if (n > 0 && owed.Count > 0 && cardCategory is not null)
+        {
+            var minimums = owed.Sum(d => Math.Min(d.MinimumCents, d.BalanceCents));
+            var others = proposals.Where(p => p != cardCategory).Sum(p => p.ProposedCents);
+            var extra = Math.Max(0, income + partner - others - minimums);
+            var target = Debt.DebtPayoff.Order(owed, owed.ToDictionary(d => d.Id, d => d.BalanceCents), Debt.DebtStrategy.Avalanche).First();
+            var why = $"Your card minimums add up to {Money(minimums)}"
+                      + (extra > 0 ? $", plus {Money(extra)} left over after everything else, as extra to {target.Name} ({target.AprBps / 100m:0.##}% APR, the highest)." : ". Nothing is left over for extra this month.");
+            proposals[proposals.IndexOf(cardCategory)] = cardCategory with { ProposedCents = minimums + extra, Explanation = why };
+        }
 
         var allocated = proposals.Sum(p => p.ProposedCents);
         var uncategorized = transactions.Count(t => months.Any(m => m.Contains(t.Date))

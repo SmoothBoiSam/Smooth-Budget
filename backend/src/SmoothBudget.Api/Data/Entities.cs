@@ -36,6 +36,10 @@ public class Household
     public string? PartnerName { get; set; }
     /// <summary>The last day the user marked the settle-up balance as settled.</summary>
     public DateOnly? PartnerSettledThrough { get; set; }
+    /// <summary>How extra debt payments are aimed: Avalanche (highest APR first, the default) or Snowball.</summary>
+    public SmoothBudget.Core.Debt.DebtStrategy DebtStrategy { get; set; }
+    /// <summary>Extra paid toward debt each month beyond the minimums. Null = whatever the budget plans for card payments.</summary>
+    public long? ExtraDebtPaymentCents { get; set; }
 
     public DateTime CreatedUtc { get; set; }
 
@@ -59,6 +63,8 @@ public class Account
 
     /// <summary>From the owner's point of view: money in a bank account is positive, a card balance owed is negative.</summary>
     public long CurrentBalanceCents { get; set; }
+    /// <summary>A credit card's limit, from the bank when it reports one (for utilization).</summary>
+    public long? CreditLimitCents { get; set; }
     public bool IncludedInBudget { get; set; } = true;
     public DataSource Source { get; set; }
     public DateTime CreatedUtc { get; set; }
@@ -267,4 +273,35 @@ public class SweepTask
     public long AmountCents { get; set; }
     public required string Destination { get; set; }
     public DateTime? DoneUtc { get; set; }
+}
+
+/// <summary>
+/// A debt for the payoff plan (SPEC 4.4): a credit card (linked to its account, whose balance it follows) or a
+/// loan entered by hand. APR and minimum come from the bank when it shares them (Plaid Liabilities) and are always editable.
+/// </summary>
+public class DebtAccount
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    /// <summary>The credit card account this debt follows. Null for a loan entered by hand.</summary>
+    public Guid? AccountId { get; set; }
+    public Account? Account { get; set; }
+    public required string Name { get; set; }
+    /// <summary>What's owed, positive. For a linked card it's refreshed from the account's balance.</summary>
+    public long BalanceCents { get; set; }
+    /// <summary>APR in basis points (2499 = 24.99%). Null until you (or the bank) fill it in.</summary>
+    public int? AprBps { get; set; }
+    public long? MinimumPaymentCents { get; set; }
+    /// <summary>Day of the month the payment is due (1-31; months shorter than that use their last day).</summary>
+    public int? DueDay { get; set; }
+    /// <summary>For cards without a limit from the bank, or loans with an original amount.</summary>
+    public long? CreditLimitCents { get; set; }
+    /// <summary>What was owed when tracking started, for "paid down so far".</summary>
+    public long StartingBalanceCents { get; set; }
+    public DateOnly StartedOn { get; set; }
+    /// <summary>The APR and minimum came from the bank (Plaid Liabilities) and you haven't changed them.</summary>
+    public bool FromBank { get; set; }
+    /// <summary>Left out of the plan (e.g. a card you pay in full every month).</summary>
+    public bool IsHidden { get; set; }
+    public DateTime CreatedUtc { get; set; }
 }

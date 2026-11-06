@@ -38,7 +38,12 @@ public class PlaidException(string errorType, string errorCode, string message, 
 }
 
 #pragma warning disable CA1812 // instantiated by System.Text.Json
-public record PlaidBalances(decimal? Current, decimal? Available, string? IsoCurrencyCode);
+public record PlaidBalances(decimal? Current, decimal? Available, string? IsoCurrencyCode, decimal? Limit = null);
+// /liabilities/get (credit cards only; loans aren't imported). Plaid reports APRs as percentages, e.g. 24.99.
+public record PlaidApr(decimal AprPercentage, string AprType);
+public record PlaidCreditLiability(string? AccountId, List<PlaidApr>? Aprs, decimal? MinimumPaymentAmount, DateOnly? NextPaymentDueDate, decimal? LastStatementBalance);
+public record PlaidLiabilities(List<PlaidCreditLiability>? Credit);
+public record LiabilitiesGetResponse(PlaidLiabilities Liabilities);
 public record PlaidAccount(string AccountId, PlaidBalances Balances, string? Mask, string Name, string? OfficialName, string Type, string? Subtype);
 public record PlaidCategory(string? Primary, string? Detailed, string? ConfidenceLevel = null);
 public record PlaidTransaction(
@@ -94,6 +99,9 @@ public class PlaidClient(HttpClient http, PlaidOptions options)
 
     public Task<AccountsGetResponse> GetAccountsAsync(string accessToken, CancellationToken ct) =>
         PostAsync<AccountsGetResponse>("accounts/get", new { access_token = accessToken }, ct);
+
+    public Task<LiabilitiesGetResponse> GetLiabilitiesAsync(string accessToken, CancellationToken ct) =>
+        PostAsync<LiabilitiesGetResponse>("liabilities/get", new { access_token = accessToken }, ct);
 
     public async Task<string?> GetInstitutionNameAsync(string institutionId, CancellationToken ct)
     {
