@@ -82,6 +82,8 @@ export interface Category {
   monthlyLimitCents: number
   isDiscretionary: boolean
   sortOrder: number
+  /** Split with the partner by default: her share in percent (0 = not split). */
+  partnerSharePercent: number
 }
 
 export interface Transaction {
@@ -90,16 +92,23 @@ export interface Transaction {
   amountCents: number
   merchant: string
   description: string
-  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution'
+  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution' | 'PartnerSettleUp'
   categoryId: string | null
   categoryName: string | null
-  categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User'
+  categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User' | 'Learned'
   isTransfer: boolean
   pending: boolean
   accountId: string
   accountName: string
   bankCategory: string | null
+  /** Filed automatically and not confirmed yet: every automatic category waits for you. */
   needsReview: boolean
+  /** The app's least certain guesses; shown first when reviewing. */
+  unsure: boolean
+  /** Money to or from the partner (by the name in More). */
+  isPartnerTransfer: boolean
+  /** Your share of a split purchase: 0.5 = half each, 1 = not split. */
+  ownerShare: number
   categoryReason: string | null
 }
 
@@ -161,15 +170,25 @@ export const budgetApi = {
   monthTransactions: () => request<{ from: string; to: string; items: Transaction[] }>('GET', '/transactions'),
   inbox: () => request<Transaction[]>('GET', '/transactions/inbox'),
   inboxCount: () => request<{ count: number; review: number }>('GET', '/transactions/inbox/count'),
-  review: () => request<Transaction[]>('GET', '/transactions/review'),
+  review: (scope: ReviewScope = 'month') => request<Transaction[]>('GET', `/transactions/review?scope=${scope}`),
+  reviewSummary: () => request<ReviewSummary>('GET', '/transactions/review/summary'),
+  confirmLikely: (scope: ReviewScope | 'all') => request<{ confirmed: number }>('POST', '/transactions/review/confirm-likely', { scope }),
   confirmGuesses: (ids: string[]) => request<{ confirmed: number }>('POST', '/transactions/review/confirm', { ids }),
   autoCategorize: () => request<AutoCategorizeResult>('POST', '/transactions/auto-categorize'),
   suggestedCategories: () => request<SuggestedCategory[]>('GET', '/transactions/suggested-categories'),
-  updateTransaction: (id: string, categoryId: string | null, isTransfer: boolean, rulePattern: string | null) =>
+  updateTransaction: (
+    id: string,
+    categoryId: string | null,
+    isTransfer: boolean,
+    rulePattern: string | null,
+    extra: { ownerShare?: number; partnerPurpose?: PartnerPurpose } = {},
+  ) =>
     request<{ transaction: Transaction; ruleAppliedTo: number }>('PATCH', `/transactions/${id}`, {
       categoryId,
       isTransfer,
       rulePattern,
+      ownerShare: extra.ownerShare ?? null,
+      partnerPurpose: extra.partnerPurpose ?? null,
     }),
   importCsv: (accountId: string, file: File) => {
     const form = new FormData()
@@ -196,6 +215,7 @@ export interface BudgetCategoryLine {
   remainingCents: number
   health: Health
   transactionCount: number
+  partnerSharePercent: number
 }
 
 export interface BudgetGroup {
@@ -362,7 +382,8 @@ export interface GeneratorProposal {
   spendsMoreThanIncome: boolean
   uncategorizedCount: number
   hasCardDebt: boolean
-  createdStarterCategories: boolean
+  /** No categories yet: build them from your history first. */
+  needsCategorySetup: boolean
 }
 
 export type SweepTarget = 'Debt' | 'Savings' | 'Split'
@@ -372,7 +393,15 @@ export const budgetEditApi = {
     request<{ id: string }>('POST', '/budget/categories', { name, type, limitCents, isDiscretionary }),
   updateCategory: (
     id: string,
-    body: { name: string; type: Category['type']; limitCents: number; isDiscretionary: boolean; isHidden: boolean; applyTo: 'month' | 'permanent' },
+    body: {
+      name: string
+      type: Category['type']
+      limitCents: number
+      isDiscretionary: boolean
+      isHidden: boolean
+      applyTo: 'month' | 'permanent'
+      partnerSharePercent?: number
+    },
   ) => request<void>('PUT', `/budget/categories/${id}`, body),
   reorder: (ids: string[]) => request<void>('POST', '/budget/categories/order', { ids }),
   hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
@@ -382,6 +411,12 @@ export const budgetEditApi = {
   sweepDone: (id: string) => request<void>('POST', `/budget/sweeps/${id}/done`),
   sweepUndo: (id: string) => request<void>('DELETE', `/budget/sweeps/${id}/done`),
   generator: () => request<GeneratorProposal>('GET', '/budget/generator'),
+  discoverCategories: () => request<CategoryDiscovery>('GET', '/budget/categories/discover'),
+  applyDiscovery: (
+    create: { name: string; type: Category['type']; isDiscretionary: boolean; merchantPattern: string | null; replaces: string | null }[],
+    hideIds: string[],
+  ) =>
+    request<AutoCategorizeResult>('POST', '/budget/categories/discover/apply', { create, hideIds }),
   applyGenerator: (incomeCents: number, partnerCents: number, limits: { categoryId: string; limitCents: number }[]) =>
     request<void>('POST', '/budget/generator/apply', { incomeCents, partnerCents, limits }),
   settings: () => request<{ sweepTarget: SweepTarget; sweepSavingsPercent: number }>('GET', '/settings/budget'),
@@ -407,4 +442,57 @@ export const partnerApi = {
   get: () => request<{ partnerName: string | null }>('GET', '/settings/partner'),
   save: (partnerName: string | null) => request<AutoCategorizeResult>('PUT', '/settings/partner', { partnerName }),
   suggestions: () => request<{ name: string; count: number; totalCents: number }[]>('GET', '/settings/partner/suggestions'),
+  settleUp: () => request<SettleUp>('GET', '/partner/settle-up'),
+  markSettled: () => request<SettleUp>('POST', '/partner/settle-up/settled'),
+}
+
+/** What money to or from the partner was for: hers toward bills, paying back, or your share of something she bought. */
+export type PartnerPurpose = 'contribution' | 'settleUp' | 'myShare'
+
+export interface SettleUp {
+  partnerName: string | null
+  /** Positive: your partner owes you. Negative: you owe her. */
+  owedToYouCents: number
+  splitSharesCents: number
+  paidBackByPartnerCents: number
+  paidBackByYouCents: number
+  settledThrough: string | null
+  items: { transactionId: string; date: string; merchant: string; effectCents: number; kind: 'split' | 'paidByPartner' | 'paidByYou' }[]
+}
+
+export type ReviewScope = 'month' | 'earlier'
+
+export interface ReviewCounts {
+  total: number
+  likely: number
+  unsure: number
+}
+
+export interface ReviewSummary {
+  month: ReviewCounts
+  earlier: ReviewCounts
+}
+
+export interface DiscoveredCategory {
+  name: string
+  type: Category['type']
+  isDiscretionary: boolean
+  /** A pattern found in your spending rather than one of the common categories. */
+  custom: boolean
+  transactionCount: number
+  monthsSeen: number
+  monthlyCents: number
+  examples: string[]
+  reason: string
+  status: 'new' | 'exists' | 'hidden'
+  /** One bill per line: the merchant it's for, and the grouped category it's split out of. */
+  merchantPattern: string | null
+  replaces: string | null
+}
+
+export interface CategoryDiscovery {
+  monthsAnalyzed: number
+  proposed: DiscoveredCategory[]
+  unused: { id: string; name: string; reason: string }[]
+  unmatched: number
 }

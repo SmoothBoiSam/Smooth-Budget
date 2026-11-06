@@ -31,6 +31,7 @@ export default function CategoryEditSheet({
   const [type, setType] = useState<Category['type']>(line?.type ?? 'Variable')
   const [limit, setLimit] = useState(line ? centsToInput(line.limitCents) : '')
   const [discretionary, setDiscretionary] = useState(line?.isDiscretionary ?? false)
+  const [split, setSplit] = useState(line?.partnerSharePercent ?? 0)
   const [applyTo, setApplyTo] = useState<'month' | 'permanent'>(line?.hasMonthOverride ? 'month' : 'permanent')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,6 +56,7 @@ export default function CategoryEditSheet({
           isDiscretionary: type === 'Variable' && discretionary,
           isHidden: hide,
           applyTo,
+          partnerSharePercent: type === 'Variable' ? split : 0,
         })
         onSaved(hide ? `${name.trim()} is hidden.` : applyTo === 'month' && limitChanged ? `Saved for this month only.` : 'Saved.')
       }
@@ -148,6 +150,23 @@ export default function CategoryEditSheet({
             <span className="text-sm">
               Nice-to-have spending
               <span className="block text-xs text-slate-500">Like eating out or shopping: trimmed first when money is tight</span>
+            </span>
+          </label>
+        )}
+
+        {type === 'Variable' && !isNew && (
+          <label className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={split > 0}
+              onChange={(e) => setSplit(e.target.checked ? 50 : 0)}
+              className="size-5"
+            />
+            <span className="text-sm">
+              Split with my partner by default
+              <span className="block text-xs text-slate-500">
+                Like groceries: only your half counts here, and her half goes on the settle-up balance. You can change any one purchase.
+              </span>
             </span>
           </label>
         )}

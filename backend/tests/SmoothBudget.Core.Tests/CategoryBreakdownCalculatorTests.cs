@@ -122,4 +122,51 @@ public class CategoryBreakdownCalculatorTests
         Assert.Equal(lts.LeftToSpendCents, variableRemaining - 42_50);
         Assert.Equal(lts.TotalVariableSpentCents, lines.Where(l => l.Type == CategoryType.Variable).Sum(l => l.SpentCents));
     }
+
+    // ---- Nothing counts twice (DECISIONS.md 85) ------------------------------------------------------
+
+    private static BudgetTransaction OnCard(Guid? cat, long cents) => new(cat, new DateOnly(2026, 11, 12), cents, OnCreditCard: true);
+    private static BudgetTransaction Payment(long cents, bool cardSide = false) =>
+        new(cardSide ? null : CardPayment, new DateOnly(2026, 11, 20), cardSide ? -cents : cents, IsTransfer: true,
+            Kind: SmoothBudget.Core.Transactions.TransactionKind.CardPayment, OnCreditCard: cardSide);
+
+    [Fact]
+    public void A_card_payment_that_covers_this_months_card_purchases_isnt_counted_again()
+    {
+        var lines = CategoryBreakdownCalculator.Calculate(Nov, Categories,
+            [OnCard(Groceries, 200_00), OnCard(EatingOut, 60_00), Payment(260_00), Payment(260_00, cardSide: true)]);
+        Assert.Equal(200_00, Line(lines, Groceries).SpentCents);
+        Assert.Equal(60_00, Line(lines, EatingOut).SpentCents);
+        Assert.Equal(0, Line(lines, CardPayment).SpentCents); // it just paid for the groceries and dinners
+    }
+
+    [Fact]
+    public void Only_what_you_pay_beyond_card_purchases_pays_down_the_balance()
+    {
+        var lines = CategoryBreakdownCalculator.Calculate(Nov, Categories,
+            [OnCard(Groceries, 200_00), OnCard(Streaming, 15_00), new(Groceries, new DateOnly(2026, 11, 15), 40_00), Payment(500_00)]);
+        Assert.Equal(500_00 - 215_00, Line(lines, CardPayment).SpentCents); // debit-card groceries aren't on the card
+        Assert.Equal(240_00, Line(lines, Groceries).SpentCents);
+    }
+
+    [Fact]
+    public void Split_card_purchases_cover_only_your_share()
+    {
+        var lines = CategoryBreakdownCalculator.Calculate(Nov, Categories,
+            [new(Groceries, new DateOnly(2026, 11, 12), 120_00, SplitFactor: 0.5m, OnCreditCard: true), Payment(120_00)]);
+        Assert.Equal(60_00, Line(lines, Groceries).SpentCents);
+        Assert.Equal(60_00, Line(lines, CardPayment).SpentCents); // her half is in the settle-up balance, not your budget
+    }
+
+    [Fact]
+    public void Filing_both_sides_of_a_transfer_counts_it_once()
+    {
+        var lines = CategoryBreakdownCalculator.Calculate(Nov, Categories,
+        [
+            T(RainyDay, 100_00, transfer: true), T(RainyDay, -100_00, transfer: true), // checking -> savings, both sides filed
+            new(CardPayment, new DateOnly(2026, 11, 20), 300_00, IsTransfer: true), new(CardPayment, new DateOnly(2026, 11, 20), -300_00, IsTransfer: true),
+        ]);
+        Assert.Equal(100_00, Line(lines, RainyDay).SpentCents);
+        Assert.Equal(300_00, Line(lines, CardPayment).SpentCents);
+    }
 }

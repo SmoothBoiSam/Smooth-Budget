@@ -10,7 +10,7 @@ import {
   type Category,
   type Health,
   type LastMonth,
-  type SuggestedCategory,
+  type ReviewSummary,
   type Transaction,
 } from './api'
 import BudgetPlanner from './BudgetPlanner'
@@ -20,15 +20,14 @@ import TransactionSheet from './TransactionSheet'
 
 // Sub-views of the Budget tab, from the URL hash:
 //   #/budget            categories overview
-//   #/budget/inbox      transactions that need a category
+//   (#/budget/inbox moved to the Review tab, #/review)
 //   #/budget/all        every transaction this month
 //   #/budget/c/<id>     one category's transactions
 //   #/budget/plan       the budget generator
-type View = { kind: 'overview' } | { kind: 'inbox' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'category'; id: string }
+type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'category'; id: string }
 
 function viewFromHash(): View {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
-  if (parts[1] === 'inbox') return { kind: 'inbox' }
   if (parts[1] === 'all') return { kind: 'all' }
   if (parts[1] === 'plan') return { kind: 'plan' }
   if (parts[1] === 'c' && parts[2]) return { kind: 'category', id: parts[2] }
@@ -47,8 +46,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [summary, setSummary] = useState<BudgetSummary | null>(null)
   const [month, setMonth] = useState<Transaction[]>([])
   const [inbox, setInbox] = useState<Transaction[]>([])
-  const [review, setReview] = useState<Transaction[]>([])
-  const [suggestions, setSuggestions] = useState<SuggestedCategory[]>([])
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
@@ -67,19 +65,17 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   const load = useCallback(async () => {
     try {
-      const [s, m, i, c, r, sg] = await Promise.all([
+      const [s, m, i, c, rs] = await Promise.all([
         budgetSummaryApi.get(),
         budgetApi.monthTransactions(),
         budgetApi.inbox(),
         budgetApi.categories(),
-        budgetApi.review(),
-        budgetApi.suggestedCategories(),
+        budgetApi.reviewSummary(),
       ])
       setSummary(s)
       setMonth(m.items)
       setInbox(i)
-      setReview(r)
-      setSuggestions(sg)
+      setReviewSummary(rs)
       setCategories(c)
       setError(null)
     } catch (e) {
@@ -144,13 +140,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           </a>
           <div className="mt-1 flex items-center justify-between gap-3">
             <h1 className="truncate text-2xl font-bold tracking-tight">
-              {view.kind === 'inbox'
-                ? 'To review'
-                : view.kind === 'all'
-                  ? 'All transactions'
-                  : view.kind === 'plan'
-                    ? 'Build your budget'
-                    : (line?.name ?? 'Category')}
+              {view.kind === 'all' ? 'All transactions' : view.kind === 'plan' ? 'Build your budget' : (line?.name ?? 'Category')}
             </h1>
             {view.kind === 'category' && line && (
               <button type="button" onClick={() => setEditing(line)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-slate-200">
@@ -177,7 +167,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         <Overview
           summary={summary}
           inboxCount={inbox.length}
-          guessCount={review.length}
+          guessCount={reviewSummary?.month.total ?? 0}
           onAdd={() => setEditing(null)}
           onCloseMonth={(start) => act(() => budgetEditApi.closeMonth(start), 'Month closed.')}
           onSweep={(id, done) => act(() => (done ? budgetEditApi.sweepDone(id) : budgetEditApi.sweepUndo(id)), done ? 'Marked as sent.' : 'Marked as not sent.')}
@@ -206,30 +196,6 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
       {summary && view.kind === 'category' && !line && (
         <p className="mt-6 text-sm text-slate-500">This category no longer exists.</p>
-      )}
-
-      {summary && view.kind === 'inbox' && (
-        <ReviewView
-          inbox={inbox}
-          review={review}
-          suggestions={suggestions}
-          onSelect={setSelected}
-          onConfirm={(ids) => act(() => budgetApi.confirmGuesses(ids), ids.length === 1 ? 'Confirmed.' : `Confirmed ${ids.length} categories.`)}
-          onAddCategory={(s) =>
-            act(
-              () => budgetEditApi.createCategory(s.name, s.type, 0, s.isDiscretionary),
-              `Added ${s.name} and filed what fits. Give it a limit on the Budget tab.`,
-            )
-          }
-          onRerun={async () => {
-            try {
-              const r = await budgetApi.autoCategorize()
-              saved(`Filed ${r.filed} automatically · ${r.guesses} guesses to check · ${r.stillUncategorized} still need a category.`)
-            } catch (e) {
-              setError(e instanceof Error ? e.message : 'Could not auto-categorize.')
-            }
-          }}
-        />
       )}
 
       {summary && view.kind === 'all' && (
@@ -303,13 +269,13 @@ function Overview({
 
       {inboxCount + guessCount > 0 && (
         <a
-          href="#/budget/inbox"
+          href="#/review"
           className="mt-3 flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200"
         >
           <span>
             {guessCount > 0 && (
               <>
-                <span className="font-semibold">{guessCount}</span> category {guessCount === 1 ? 'guess' : 'guesses'} to check
+                <span className="font-semibold">{guessCount}</span> to confirm
               </>
             )}
             {guessCount > 0 && inboxCount > 0 && ' · '}
@@ -364,6 +330,9 @@ function Group({ group: g }: { group: BudgetGroup }) {
         </p>
       </div>
       {!spending && <p className="text-xs text-slate-400">Not part of Left to Spend</p>}
+      {g.type === 'DebtPayment' && (
+        <p className="text-xs text-slate-400">Card payments count only what you pay beyond this month’s card purchases, which already count in their own categories.</p>
+      )}
       <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
         {g.categories.map((c) => (
           <li key={c.id}>
@@ -454,7 +423,13 @@ function TransactionList({ items, empty, onSelect }: { items: Transaction[]; emp
 
 function Tag({ t }: { t: Transaction }) {
   if (t.isTransfer) return <span className="text-xs text-slate-400">{t.categoryName ?? 'Transfer'}</span>
-  if (t.categoryName && t.needsReview) return <span className="text-xs font-medium text-amber-600">{t.categoryName}?</span>
+  if (t.categoryName && t.needsReview)
+    return (
+      <span className={`text-xs ${t.unsure ? 'font-medium text-amber-600' : 'text-slate-500'}`} title="Not confirmed yet">
+        {t.categoryName}
+        {t.unsure ? '?' : <span className="text-amber-500"> •</span>}
+      </span>
+    )
   if (t.categoryName) return <span className="text-xs text-slate-500">{t.categoryName}</span>
   if (t.kind === 'Income') return <span className="text-xs text-emerald-600">Income</span>
   if (t.kind === 'PartnerContribution') return <span className="text-xs text-emerald-600">Partner</span>
@@ -641,105 +616,3 @@ function MoneyField({ label, value, onChange }: { label: string; value: string; 
   )
 }
 
-/**
- * Budget → To review: categories worth adding, automatic guesses to confirm (they already count), and
- * purchases with no category yet (they don't count until filed).
- */
-function ReviewView({
-  inbox,
-  review,
-  suggestions,
-  onSelect,
-  onConfirm,
-  onAddCategory,
-  onRerun,
-}: {
-  inbox: Transaction[]
-  review: Transaction[]
-  suggestions: SuggestedCategory[]
-  onSelect: (t: Transaction) => void
-  onConfirm: (ids: string[]) => void
-  onAddCategory: (s: SuggestedCategory) => void
-  onRerun: () => void
-}) {
-  return (
-    <>
-      {suggestions.length > 0 && (
-        <section aria-labelledby="sugg-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-          <h2 id="sugg-h" className="text-sm font-semibold">
-            Categories to add
-          </h2>
-          <p className="text-xs text-slate-500">Your bank groups these, but none of your categories fit. Adding one files them automatically.</p>
-          <ul className="mt-2 divide-y divide-slate-100">
-            {suggestions.map((s) => (
-              <li key={s.name} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span>
-                  <span className="font-medium">{s.name}</span>{' '}
-                  <span className="text-slate-500">
-                    · {s.transactionCount} {s.transactionCount === 1 ? 'transaction' : 'transactions'}
-                  </span>
-                </span>
-                <button type="button" onClick={() => onAddCategory(s)} className="shrink-0 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
-                  Add
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <section aria-labelledby="guess-h" className="mt-6">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 id="guess-h" className="text-sm font-semibold text-slate-700">
-            Check these guesses <span className="text-slate-400">({review.length})</span>
-          </h2>
-          {review.length > 1 && (
-            <button type="button" onClick={() => onConfirm(review.map((t) => t.id))} className="text-xs font-medium text-slate-700 underline">
-              All look right
-            </button>
-          )}
-        </div>
-        <p className="text-xs text-slate-500">Already counted in their category. Confirm, or tap to change.</p>
-        {review.length === 0 ? (
-          <p className="mt-2 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">Nothing to check.</p>
-        ) : (
-          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
-            {review.map((t) => (
-              <li key={t.id} className="flex items-center gap-2 pr-2">
-                <button type="button" onClick={() => onSelect(t)} className="min-w-0 flex-1 px-4 py-3 text-left hover:bg-slate-50">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-sm font-medium">{titleCase(t.merchant)}</span>
-                    <span className="shrink-0 text-sm tabular-nums">{formatSigned(t.amountCents)}</span>
-                  </div>
-                  <p className="truncate text-xs text-slate-500">
-                    {formatDay(t.date)} · <span className="font-medium text-amber-600">{t.categoryName}?</span> {t.categoryReason}
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onConfirm([t.id])}
-                  aria-label={`${t.categoryName} is right for ${titleCase(t.merchant)}`}
-                  className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
-                >
-                  ✓ Right
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="none-h" className="mt-6">
-        <h2 id="none-h" className="text-sm font-semibold text-slate-700">
-          Needs a category <span className="text-slate-400">({inbox.length})</span>
-        </h2>
-        <p className="text-xs text-slate-500">Not counted in Left to Spend until filed. Tap one to set it.</p>
-        <TransactionList items={inbox} empty="All caught up. Every purchase has a category." onSelect={onSelect} />
-      </section>
-
-      <button type="button" onClick={onRerun} className="mt-6 w-full rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
-        Auto-categorize again
-      </button>
-    </>
-  )
-}

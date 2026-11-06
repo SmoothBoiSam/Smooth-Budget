@@ -6,7 +6,7 @@ namespace SmoothBudget.Core.Transactions;
 /// <param name="BankCategory">The most specific bank label: Plaid's detailed category, or a CSV's category column.</param>
 /// <param name="BankPrimary">Plaid's primary category, when known.</param>
 /// <param name="BankConfidence">Plaid's confidence_level (VERY_HIGH, HIGH, MEDIUM, LOW, UNKNOWN), when known.</param>
-public sealed record CategorizationInput(string Merchant, string? BankCategory, string? BankPrimary = null, string? BankConfidence = null);
+public sealed record CategorizationInput(string Merchant, string? BankCategory, string? BankPrimary = null, string? BankConfidence = null, string? Description = null);
 
 /// <summary>What the user chose before for one merchant: how many times each category.</summary>
 public sealed record MerchantHistory(string Merchant, IReadOnlyDictionary<Guid, int> CategoryCounts);
@@ -14,10 +14,11 @@ public sealed record MerchantHistory(string Merchant, IReadOnlyDictionary<Guid, 
 /// <summary>A category the household doesn't have yet but that would fit a group of transactions.</summary>
 public sealed record SuggestedCategory(string Name, Budgeting.CategoryType Type, bool IsDiscretionary);
 
-/// <param name="NeedsReview">True when it's a guess: filed (and counted) but shown to the user to confirm.</param>
+/// <param name="Unsure">True when it's a real guess (ambiguous or low confidence). Every automatic category waits for the
+/// user to confirm it; this only tells "likely right" apart from "not sure" in the review list.</param>
 /// <param name="Reason">Why, in plain words, shown next to the category.</param>
 /// <param name="Suggestion">When nothing fits: a category worth adding for this kind of transaction.</param>
-public sealed record CategoryGuess(Guid? CategoryId, CategorySource Source, bool NeedsReview, string Reason, SuggestedCategory? Suggestion = null)
+public sealed record CategoryGuess(Guid? CategoryId, CategorySource Source, bool Unsure, string Reason, SuggestedCategory? Suggestion = null)
 {
     public static readonly CategoryGuess None = new(null, CategorySource.None, false, "No matching category.");
 }
@@ -29,11 +30,13 @@ public sealed record CategoryGuess(Guid? CategoryId, CategorySource Source, bool
 /// <item><b>Your merchant rules</b>: sure.</item>
 /// <item><b>What you chose before for this merchant</b>: sure when you've always picked the same category;
 /// a guess (most common choice) when you've picked different ones.</item>
+/// <item><b>Merchant patterns</b> (<see cref="SpendingThemes"/>), when the household has that category: sure. This is how
+/// EV charging is told apart from gas even though the bank labels both "gas".</item>
 /// <item><b>The bank's category</b> through <see cref="BankMap"/>: sure for clear-cut labels (gas, groceries,
 /// restaurants); a guess for ambiguous ones (superstores, a generic "food and drink" with no detail) or when
 /// Plaid itself reports MEDIUM/LOW confidence.</item>
 /// </list>
-/// A guess is still filed (so Left to Spend counts it) but flagged for the user to confirm.
+/// Every automatic category is filed (so Left to Spend counts it) but stays unconfirmed until the user reviews it.
 /// When nothing fits, it stays uncategorized and may carry a suggested new category.
 /// </summary>
 public static partial class AutoCategorizer
@@ -160,7 +163,12 @@ public static partial class AutoCategorizer
                     : $"Your most common choice for this merchant ({ranked[0].Value} of {history.CategoryCounts.Values.Sum()}).");
         }
 
-        // 3. The bank's category: the detailed label first, then the primary.
+        // 3. Merchant patterns (EV charging, rent, phone carriers, streaming, …) that map to one of the household's categories.
+        var theme = SpendingThemes.Match(input.Merchant, input.Description);
+        if (theme is not null && FindCategory(theme.Name, categoryIdsByName) is { } themed)
+            return new CategoryGuess(themed, CategorySource.Bank, false, $"Looks like {theme.Name.ToLowerInvariant()} from the merchant name.");
+
+        // 4. The bank's category: the detailed label first, then the primary.
         foreach (var label in new[] { input.BankCategory, input.BankPrimary })
         {
             if (string.IsNullOrWhiteSpace(label))

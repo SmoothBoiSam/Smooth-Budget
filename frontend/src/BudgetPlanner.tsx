@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { budgetEditApi, type Category, type GeneratorProposal } from './api'
+import CategorySetup from './CategorySetup'
 import { centsToInput, formatCents, formatDay, parseDollars } from './format'
 
 const groups: { type: Category['type']; label: string }[] = [
@@ -21,21 +22,37 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
   const [limits, setLimits] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [setup, setSetup] = useState(false)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     budgetEditApi
       .generator()
       .then((r) => {
         setP(r)
+        setSetup(r.needsCategorySetup)
         setIncome(centsToInput(r.incomeCents))
         setPartner(centsToInput(r.partnerCents))
         setLimits(Object.fromEntries(r.categories.map((c) => [c.categoryId, centsToInput(c.proposedCents)])))
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not build a proposal.'))
-  }, [])
+  }, [reload])
 
   if (error && !p) return <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>
   if (!p) return <p className="mt-10 text-center text-slate-400">Looking at your history…</p>
+
+  if (setup)
+    return (
+      <CategorySetup
+        firstTime={p.needsCategorySetup}
+        onCancel={p.needsCategorySetup ? undefined : () => setSetup(false)}
+        onDone={() => {
+          setP(null)
+          setSetup(false)
+          setReload((n) => n + 1)
+        }}
+      />
+    )
 
   const incomeCents = parseDollars(income)
   const partnerCents = parseDollars(partner)
@@ -43,6 +60,7 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
   const invalid = incomeCents === null || partnerCents === null || parsed.some((x) => x.cents === null)
   const planned = parsed.reduce((sum, x) => sum + (x.cents ?? 0), 0)
   const remainder = (incomeCents ?? 0) + (partnerCents ?? 0) - planned
+  const waiting = p.categorization.filed + p.categorization.guesses
 
   async function apply() {
     if (invalid) return
@@ -64,27 +82,21 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
           ? "There isn't a complete month of history yet, so your current limits are kept. Import a few months of CSVs or connect a bank, then come back."
           : `Based on your last ${p.monthsUsed} complete ${p.monthsUsed === 1 ? 'month' : 'months'} (${formatDay(p.months[0].start)} – ${formatDay(p.months[p.months.length - 1].end)}). Every number is editable.`}
       </p>
-      {p.createdStarterCategories && (
-        <p className="mt-3 rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-700">Started you with a standard set of categories. Rename or hide any later.</p>
-      )}
-      {p.categorization.filed + p.categorization.guesses > 0 && (
+      {waiting > 0 && (
         <p className="mt-3 rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-700">
-          Filed {p.categorization.filed} transactions automatically
-          {p.categorization.guesses > 0 && (
-            <>
-              {' '}
-              and made {p.categorization.guesses} guesses.{' '}
-              <a href="#/budget/inbox" className="font-medium underline">
-                Check the guesses
-              </a>{' '}
-              for a more accurate proposal
-            </>
-          )}
-          .
+          {waiting} automatically sorted {waiting === 1 ? 'purchase is' : 'purchases are'} counted here but not confirmed yet
+          {p.categorization.guesses > 0 && <> ({p.categorization.guesses} of them rough guesses)</>}. Confirming them in{' '}
+          <a href="#/review" className="font-medium underline">
+            To review
+          </a>{' '}
+          makes this proposal more accurate.
         </p>
       )}
+      <button type="button" onClick={() => setSetup(true)} className="mt-3 text-sm font-medium text-slate-700 underline">
+        Find categories from my history
+      </button>
       {p.uncategorizedCount > 0 && (
-        <a href="#/budget/inbox" className="mt-3 block rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
+        <a href="#/review" className="mt-3 block rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
           {p.uncategorizedCount} {p.uncategorizedCount === 1 ? 'purchase' : 'purchases'} in that period had no category and weren't counted. Categorize them for a better proposal ›
         </a>
       )}
@@ -101,7 +113,7 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
           <span className="mt-1 block text-xs text-slate-500">
             {p.partnerName
               ? `Median of what ${p.partnerName} sent each month.`
-              : 'Set your partner’s name in More so her transfers are tracked here instead of as your income.'}
+              : 'Set your partner’s name in More so their transfers are tracked here instead of as your income.'}
           </span>
         </label>
         <dl className="mt-4 grid grid-cols-3 gap-2 text-center">

@@ -1,0 +1,621 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ApiError,
+  budgetApi,
+  budgetEditApi,
+  partnerApi,
+  type Category,
+  type PartnerPurpose,
+  type ReviewScope,
+  type ReviewSummary,
+  type SettleUp,
+  type Transaction,
+} from './api'
+import { formatCents, formatDay, formatSigned, titleCase } from './format'
+
+type Scope = 'todo' | 'earlier'
+
+const typeOrder: Category['type'][] = ['Variable', 'FixedBill', 'DebtPayment', 'SavingsTransfer']
+const typeLabels: Record<Category['type'], string> = { Variable: 'Spending', FixedBill: 'Bills', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
+
+/** Partner money first, then purchases with no category, then the app's least certain guesses, then likely ones. */
+function rank(t: Transaction) {
+  if (t.isPartnerTransfer) return 0
+  if (!t.categoryId && t.kind !== 'PartnerContribution' && t.kind !== 'PartnerSettleUp') return 1
+  return t.unsure ? 2 : 3
+}
+
+/**
+ * The Review tab (DECISIONS.md 87): one place to categorize and confirm everything the app sorted on its own.
+ * Cards go one at a time with the app's guess up front; the list is for confirming the likely ones in bulk.
+ * Nothing here is settled until the user says so (DECISIONS.md 80).
+ */
+export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: () => void; onSignedOut: () => void }) {
+  const [scope, setScope] = useState<Scope>('todo')
+  const [mode, setMode] = useState<'cards' | 'list'>('cards')
+  const [queue, setQueue] = useState<Transaction[] | null>(null)
+  const [summary, setSummary] = useState<ReviewSummary | null>(null)
+  const [todoCount, setTodoCount] = useState<number | null>(null)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [partnerName, setPartnerName] = useState<string | null>(null)
+  const [settle, setSettle] = useState<SettleUp | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const fail = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.status === 401) return onSignedOut()
+      setError(e instanceof Error ? e.message : 'Something went wrong.')
+    },
+    [onSignedOut],
+  )
+
+  const loadSide = useCallback(async () => {
+    const [s, p, c] = await Promise.all([budgetApi.reviewSummary(), partnerApi.get(), budgetApi.inboxCount()])
+    setSummary(s)
+    setTodoCount(c.count + c.review)
+    setPartnerName(p.partnerName)
+    setSettle(p.partnerName ? await partnerApi.settleUp() : null)
+  }, [])
+
+  const loadQueue = useCallback(
+    async (which: Scope) => {
+      const items =
+        which === 'todo'
+          ? (await Promise.all([budgetApi.inbox(), budgetApi.review('month')])).flat()
+          : await budgetApi.review('earlier')
+      const unique = [...new Map(items.map((t) => [t.id, t])).values()]
+      setQueue(unique.sort((a, b) => rank(a) - rank(b) || b.date.localeCompare(a.date)))
+    },
+    [],
+  )
+
+  const loadCategories = useCallback(async () => setCategories(await budgetApi.categories()), [])
+
+  useEffect(() => {
+    Promise.all([loadQueue(scope), loadSide(), loadCategories()]).catch(fail)
+  }, [scope, loadQueue, loadSide, loadCategories, fail])
+
+  /** After one card: drop it locally (no jumpy reload), refresh the counts and the badge. */
+  async function done(id: string, message: string) {
+    setNotice(message)
+    setError(null)
+    setQueue((q) => q?.filter((t) => t.id !== id) ?? null)
+    onChanged()
+    await loadSide().catch(fail)
+  }
+
+  async function bulk(action: () => Promise<{ confirmed: number }>) {
+    try {
+      const r = await action()
+      setNotice(`Confirmed ${r.confirmed} ${r.confirmed === 1 ? 'purchase' : 'purchases'}.`)
+      onChanged()
+      await Promise.all([loadQueue(scope), loadSide()])
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  const counts = scope === 'todo' ? summary?.month : summary?.earlier
+  const likely = counts?.likely ?? 0
+  const reviewScope: ReviewScope = scope === 'todo' ? 'month' : 'earlier'
+  const current = queue?.[0]
+
+  return (
+    <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
+      <header className="flex items-baseline justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Review</h1>
+        <div role="tablist" aria-label="View" className="flex rounded-full bg-slate-200/70 p-0.5 text-xs font-medium">
+          {(['cards', 'list'] as const).map((m) => (
+            <button
+              key={m}
+              role="tab"
+              aria-selected={mode === m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`rounded-full px-3 py-1 ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+            >
+              {m === 'cards' ? 'One by one' : 'List'}
+            </button>
+          ))}
+        </div>
+      </header>
+      <p className="mt-1 text-sm text-slate-500">
+        New purchases are sorted for you right away. Confirm each one or change it.{' '}
+        <a href="#/budget/plan" className="font-medium text-slate-700 underline">
+          Find categories from my history
+        </a>
+      </p>
+
+      <div className="mt-4 flex gap-2" role="tablist" aria-label="Which transactions">
+        {(['todo', 'earlier'] as const).map((s) => {
+          const n = s === 'todo' ? todoCount : summary?.earlier.total
+          return (
+            <button
+              key={s}
+              role="tab"
+              aria-selected={scope === s}
+              type="button"
+              onClick={() => {
+                setScope(s)
+                setQueue(null)
+                setNotice(null)
+              }}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 ${scope === s ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+            >
+              {s === 'todo' ? 'This month' : 'Earlier months'}
+              {n != null && n > 0 && <span className="ml-1.5 opacity-70">{n}</span>}
+            </button>
+          )
+        })}
+      </div>
+
+      {settle && partnerName && <SettleUpCard settle={settle} partnerName={partnerName} onSettled={(s) => setSettle(s)} onError={fail} />}
+
+      {notice && (
+        <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </p>
+      )}
+
+      {queue === null ? (
+        <p className="mt-10 text-center text-slate-400">Loading…</p>
+      ) : queue.length === 0 ? (
+        <div className="mt-8 rounded-2xl bg-white px-5 py-8 text-center ring-1 ring-slate-200">
+          <p className="text-lg font-semibold">All caught up</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {scope === 'todo' ? 'Everything this month has a category you confirmed.' : 'Nothing from earlier months is waiting.'}
+          </p>
+          {scope === 'todo' && (summary?.earlier.total ?? 0) > 0 && (
+            <button type="button" onClick={() => setScope('earlier')} className="mt-4 text-sm font-medium text-slate-700 underline">
+              Review {summary!.earlier.total} from earlier months
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="mt-5 flex items-baseline justify-between gap-3">
+            <p className="text-sm text-slate-600">
+              <span className="font-semibold">{queue.length}</span> to go
+              {counts && counts.unsure > 0 && <span className="text-slate-400"> · {counts.unsure} the app wasn’t sure about</span>}
+            </p>
+            {likely > 1 && (
+              <button
+                type="button"
+                onClick={() => void bulk(() => budgetApi.confirmLikely(reviewScope))}
+                className="shrink-0 text-xs font-medium text-slate-700 underline"
+              >
+                Confirm {likely} likely
+              </button>
+            )}
+          </div>
+
+          {mode === 'cards' && current && (
+            <ReviewCard
+              key={current.id}
+              t={current}
+              categories={categories}
+              partnerName={partnerName}
+              onDone={(message) => void done(current.id, message)}
+              onSkip={() => setQueue((q) => (q && q.length > 1 ? [...q.slice(1), q[0]] : q))}
+              onCategoryCreated={loadCategories}
+              onError={fail}
+            />
+          )}
+
+          {mode === 'list' && (
+            <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+              {queue.slice(0, 200).map((t) => (
+                <ListRow
+                  key={t.id}
+                  t={t}
+                  onOpen={() => {
+                    setQueue((q) => (q ? [t, ...q.filter((x) => x.id !== t.id)] : q))
+                    setMode('cards')
+                  }}
+                  onConfirm={async () => {
+                    try {
+                      await budgetApi.confirmGuesses([t.id])
+                      await done(t.id, `Confirmed ${t.categoryName ?? 'it'}.`)
+                    } catch (e) {
+                      fail(e)
+                    }
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+          {mode === 'list' && queue.length > 200 && (
+            <p className="mt-2 text-center text-xs text-slate-400">Showing the first 200. Confirm some to see the rest.</p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** One transaction to confirm or change, with the app's guess up front. */
+function ReviewCard({
+  t,
+  categories,
+  partnerName,
+  onDone,
+  onSkip,
+  onCategoryCreated,
+  onError,
+}: {
+  t: Transaction
+  categories: Category[]
+  partnerName: string | null
+  onDone: (message: string) => void
+  onSkip: () => void
+  onCategoryCreated: () => Promise<void>
+  onError: (e: unknown) => void
+}) {
+  const first = partnerName ? titleCase(partnerName.split(' ')[0]) : 'your partner'
+  const partnerIn = t.isPartnerTransfer && t.amountCents < 0
+  const partnerOut = t.isPartnerTransfer && t.amountCents > 0
+  const initialPurpose: PartnerPurpose | null = partnerIn
+    ? t.kind === 'PartnerContribution'
+      ? 'contribution'
+      : 'settleUp'
+    : partnerOut
+      ? t.kind === 'PartnerSettleUp'
+        ? 'settleUp'
+        : 'myShare'
+      : null
+  const [purpose, setPurpose] = useState<PartnerPurpose | null>(initialPurpose)
+  const [categoryId, setCategoryId] = useState<string | null>(t.categoryId)
+  const [split, setSplit] = useState(t.ownerShare < 1)
+  const [rule, setRule] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const selected = categories.find((c) => c.id === categoryId) ?? null
+  const needsCategory = !partnerIn && purpose !== 'settleUp'
+  const sorted = useMemo(
+    () => [...categories].sort((a, b) => typeOrder.indexOf(a.type) - typeOrder.indexOf(b.type) || a.sortOrder - b.sortOrder),
+    [categories],
+  )
+  // The app's pick first, then spending categories; the order stays put while you tap around.
+  const suggested = categories.find((c) => c.id === t.categoryId) ?? null
+  const quick = showAll
+    ? sorted
+    : [...(suggested ? [suggested] : []), ...sorted.filter((c) => c.id !== t.categoryId && c.type === 'Variable')].slice(0, 8)
+  if (selected && !quick.some((c) => c.id === selected.id)) quick.push(selected)
+
+  async function save(override?: { transfer?: boolean }) {
+    setBusy(true)
+    try {
+      if (override?.transfer) {
+        await budgetApi.updateTransaction(t.id, null, true, null)
+        return onDone(`${titleCase(t.merchant)} is a transfer: never counted as spending.`)
+      }
+      if (purpose === 'contribution' || purpose === 'settleUp') {
+        await budgetApi.updateTransaction(t.id, null, false, null, { partnerPurpose: purpose })
+        return onDone(purpose === 'contribution' ? `Counted as ${first}’s contribution.` : 'Counted as paying back. The settle-up balance is updated.')
+      }
+      if (!categoryId) return
+      const share = split ? (t.ownerShare < 1 ? t.ownerShare : 1 - (selected?.partnerSharePercent || 50) / 100) : 1
+      await budgetApi.updateTransaction(t.id, categoryId, false, rule ? t.merchant : null, {
+        ownerShare: t.amountCents > 0 || t.kind === 'Refund' ? share : undefined,
+        partnerPurpose: purpose === 'myShare' ? 'myShare' : undefined,
+      })
+      onDone(
+        `${selected?.name ?? 'Saved'}${split ? ', split with ' + first : ''}${rule ? `. Future ${titleCase(t.merchant)} purchases go there too, for you to confirm` : ''}.`,
+      )
+    } catch (e) {
+      onError(e)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <article aria-label={`Review ${titleCase(t.merchant)}`} className="mt-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-semibold">{titleCase(t.merchant)}</h2>
+          <p className="text-sm text-slate-500">
+            {formatDay(t.date)} · {t.accountName}
+          </p>
+        </div>
+        <p className={`text-xl font-semibold tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</p>
+      </div>
+      {t.description !== t.merchant && <p className="mt-1 break-words text-xs text-slate-400">{t.description}</p>}
+      {t.categoryReason && (
+        <p className={`mt-3 rounded-lg px-3 py-2 text-xs ${t.unsure || !t.categoryId ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>
+          {t.unsure && <span className="font-semibold">Not sure. </span>}
+          {t.categoryReason}
+        </p>
+      )}
+
+      {(partnerIn || partnerOut) && (
+        <fieldset className="mt-4">
+          <legend className="text-sm font-medium text-slate-700">{partnerIn ? `What was this from ${first}?` : `What did you send ${first}?`}</legend>
+          <div className="mt-2 grid gap-2">
+            {(partnerIn
+              ? [
+                  ['contribution', 'Toward bills', `Like the monthly rent money. Counts as ${first}’s contribution in your budget.`],
+                  ['settleUp', 'Paying you back', `${first}’s share of something you bought, like groceries. Lowers what ${first} owes.`],
+                ]
+              : [
+                  ['myShare', `Your share of something ${first} bought`, 'Counts as your spending in the category you pick below.'],
+                  ['settleUp', `Paying ${first} back`, 'Settles what you owed. Not spending.'],
+                ]
+            ).map(([value, label, hint]) => (
+              <label
+                key={value}
+                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ring-1 ${purpose === value ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white ring-slate-200'}`}
+              >
+                <input type="radio" name={`purpose-${t.id}`} checked={purpose === value} onChange={() => setPurpose(value as PartnerPurpose)} className="sr-only" />
+                <span>
+                  <span className="block text-sm font-semibold">{label}</span>
+                  <span className={`block text-xs ${purpose === value ? 'text-slate-300' : 'text-slate-500'}`}>{hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
+      {needsCategory && (
+        <fieldset className="mt-4">
+          <legend className="text-sm font-medium text-slate-700">{selected ? 'Category' : 'Pick a category'}</legend>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {quick.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                aria-pressed={c.id === categoryId}
+                onClick={() => setCategoryId(c.id)}
+                className={`rounded-full px-3 py-1.5 text-sm ring-1 ${c.id === categoryId ? 'bg-slate-900 font-semibold text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+              >
+                {c.name}
+                {showAll && c.type !== 'Variable' && <span className="ml-1 text-[11px] opacity-60">{typeLabels[c.type]}</span>}
+              </button>
+            ))}
+            {!showAll && sorted.length > quick.length && (
+              <button type="button" onClick={() => setShowAll(true)} className="rounded-full px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-dashed ring-slate-300">
+                All categories…
+              </button>
+            )}
+            <button type="button" onClick={() => setAdding(true)} className="rounded-full px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-dashed ring-slate-300">
+              + New
+            </button>
+          </div>
+          {adding && (
+            <NewCategory
+              suggestion={titleCase(t.merchant)}
+              onCancel={() => setAdding(false)}
+              onCreated={async (id) => {
+                await onCategoryCreated()
+                setCategoryId(id)
+                setAdding(false)
+              }}
+              onError={onError}
+            />
+          )}
+        </fieldset>
+      )}
+
+      {needsCategory && selected && !partnerOut && (
+        <div className="mt-4 grid gap-2">
+          {partnerName && (t.amountCents > 0 || t.kind === 'Refund') && (
+            <label className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
+              <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} className="size-5" />
+              <span className="text-sm">
+                Split with {first}
+                <span className="block text-xs text-slate-500">
+                  {split
+                    ? `Only your ${formatCents(Math.round(t.amountCents * (t.ownerShare < 1 ? t.ownerShare : 1 - (selected.partnerSharePercent || 50) / 100)))} counts; ${first} owes you the rest.`
+                    : 'Like a grocery run or a dinner you shared.'}
+                </span>
+              </span>
+            </label>
+          )}
+          <label className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
+            <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="size-5" />
+            <span className="text-sm">
+              Always {selected.name} for {titleCase(t.merchant)}
+              <span className="block text-xs text-slate-500">Leave this off for stores where it varies, like a supercenter.</span>
+            </span>
+          </label>
+        </div>
+      )}
+
+      <button
+        type="button"
+        disabled={busy || (needsCategory && !categoryId)}
+        onClick={() => void save()}
+        className="mt-5 w-full rounded-xl bg-slate-900 py-3.5 text-base font-semibold text-white disabled:opacity-40"
+      >
+        {busy
+          ? 'Saving…'
+          : !needsCategory
+            ? '✓ Confirm'
+            : selected
+              ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
+              : 'Pick a category'}
+      </button>
+      <div className="mt-2 flex justify-between text-sm">
+        <button type="button" onClick={onSkip} className="py-2 font-medium text-slate-500">
+          Skip for now
+        </button>
+        {!t.isPartnerTransfer && (
+          <button type="button" onClick={() => void save({ transfer: true })} disabled={busy} className="py-2 font-medium text-slate-500">
+            It’s a transfer
+          </button>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function NewCategory({
+  suggestion,
+  onCancel,
+  onCreated,
+  onError,
+}: {
+  suggestion: string
+  onCancel: () => void
+  onCreated: (id: string) => Promise<void>
+  onError: (e: unknown) => void
+}) {
+  const [name, setName] = useState('')
+  const [bill, setBill] = useState(false)
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="mt-3 rounded-xl bg-slate-50 p-3">
+      <label className="block">
+        <span className="text-xs text-slate-500">New category name</span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={bill ? suggestion : 'e.g. Household'}
+          className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base"
+        />
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={bill} onChange={(e) => setBill(e.target.checked)} className="size-4" />
+        It’s a bill or subscription (its own line in the budget)
+      </label>
+      <div className="mt-3 flex gap-2">
+        <button type="button" onClick={onCancel} className="flex-1 rounded-lg bg-white py-2 text-sm font-medium ring-1 ring-slate-200">
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={busy || !(name.trim() || (bill && suggestion))}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              const r = await budgetEditApi.createCategory(name.trim() || suggestion, bill ? 'FixedBill' : 'Variable', 0, false)
+              await onCreated(r.id)
+            } catch (e) {
+              onError(e)
+              setBusy(false)
+            }
+          }}
+          className="flex-1 rounded-lg bg-slate-900 py-2 text-sm font-semibold text-white disabled:opacity-40"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void; onConfirm: () => void }) {
+  const partnerKind = t.kind === 'PartnerContribution' ? 'Contribution' : t.kind === 'PartnerSettleUp' ? 'Paying back' : null
+  const label = t.categoryName ?? partnerKind
+  return (
+    <li className="flex items-center gap-2 pr-2">
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 px-4 py-3 text-left hover:bg-slate-50">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="truncate text-sm font-medium">{titleCase(t.merchant)}</span>
+          <span className={`shrink-0 text-sm tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</span>
+        </div>
+        <p className="truncate text-xs text-slate-500">
+          {formatDay(t.date)} ·{' '}
+          {label ? (
+            <span className={`font-medium ${t.unsure ? 'text-amber-600' : 'text-slate-700'}`}>
+              {t.unsure ? `Not sure: ${label}?` : label}
+            </span>
+          ) : (
+            <span className="font-medium text-amber-600">Needs a category</span>
+          )}
+          {t.ownerShare < 1 && <span className="text-slate-400"> · split</span>}
+        </p>
+      </button>
+      {label && !t.isPartnerTransfer ? (
+        <button
+          type="button"
+          onClick={onConfirm}
+          aria-label={`${label} is right for ${titleCase(t.merchant)}`}
+          className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+        >
+          ✓ Right
+        </button>
+      ) : (
+        <button type="button" onClick={onOpen} className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">
+          Sort
+        </button>
+      )}
+    </li>
+  )
+}
+
+/** Who owes whom from split purchases and paying back (SPEC 4.8), with "mark settled". */
+function SettleUpCard({
+  settle: s,
+  partnerName,
+  onSettled,
+  onError,
+}: {
+  settle: SettleUp
+  partnerName: string
+  onSettled: (s: SettleUp) => void
+  onError: (e: unknown) => void
+}) {
+  const first = titleCase(partnerName.split(' ')[0])
+  const [open, setOpen] = useState(false)
+  const owed = s.owedToYouCents
+  if (owed === 0 && s.items.length === 0) return null
+  return (
+    <section aria-label="Settle up" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Settle up with {first}</p>
+          <p className="text-lg font-semibold tabular-nums">
+            {owed > 0 ? `${first} owes you ${formatCents(owed)}` : owed < 0 ? `You owe ${first} ${formatCents(-owed)}` : `You’re square with ${first}`}
+          </p>
+        </div>
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="shrink-0 text-xs font-medium text-slate-600 underline">
+          {open ? 'Hide' : 'Details'}
+        </button>
+      </div>
+      {open && (
+        <>
+          <p className="mt-2 text-xs text-slate-500">
+            {first}’s share of split purchases {formatCents(s.splitSharesCents)} − paid you back {formatCents(s.paidBackByPartnerCents)} + you paid back{' '}
+            {formatCents(s.paidBackByYouCents)}
+            {s.settledThrough && ` · since you marked it settled on ${formatDay(s.settledThrough)}`}.
+          </p>
+          <ul className="mt-2 divide-y divide-slate-100 text-sm">
+            {s.items.slice(0, 8).map((i) => (
+              <li key={i.transactionId} className="flex justify-between gap-3 py-1.5">
+                <span className="min-w-0 truncate">
+                  {formatDay(i.date)} · {i.kind === 'split' ? `${first}’s share of ${titleCase(i.merchant)}` : i.kind === 'paidByPartner' ? `${first} paid you back` : `You paid ${first} back`}
+                </span>
+                <span className="shrink-0 tabular-nums text-slate-600">{formatCents(Math.abs(i.effectCents))}</span>
+              </li>
+            ))}
+          </ul>
+          {owed !== 0 && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!window.confirm(`Mark everything with ${first} as settled? The balance starts over from today.`)) return
+                try {
+                  onSettled(await partnerApi.markSettled())
+                } catch (e) {
+                  onError(e)
+                }
+              }}
+              className="mt-3 w-full rounded-xl bg-slate-100 py-2.5 text-sm font-semibold text-slate-700"
+            >
+              Mark settled
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  )
+}

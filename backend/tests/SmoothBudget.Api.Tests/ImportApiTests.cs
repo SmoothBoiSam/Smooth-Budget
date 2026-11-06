@@ -141,7 +141,7 @@ public class ImportApiTests(TestApp app) : IClassFixture<TestApp>
         var summary = (await s.Client.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!;
         Assert.Equal(225_09, summary.TotalVariableSpentCents);
         Assert.Equal(1_010_00 - 225_09, summary.LeftToSpendCents);
-        Assert.Equal(3, summary.UncategorizedCount);
+        Assert.Equal(2, summary.UncategorizedCount); // the rent is recognized by its name
     }
 
     [Fact]
@@ -150,9 +150,13 @@ public class ImportApiTests(TestApp app) : IClassFixture<TestApp>
         var s = await ImportAllAsync();
         var inbox = (await s.Client.GetFromJsonAsync<List<TransactionDto>>("/api/transactions/inbox", Json))!;
 
-        Assert.Equal(["MYSTERY MERCHANT", "KING SOOPERS DENVER CO", "MAPLE COURT APTS WEB PMTS"], inbox.Select(t => t.Merchant));
+        Assert.Equal(["MYSTERY MERCHANT", "KING SOOPERS DENVER CO"], inbox.Select(t => t.Merchant));
         var count = await s.Client.GetFromJsonAsync<JsonElement>("/api/transactions/inbox/count");
-        Assert.Equal(3, count.GetProperty("count").GetInt32());
+        Assert.Equal(2, count.GetProperty("count").GetInt32());
+
+        // The bank didn't label the rent, but its name says rent: it's filed there and waits for you to confirm.
+        var rent = (await Month(s.Client)).Single(t => t.Merchant == "MAPLE COURT APTS WEB PMTS");
+        Assert.Equal(("Rent", true), (rent.CategoryName, rent.NeedsReview));
     }
 
     [Fact]

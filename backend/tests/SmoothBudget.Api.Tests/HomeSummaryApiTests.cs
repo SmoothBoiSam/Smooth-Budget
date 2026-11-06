@@ -173,7 +173,8 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
 
         Assert.Equal((-22_35L, "over"), (Cat(b, "Eating out").RemainingCents, Cat(b, "Eating out").Health));
         Assert.Equal((30_48L, "low"), (Cat(b, "Groceries").RemainingCents, Cat(b, "Groceries").Health)); // 6.8% left
-        Assert.Equal(300_00, Cat(b, "Credit card payment").SpentCents); // the card payment, a transfer, counts as paid
+        // The $300 card payment only covered this month's card purchases, which already count in their categories.
+        Assert.Equal(0, Cat(b, "Credit card payment").SpentCents);
         Assert.Equal(76_53, b.LeftToSpendCents);
     }
 

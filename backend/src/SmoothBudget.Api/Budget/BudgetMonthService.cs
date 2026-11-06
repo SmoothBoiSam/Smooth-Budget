@@ -6,7 +6,7 @@ using SmoothBudget.Core.Budgeting;
 namespace SmoothBudget.Api.Budget;
 
 /// <summary>A category with the limit that applies in one particular budget month.</summary>
-public sealed record MonthCategory(Guid Id, string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, int SortOrder, bool HasMonthOverride)
+public sealed record MonthCategory(Guid Id, string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, int SortOrder, bool HasMonthOverride, int PartnerSharePercent = 0)
 {
     public BudgetCategory ForCalculator => new(Id, Type, LimitCents);
 }
@@ -89,7 +89,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             var ids = perMonth.Where(p => p.ClosingLimitCents is not null).Select(p => p.CategoryId).ToList();
             var cats = await db.Categories.AsNoTracking().Where(c => ids.Contains(c.Id)).ToListAsync(ct);
             categories = cats.Select(c => new MonthCategory(c.Id, c.Name, c.Type, perMonth.Single(p => p.CategoryId == c.Id).ClosingLimitCents!.Value,
-                c.IsDiscretionary, c.SortOrder, false)).ToList();
+                c.IsDiscretionary, c.SortOrder, false, c.PartnerSharePercent)).ToList();
         }
         else
         {
@@ -97,14 +97,15 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             categories = cats.Select(c =>
             {
                 var o = perMonth.SingleOrDefault(p => p.CategoryId == c.Id)?.LimitOverrideCents;
-                return new MonthCategory(c.Id, c.Name, c.Type, o ?? c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder, o is not null);
+                return new MonthCategory(c.Id, c.Name, c.Type, o ?? c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder, o is not null, c.PartnerSharePercent);
             }).ToList();
         }
         categories = categories.OrderBy(c => c.SortOrder).ThenBy(c => c.Name).ToList();
 
         var transactions = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.Date >= range.Start && t.Date <= range.End && t.Account.IncludedInBudget)
-            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind))
+            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind,
+                t.Account.Type == AccountType.CreditCard))
             .ToListAsync(ct);
 
         var carried = await CarriedInAsync(householdId, row, ct, depth);

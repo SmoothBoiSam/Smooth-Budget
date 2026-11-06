@@ -174,7 +174,10 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
                                 : p.Merchant.Contains("Zelle payment from Partner", StringComparison.Ordinal) ? TransactionKind.PartnerContribution
                                 : TransactionKind.Income)
                             : TransactionKind.Purchase,
-                    CategorySource = p.Category is null ? CategorySource.None : p.Transfer ? CategorySource.Transfer : CategorySource.Bank,
+                    // Past months count as already reviewed; this month's purchases wait for the user to confirm them.
+                    CategorySource = p.Category is null ? CategorySource.None : p.Transfer ? CategorySource.Transfer : back == 0 ? CategorySource.Bank : CategorySource.User,
+                    NeedsReview = back == 0 && p.Category is not null && !p.Transfer,
+                    CategoryReason = p.Category is null || p.Transfer ? null : back == 0 ? "Demo: filed automatically." : "Demo: reviewed.",
                     Pending = back == 0 && date >= today.AddDays(-1), Source = DataSource.Seed, CreatedUtc = now,
                 });
             }

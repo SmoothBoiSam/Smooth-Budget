@@ -34,6 +34,8 @@ public class Household
 
     /// <summary>The partner's name as it appears on incoming transfers ("Zelle payment from ..."); set in Settings.</summary>
     public string? PartnerName { get; set; }
+    /// <summary>The last day the user marked the settle-up balance as settled.</summary>
+    public DateOnly? PartnerSettledThrough { get; set; }
 
     public DateTime CreatedUtc { get; set; }
 
@@ -109,6 +111,8 @@ public class Category
 
     /// <summary>Eating out, shopping, entertainment: trimmed first when income falls short (SPEC section 3).</summary>
     public bool IsDiscretionary { get; set; }
+    /// <summary>Split with the partner by default: her share of each purchase, in percent (0 = not split).</summary>
+    public int PartnerSharePercent { get; set; }
 
     public bool IsSplit { get; set; }
     public decimal SplitPercent { get; set; } = 50m;
@@ -148,8 +152,11 @@ public class Transaction
     /// <summary>Plaid's confidence in its category (VERY_HIGH, HIGH, MEDIUM, LOW, UNKNOWN), when known.</summary>
     public string? BankConfidence { get; set; }
 
-    /// <summary>The category is an automatic guess the user should confirm. It still counts in the budget.</summary>
+    /// <summary>Filed automatically and not yet confirmed by the user. It still counts in the budget.</summary>
     public bool NeedsReview { get; set; }
+
+    /// <summary>The automatic category is a real guess (ambiguous or low confidence), not just "likely right".</summary>
+    public bool CategoryUnsure { get; set; }
 
     /// <summary>Why it has this category, in plain words ("The bank calls it ...").</summary>
     public string? CategoryReason { get; set; }
@@ -170,6 +177,8 @@ public class Transaction
 
     /// <summary>Owner's share, 0..1. 1 = all of it.</summary>
     public decimal SplitFactor { get; set; } = 1m;
+    /// <summary>Money to or from the partner (by the name in Settings): its purpose waits for the user (DECISIONS.md 86).</summary>
+    public bool IsPartnerTransfer { get; set; }
 
     public long PartnerOffsetCents { get; set; }
     public DataSource Source { get; set; }

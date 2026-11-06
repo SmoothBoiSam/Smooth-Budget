@@ -10,6 +10,7 @@ using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Import;
 using SmoothBudget.Api.Seeding;
+using SmoothBudget.Api.Transactions;
 using SmoothBudget.Core.Budgeting;
 
 namespace SmoothBudget.Api.Tests;
@@ -272,7 +273,7 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task A_new_household_gets_starter_categories_from_the_generator()
+    public async Task A_new_household_has_no_premade_categories()
     {
         At(2026, 11, 20);
         var client = app.CreateClient();
@@ -280,10 +281,9 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
 
         var g = (await client.GetFromJsonAsync<GeneratorDto>("/api/budget/generator", Json))!;
 
-        Assert.True(g.CreatedStarterCategories);
-        Assert.Equal(0, g.MonthsUsed);
-        Assert.Contains(g.Categories, c => c.Name == "Groceries");
-        Assert.All(g.Categories, c => Assert.Equal(0, c.ProposedCents));
+        Assert.True(g.NeedsCategorySetup); // categories come from the user's own transactions
+        Assert.Empty(g.Categories);
+        Assert.Empty((await client.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!);
     }
 
     [Fact]

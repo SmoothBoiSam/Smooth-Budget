@@ -102,7 +102,7 @@ public static class BudgetGenerator
                 why = c.Type switch
                 {
                     CategoryType.FixedBill => median == 0 ? $"Not paid in the last {Months(n)}." : $"Usually {Money(median)} a month (median of {Months(n)}).",
-                    CategoryType.DebtPayment => median == 0 ? $"No card payments in the last {Months(n)}." : $"You paid a median of {Money(median)} a month toward cards.",
+                    CategoryType.DebtPayment => median == 0 ? $"Nothing paid beyond your card purchases in the last {Months(n)}." : $"You paid a median of {Money(median)} a month beyond what you bought on the cards (the purchases already count in their categories).",
                     _ => median == 0 ? $"No transfers to savings in the last {Months(n)}." : $"You moved a median of {Money(median)} a month to savings.",
                 };
             }

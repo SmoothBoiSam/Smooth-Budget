@@ -18,7 +18,9 @@ public sealed record BudgetTransaction(
     bool IsTransfer = false,
     bool Pending = false,
     decimal SplitFactor = 1m,
-    TransactionKind Kind = TransactionKind.Purchase);
+    TransactionKind Kind = TransactionKind.Purchase,
+    // Charged to a credit card account (its purchases are what the card payments pay for).
+    bool OnCreditCard = false);
 
 public enum LeftToSpendStatus
 {

@@ -72,6 +72,7 @@ builder.Services.AddScoped<DemoSeeder>();
 builder.Services.AddScoped<TransferDetectionService>();
 builder.Services.AddScoped<ImportService>();
 builder.Services.AddScoped<CategorizationService>();
+builder.Services.AddScoped<CategoryDiscoveryService>();
 
 // Plaid (milestone 3). Credentials and the token-encryption key come only from environment variables.
 var plaidOptions = new PlaidOptions

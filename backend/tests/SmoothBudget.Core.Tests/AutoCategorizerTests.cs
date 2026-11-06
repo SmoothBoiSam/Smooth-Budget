@@ -25,7 +25,7 @@ public class AutoCategorizerTests
     public void Clear_bank_categories_are_filed_without_review(string detailed, string primary, string? confidence)
     {
         var g = G("KING SOOPERS", detailed, primary, confidence);
-        Assert.Equal((Groceries, CategorySource.Bank, false), (g.CategoryId, g.Source, g.NeedsReview));
+        Assert.Equal((Groceries, CategorySource.Bank, false), (g.CategoryId, g.Source, g.Unsure));
         Assert.Equal("The bank calls it food and drink: groceries.", g.Reason);
     }
 
@@ -33,7 +33,7 @@ public class AutoCategorizerTests
     public void Low_or_medium_bank_confidence_is_filed_as_a_guess()
     {
         var g = G("CORNER SPOT", "FOOD_AND_DRINK_RESTAURANT", "FOOD_AND_DRINK", "MEDIUM");
-        Assert.Equal((EatingOut, true), (g.CategoryId, g.NeedsReview));
+        Assert.Equal((EatingOut, true), (g.CategoryId, g.Unsure));
         Assert.Contains("isn't sure", g.Reason);
     }
 
@@ -41,7 +41,7 @@ public class AutoCategorizerTests
     public void Ambiguous_labels_are_guesses_even_when_the_bank_is_confident()
     {
         var superstore = G("WAL-MART AURORA CO", "GENERAL_MERCHANDISE_SUPERSTORES", "GENERAL_MERCHANDISE", "VERY_HIGH");
-        Assert.Equal((Shopping, true), (superstore.CategoryId, superstore.NeedsReview)); // could be groceries
+        Assert.Equal((Shopping, true), (superstore.CategoryId, superstore.Unsure)); // could be groceries
         Assert.Contains("more than one thing", superstore.Reason);
     }
 
@@ -50,17 +50,17 @@ public class AutoCategorizerTests
     {
         // Detailed label not mapped (or not stored); only "food and drink" is known.
         var g = G("SOME PLACE", "FOOD_AND_DRINK", null, null);
-        Assert.Equal((EatingOut, true), (g.CategoryId, g.NeedsReview));
+        Assert.Equal((EatingOut, true), (g.CategoryId, g.Unsure));
         var unmappedDetail = G("SOME PLACE", "FOOD_AND_DRINK_SOMETHING_NEW", "FOOD_AND_DRINK", "HIGH");
-        Assert.Equal((EatingOut, true), (unmappedDetail.CategoryId, unmappedDetail.NeedsReview));
+        Assert.Equal((EatingOut, true), (unmappedDetail.CategoryId, unmappedDetail.Unsure));
     }
 
     [Fact]
     public void Csv_bank_categories_map_too()
     {
-        Assert.Equal((Groceries, false), (G("FRESH MARKET", "Grocery").CategoryId, G("FRESH MARKET", "Grocery").NeedsReview));
-        Assert.Equal((EatingOut, false), (G("TAQUERIA UNO", "Food & Drink").CategoryId, G("TAQUERIA UNO", "Food & Drink").NeedsReview));
-        Assert.True(G("STREAMCO", "Entertainment").NeedsReview); // often a subscription
+        Assert.Equal((Groceries, false), (G("FRESH MARKET", "Grocery").CategoryId, G("FRESH MARKET", "Grocery").Unsure));
+        Assert.Equal((EatingOut, false), (G("TAQUERIA UNO", "Food & Drink").CategoryId, G("TAQUERIA UNO", "Food & Drink").Unsure));
+        Assert.True(G("STREAMCO", "Entertainment").Unsure); // often a subscription
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class AutoCategorizerTests
     {
         var g = G("KING SOOPERS FUEL", "FOOD_AND_DRINK_GROCERIES", "FOOD_AND_DRINK", "HIGH",
             rules: [new MerchantRule(Gas, "KING SOOPERS FUEL", DateTime.UtcNow)]);
-        Assert.Equal((Gas, CategorySource.Rule, false), (g.CategoryId, g.Source, g.NeedsReview));
+        Assert.Equal((Gas, CategorySource.Rule, false), (g.CategoryId, g.Source, g.Unsure));
     }
 
     [Fact]
@@ -76,11 +76,11 @@ public class AutoCategorizerTests
     {
         var consistent = G("VOLT CHARGERS CO", "TRANSPORTATION_GAS", "TRANSPORTATION", "HIGH",
             history: new MerchantHistory("VOLT CHARGERS CO", new Dictionary<Guid, int> { [Shopping] = 3 }));
-        Assert.Equal((Shopping, CategorySource.Learned, false), (consistent.CategoryId, consistent.Source, consistent.NeedsReview));
+        Assert.Equal((Shopping, CategorySource.Learned, false), (consistent.CategoryId, consistent.Source, consistent.Unsure));
         Assert.Equal("You filed 3 earlier purchases here the same way.", consistent.Reason);
 
         var mixed = G("WAL-MART", null, history: new MerchantHistory("WAL-MART", new Dictionary<Guid, int> { [Groceries] = 4, [Shopping] = 1 }));
-        Assert.Equal((Groceries, true), (mixed.CategoryId, mixed.NeedsReview));
+        Assert.Equal((Groceries, true), (mixed.CategoryId, mixed.Unsure));
         Assert.Contains("4 of 5", mixed.Reason);
     }
 
@@ -102,7 +102,7 @@ public class AutoCategorizerTests
         var withTransport = new Dictionary<string, Guid>(Cats) { ["Transportation"] = Transportation };
         var g = G("RTD DENVER", "TRANSPORTATION_PUBLIC_TRANSIT", "TRANSPORTATION", "HIGH", cats: withTransport);
         Assert.Equal(Transportation, g.CategoryId);
-        Assert.True(g.NeedsReview); // suggestion-only mappings are always confirmed once
+        Assert.True(g.Unsure); // suggestion-only mappings are always confirmed once
     }
 
     [Fact]

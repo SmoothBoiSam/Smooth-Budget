@@ -18,7 +18,9 @@ public record BudgetCategoryLineDto(
     long RemainingCents,
     // "onTrack", "low" or "over".
     string Health,
-    int TransactionCount);
+    int TransactionCount,
+    // Split with the partner by default: her share in percent (0 = not split).
+    int PartnerSharePercent = 0);
 
 public record BudgetGroupDto(
     string Type,
@@ -91,7 +93,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
                 {
                     var l = lines[c.Id];
                     return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.IsDiscretionary, l.LimitCents, c.HasMonthOverride,
-                        l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount);
+                        l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount, c.PartnerSharePercent);
                 }).ToList();
                 return new BudgetGroupDto(g.Type.ToString(), g.Label, g.Type == CategoryType.Variable,
                     items.Sum(i => i.LimitCents), items.Sum(i => i.SpentCents), items);

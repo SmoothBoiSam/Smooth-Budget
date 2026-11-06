@@ -193,9 +193,9 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
         )}
         {s.reviewCount > 0 && (
           <li>
-            <a href="#/budget/inbox" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
+            <a href="#/review" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
               <span>
-                {s.reviewCount} category {s.reviewCount === 1 ? "guess" : "guesses"} this month to check
+                {s.reviewCount} {s.reviewCount === 1 ? "purchase" : "purchases"} this month to confirm
               </span>
               <span aria-hidden className="font-semibold">›</span>
             </a>
@@ -203,7 +203,7 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
         )}
         {s.uncategorizedCount > 0 && (
           <li>
-            <a href="#/budget/inbox" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
+            <a href="#/review" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
               <span>
                 {s.uncategorizedCount} {s.uncategorizedCount === 1 ? 'purchase' : 'purchases'} this month{' '}
                 {s.uncategorizedCount === 1 ? 'needs' : 'need'} a category and {s.uncategorizedCount === 1 ? "isn't" : "aren't"} counted yet
