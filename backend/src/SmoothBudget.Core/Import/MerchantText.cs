@@ -25,6 +25,7 @@ public static partial class MerchantText
         s = ChaseCardPurchasePrefix().Replace(s, "");
         s = TrailingCardDigits().Replace(s, "");
         s = ProcessorPrefix().Replace(s, "");
+        s = AchIdSuffix().Replace(s, "");
 
         var tokens = s.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Where(t => !t.Any(char.IsDigit) && !t.StartsWith('#') && !t.StartsWith('•'))
@@ -48,4 +49,8 @@ public static partial class MerchantText
 
     [GeneratedRegex(@"^(SQ ?\*|TST ?\*|PY ?\*|SP ?\*|DD ?\*|PAYPAL ?\*|GOOGLE ?\*|IC ?\*)\s*")]
     private static partial Regex ProcessorPrefix();
+
+    /// <summary>ACH boilerplate such as "WEB ID: 9999999999" or "PPD ID: …" and everything after it.</summary>
+    [GeneratedRegex(@"\s+(WEB|PPD|CCD|TEL|ARC|IAT) ID\b.*$")]
+    private static partial Regex AchIdSuffix();
 }

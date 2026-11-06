@@ -51,6 +51,8 @@ public static class TransferDetector
     [
         "PAYMENT TO CHASE CARD", "CHASE CREDIT CRD", "CRD AUTOPAY", "CARD AUTOPAY", "APPLECARD GSBANK",
         "APPLE CARD PAYMENT", "GSBANK PAYMENT", "CREDIT CARD PAYMENT",
+        // Store cards (e.g. Amazon's "AMZ_STORECRD_PMT"), seen in the owner's real checking export.
+        "STORECRD_PMT", "STORECRD PMT", "STORE CRD PMT",
     ];
 
     public static readonly string[] OwnTransferPatterns =

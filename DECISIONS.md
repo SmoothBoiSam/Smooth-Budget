@@ -57,3 +57,13 @@ Choices made where SPEC.md is silent. Newest at the bottom of each milestone.
 | 39 | **Category health:** spending categories are red when over, amber with under 15% left, and green otherwise (the same 15% rule as Home). Bills, debt and savings only show "over" or not, because a fully paid bill is good, not "low". | Consistent with decision 5. |
 | 40 | **Home and Budget load their data through one shared loader** (`CurrentMonthLoader`), so the two screens can't disagree. | One source of truth. |
 | 41 | **Known gap:** a subscription the bank labels as a spending category (e.g. a streaming service under "Entertainment") counts against that spending category until you move it. For now, set its category to Subscriptions with "Always use this category". Automatic recurring detection comes in milestone 6. | Bank categories don't distinguish subscriptions. |
+
+## Checked against your real exports (Nov 2026)
+
+The three real exports (Chase checking, Chase credit, Apple Card; about a year, 1,345 rows) were dry-run locally through the Core parser and transfer detector. Nothing was imported or committed. Results: 0 parse errors; 32 of 33 card-side payments matched to their checking debit, and the one left over (10/31/2026) is after the checking export ends. It's still treated as a payment.
+
+| # | Decision | Why |
+|---|----------|-----|
+| 42 | **Store card payments count as card payments** (`STORECRD_PMT`, e.g. Amazon's store card). | They appeared in the real checking export and would otherwise have looked like purchases. |
+| 43 | **ACH boilerplate is stripped from merchant names** ("WEB ID: …", "PPD ID: …" and the rest of the line), so "MAPLE COURT RENT WEB ID" becomes "MAPLE COURT RENT". Fingerprints use the description, so duplicate detection is unaffected. | Cleaner names and rule patterns. |
+| 44 | **Zelle and Venmo descriptions keep the other person's display name** (e.g. "ZELLE PAYMENT TO …"). | The partner's Zelle name is needed to match contributions (SPEC Appendix D, milestone 7). CLAUDE.md's no-names rule covers pay stubs and schedules. |

@@ -124,6 +124,7 @@ public class TransferDetectorTests
     [InlineData("APPLECARD GSBANK PAYMENT ••8901 WEB ID: ••9999")]
     [InlineData("CHASE CREDIT CRD AUTOPAY PPD ID: ••3456")]
     [InlineData("Payment to Chase card ending in 4321 11/14")]
+    [InlineData("AMZ_STORECRD_PMT PAYMENT ••4321 WEB ID: ••1234")] // a store card that isn't imported
     public void Known_card_payment_descriptions_are_transfers_even_when_the_card_file_is_not_imported(string desc)
     {
         var sent = T(Checking, 15, 150_00, TransactionKind.Purchase, desc);

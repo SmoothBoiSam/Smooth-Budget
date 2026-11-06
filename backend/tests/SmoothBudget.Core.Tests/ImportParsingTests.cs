@@ -41,6 +41,10 @@ public class MerchantTextTests
     [InlineData("FUEL STOP #123", "FUEL STOP")]
     [InlineData("  taqueria   uno ", "TAQUERIA UNO")]
     [InlineData("7-ELEVEN", "7-ELEVEN")] // nothing left after stripping: fall back to the whole text
+    [InlineData("MAPLE COURT RENT WEB ID: ••6789", "MAPLE COURT RENT")] // ACH boilerplate (seen in real exports)
+    [InlineData("PAYROLL DEMO AIR PPD ID: ••7890", "PAYROLL DEMO AIR")]
+    [InlineData("APPLECARD GSBANK PAYMENT ••8901 WEB ID: ••9999", "APPLECARD GSBANK PAYMENT")]
+    [InlineData("MAPLE COURT APTS WEB PMTS", "MAPLE COURT APTS WEB PMTS")] // "WEB" alone is not boilerplate
     public void Normalize_produces_a_stable_merchant_key(string input, string expected)
     {
         Assert.Equal(expected, MerchantText.Normalize(input));
