@@ -65,7 +65,7 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
     public async Task Rent_example_the_800_offsets_rent_and_the_budget_comes_out_the_same_as_counting_it_as_income()
     {
         var (c, _, rent, _) = await SetupAsync();
-        await c.PutAsJsonAsync("/api/budget/months/current/income", new IncomeRequest(2_532_86, 800_00), Json);
+        await c.PutAsJsonAsync("/api/budget/months/current/income", new IncomeRequest(2_460_86, 800_00), Json);
         var asIncome = await Budget(c);
 
         var res = await c.PostAsJsonAsync("/api/partner/contributions", new ArrangementRequest(rent, 800_00), Json);

@@ -363,11 +363,11 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         await c.PatchAsJsonAsync($"/api/transactions/{jane.Id}", new UpdateTransactionRequest(null, false, null, PartnerPurpose: "contribution"), Json);
         Assert.Equal("PartnerContribution", (await All(c)).Single(t => t.Id == jane.Id).Kind);
 
-        await c.PutAsJsonAsync("/api/budget/months/current/income", new IncomeRequest(2_532_86, 800_00), Json);
+        await c.PutAsJsonAsync("/api/budget/months/current/income", new IncomeRequest(2_460_86, 800_00), Json);
         var b = (await c.GetFromJsonAsync<BudgetSummaryDto>("/api/budget/summary", Json))!;
-        Assert.Equal((2_532_86L, 800_00L), (b.IncomeExpectedCents, b.PartnerExpectedCents));
+        Assert.Equal((2_460_86L, 800_00L), (b.IncomeExpectedCents, b.PartnerExpectedCents));
         Assert.Equal((1_700_86L + 25_00L, 800_00L), (b.IncomeReceivedCents, b.PartnerReceivedCents));
-        Assert.Equal(2_532_86 + 800_00 - b.PlannedCents, b.UnallocatedCents);
+        Assert.Equal(2_460_86 + 800_00 - b.PlannedCents, b.UnallocatedCents);
 
         await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto(null), Json);
         Assert.Equal("Income", (await All(c)).Single(t => t.Description.Contains("JANE PARTNER")).Kind);
