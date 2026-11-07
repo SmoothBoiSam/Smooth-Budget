@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
+import { ErrorNotice, Loading } from './ui'
 import { centsToInput, formatCents, formatDay, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -63,7 +64,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
     return (
       <Page>
         <h1 className="text-2xl font-bold tracking-tight">Debt</h1>
-        {error ? <Alert text={error} /> : <p className="mt-10 text-center text-slate-400">Loading…</p>}
+        {error ? <ErrorNotice message={error} onRetry={() => void load()} /> : <Loading />}
       </Page>
     )
   }

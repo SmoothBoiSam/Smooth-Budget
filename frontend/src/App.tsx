@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, budgetApi, type Me } from './api'
+import { ApiError, api, budgetApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BillsScreen from './BillsScreen'
 import BudgetScreen from './BudgetScreen'
@@ -12,6 +12,8 @@ import ReviewScreen from './ReviewScreen'
 import PaydayScreen from './PaydayScreen'
 import PaySetupScreen from './PaySetupScreen'
 import SavingsScreen from './SavingsScreen'
+import { saved, useOnline } from './offline'
+import { OfflineBar } from './ui'
 
 function currentRoute(): Route {
   const hash = window.location.hash.replace(/^#\/?/, '')
@@ -29,11 +31,19 @@ export default function App() {
   const [inboxCount, setInboxCount] = useState(0)
 
   useEffect(() => {
-    // Any failure (401, or the API being down) lands on the sign-in screen, which reports its own errors.
+    // Offline (or the server down), the account saved on this phone opens the app to the last known numbers.
+    // Anything else (401) lands on the sign-in screen, which reports its own errors.
     api
       .me()
-      .then(setMe)
-      .catch(() => setMe(null))
+      .then((m) => {
+        saved.setMe(m)
+        setMe(m)
+      })
+      .catch((e) => {
+        const cached = e instanceof ApiError && e.offline ? saved.me() : null
+        if (!cached) saved.clear()
+        setMe(cached)
+      })
     const onHash = () => setRoute(currentRoute())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -50,16 +60,29 @@ export default function App() {
     if (me) refreshInbox()
   }, [me, route, refreshInbox])
 
-  const signedOut = useCallback(() => setMe(null), [])
+  const online = useOnline()
+  const signedOut = useCallback(() => {
+    saved.clear()
+    setMe(null)
+  }, [])
+  const signedIn = useCallback((m: Me) => {
+    saved.setMe(m)
+    setMe(m)
+  }, [])
 
   if (me === undefined) {
-    return <div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>
+    return (
+      <div role="status" className="flex min-h-screen items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    )
   }
 
-  if (me === null) return <LoginScreen onSignedIn={setMe} />
+  if (me === null) return <LoginScreen onSignedIn={signedIn} />
 
   return (
     <>
+      {!online && <OfflineBar />}
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
       {route === 'budget' && <BudgetScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
       {route === 'review' && <ReviewScreen onChanged={refreshInbox} onSignedOut={signedOut} />}

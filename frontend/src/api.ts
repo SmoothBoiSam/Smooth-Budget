@@ -40,10 +40,30 @@ export class ApiError extends Error {
     super(message)
     this.status = status
   }
+
+  /** The server couldn't be reached at all (no connection, or it's down). */
+  get offline() {
+    return this.status === 0
+  }
+}
+
+export const OFFLINE_MESSAGE = "Can't reach Smooth Budget right now. Check your connection and try again."
+
+/** fetch, but a network failure becomes an ApiError with status 0 and a plain message. */
+async function send(input: string, init: RequestInit): Promise<Response> {
+  try {
+    const res = await fetch(input, init)
+    // The dev proxy and most hosts answer 502-504 when the API itself is down.
+    if (res.status >= 502 && res.status <= 504) throw new ApiError(0, OFFLINE_MESSAGE)
+    return res
+  } catch (e) {
+    if (e instanceof ApiError) throw e
+    throw new ApiError(0, OFFLINE_MESSAGE)
+  }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await send(`/api${path}`, {
     method,
     credentials: 'same-origin',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
@@ -153,7 +173,7 @@ export interface Rule {
 }
 
 async function upload<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(`/api${path}`, { method: 'POST', credentials: 'same-origin', body: form })
+  const res = await send(`/api${path}`, { method: 'POST', credentials: 'same-origin', body: form })
   if (!res.ok) {
     let message = `Upload failed (${res.status})`
     try {

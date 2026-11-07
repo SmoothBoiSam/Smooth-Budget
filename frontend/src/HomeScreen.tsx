@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, plaidApi, type HomeSummary, type Me, type Status } from './api'
 import { formatCents, formatDay, formatTime } from './format'
+import { saved } from './offline'
+import { Loading } from './ui'
 
 const statusStyles: Record<Status, { number: string; badge: string; label: string }> = {
   healthy: { number: 'text-emerald-600', badge: 'bg-emerald-100 text-emerald-800', label: 'On track' },
@@ -9,21 +11,31 @@ const statusStyles: Record<Status, { number: string; badge: string; label: strin
 }
 
 export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: () => void }) {
-  const [summary, setSummary] = useState<HomeSummary | null>(null)
+  // Opens straight to the last summary saved on this phone, then refreshes it (milestone 10).
+  const [summary, setSummary] = useState<HomeSummary | null>(() => saved.home(me.householdId)?.summary ?? null)
+  const [savedAt, setSavedAt] = useState<string | null>(null) // set while showing a saved summary because the server can't be reached
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     try {
-      setSummary(await api.homeSummary())
+      const s = await api.homeSummary()
+      setSummary(s)
+      saved.setHome(me.householdId, s)
+      setSavedAt(null)
       setError(null)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onSignedOut()
-      setError(e instanceof Error ? e.message : 'Could not load your summary.')
+      const cached = e instanceof ApiError && e.offline ? saved.home(me.householdId) : null
+      if (cached) {
+        setSummary(cached.summary)
+        setSavedAt(cached.savedUtc)
+        setError(null)
+      } else setError(e instanceof Error ? e.message : 'Could not load your summary.')
     } finally {
       setLoading(false)
     }
-  }, [onSignedOut])
+  }, [onSignedOut, me.householdId])
 
   useEffect(() => {
     void load()
@@ -107,9 +119,19 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
           </div>
         )}
 
-        {!summary && !error && <div className="mt-16 text-center text-slate-400">Loading…</div>}
+        {!summary && !error && <Loading label="Loading Left to Spend" />}
 
-        {summary && (summary.sync.state === 'stale' || summary.sync.state === 'error') && (
+        {savedAt && (
+          <div role="alert" className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span className="font-semibold">Offline: last known numbers. </span>
+            This is your Left to Spend as of {formatTime(savedAt)}. It may have changed since; it updates when you’re back online.
+            <button type="button" onClick={refresh} disabled={loading} className="mt-1 block font-semibold underline disabled:opacity-50">
+              {loading ? 'Trying…' : 'Try again'}
+            </button>
+          </div>
+        )}
+
+        {summary && !savedAt && (summary.sync.state === 'stale' || summary.sync.state === 'error') && (
           <a
             href="#/more"
             role="alert"

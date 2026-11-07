@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
+import { ErrorNotice, Loading } from './ui'
 import { centsToInput, formatCents, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -69,12 +70,8 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
-      {!s && !error && <p className="mt-10 text-center text-slate-400">Loading…</p>}
+      {error && <ErrorNotice message={error} onRetry={() => void load()} />}
+      {!s && !error && <Loading />}
 
       {s && (
         <>

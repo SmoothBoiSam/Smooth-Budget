@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, recurringApi, type RecurringItem, type RecurringSummary, type RecurringUpdate } from './api'
+import { ErrorNotice, Loading } from './ui'
 import { formatCents, formatDay } from './format'
 
 const every: Record<RecurringItem['frequency'], string> = {
@@ -82,12 +83,8 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
-      {!s && !error && <p className="mt-10 text-center text-slate-400">Looking through your transactions…</p>}
+      {error && <ErrorNotice message={error} onRetry={() => void load()} />}
+      {!s && !error && <Loading label="Looking through your transactions" />}
 
       {s && (
         <>

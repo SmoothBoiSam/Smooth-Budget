@@ -16,6 +16,7 @@ import {
   recurringApi,
   type Transaction,
 } from './api'
+import { ErrorNotice, Loading } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import CategoryEditSheet from './CategoryEditSheet'
 import { centsToInput, formatCents, formatDay, formatSigned, parseDollars, titleCase } from './format'
@@ -162,12 +163,8 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
-      {!summary && !error && <p className="mt-10 text-center text-slate-400">Loading…</p>}
+      {error && <ErrorNotice message={error} onRetry={() => void load()} />}
+      {!summary && !error && <Loading />}
 
       {summary && view.kind === 'overview' && (
         <Overview

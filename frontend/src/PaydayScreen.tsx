@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, paydayApi, type PayCheck, type PaydaySummary, type PlanItem } from './api'
+import { ErrorNotice, Loading } from './ui'
 import { formatCents, formatDay } from './format'
 
 const weekday = (iso: string) => {
@@ -57,12 +58,8 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
           Schedule & stubs
         </a>
       </div>
-      {error && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
-      {!s && !error && <p className="mt-10 text-center text-slate-400">Loading…</p>}
+      {error && <ErrorNotice message={error} onRetry={() => void load()} />}
+      {!s && !error && <Loading />}
 
       {empty && (
         <section className="mt-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">

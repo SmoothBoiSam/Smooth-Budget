@@ -10,6 +10,7 @@ import {
   type Transaction,
   type TransactionContext,
 } from './api'
+import { ErrorNotice, Loading } from './ui'
 import { formatCents, formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
@@ -150,11 +151,7 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
+      {error && <ErrorNotice message={error} onRetry={() => window.location.reload()} />}
 
       {scope !== 'todo' && summary && (
         <div className="mt-4 rounded-xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
@@ -187,7 +184,7 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
 
       {queue === null ? (
-        <p className="mt-10 text-center text-slate-400">Loading…</p>
+        <Loading />
       ) : queue.length === 0 ? (
         <div className="mt-8 rounded-2xl bg-white px-5 py-8 text-center ring-1 ring-slate-200">
           <p className="text-lg font-semibold">All caught up</p>

@@ -3,7 +3,7 @@
 A phone-first budgeting app whose Home screen answers one question: **how much do I have left to spend this month?**
 The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. `DECISIONS.md` records the choices made where the spec is silent.
 
-**Status:** Milestone 9 (payday):
+**Status:** Milestone 10 (polish), the last milestone in the spec:
 - **Milestone 1:** auth, database, CI, fake-data seed, and a Home screen showing Left to Spend.
 - **Milestone 2:** CSV import for Chase checking, Chase credit and Apple Card; categorization by bank category and merchant rules; card payment and transfer detection; and an inbox for transactions that still need a category.
 - **Milestone 3:** Plaid Link, cursor-based sync, verified webhooks, background sync, pending-to-posted handling, CSV/Plaid overlap matching, and sync health on Home.
@@ -14,6 +14,7 @@ The full spec (`SPEC.md`) stays out of the repo because its appendices contain r
 - **Milestone 7:** the Partner screen (More → Partner): a fixed contribution (e.g. $800 toward Rent) shown as an offset on its bill line with your net share, matched to her transfers in a window (the 18th to 24th by default) with expected, received, different-amount and late states (late or short money comes out of Left to Spend). Other money between you has no tally: each transfer waits in Review until you say what it was for (paying you back for a category, her money, or your share of something).
 - **Milestone 8:** the Savings tab: total saved, savings accounts and balances, goals with progress from their account balance and a projected date at your monthly amount or recent pace, a rainy-day fund created for you, a 12-month savings chart, and the order money left over goes in (rainy-day fund, high-APR debt, larger savings), which the budget generator follows.
 - **Milestone 9:** the Payday tab: import the monthly SkedPlus+ schedule (the detailed text export, or the older CSV with estimated times), add past pay stub PDFs (reviewed before saving; the app learns your taxes and deductions from them), and see the next 3 checks with a low/likely/high range, a payday plan for each (bills due before the next payday, card payment, sweep, savings, spending money), and predicted vs actual once a check lands. Every pay rule is editable. Home shows the next payday.
+- **Milestone 10:** installable on a phone's home screen (app icon, manifest and a service worker), opens to the last known Left to Spend when offline with a clear "last known numbers" notice, and the same loading placeholders and "Try again" errors on every tab.
 - **Also:** dark mode (More → Settings → Appearance: System, Light or Dark).
 
 ## Stack
@@ -65,6 +66,20 @@ npm --prefix frontend run dev
 
 Open http://localhost:5173 and sign in as `demo@smoothbudget.test` with the `SEED_DEMO_PASSWORD` from your `.env`.
 On a phone on the same Wi-Fi, run `npm --prefix frontend run dev -- --host` and open the printed network URL.
+
+### Install and offline (production build)
+
+The service worker only runs in a production build. To try it locally, build and serve the frontend (the API keeps running as above):
+
+```bash
+npm --prefix frontend run build
+```
+
+```bash
+npm --prefix frontend run preview -- --port 4173
+```
+
+Open http://localhost:4173, sign in and load Home once. Stop both servers and reload: the app opens to the last known Left to Spend, marked as offline. On a phone, installing needs the app served over HTTPS (once it's hosted): Safari's Share → **Add to Home Screen**, or Chrome's **Install app**.
 
 ### Importing your bank exports
 

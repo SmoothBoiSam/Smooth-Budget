@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, partnerPlanApi, type Category, type ContributionStatus, type PartnerOverview } from './api'
+import { ErrorNotice, Loading } from './ui'
 import { centsToInput, formatCents, formatDay, parseDollars, titleCase } from './format'
 
 const purposeLabel: Record<PartnerOverview['recent'][number]['purpose'], string> = {
@@ -70,12 +71,8 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
-      {!o && !error && <p className="mt-10 text-center text-slate-400">Loading…</p>}
+      {error && <ErrorNotice message={error} onRetry={() => void load()} />}
+      {!o && !error && <Loading />}
 
       {o && !o.partnerName && (
         <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">

@@ -10,6 +10,7 @@ import {
   type StubReview,
   type WithholdingModel,
 } from './api'
+import { ErrorNotice } from './ui'
 import { formatCents, formatDay } from './format'
 
 const hm = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
@@ -103,11 +104,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
+      {error && <ErrorNotice message={error} onRetry={() => void load()} />}
 
       <Section title="Monthly schedule" hint="The SkedPlus+ detailed text export (.txt) is exact; the older CSV works too, with estimated times. Re-importing a month replaces it.">
         <FileButton label="Import a schedule" accept=".txt,.csv,text/plain,text/csv" onChange={pickSchedule} />
