@@ -508,6 +508,10 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("SavingsPriority")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<int>("SweepSavingsPercent")
                         .HasColumnType("integer");
 
@@ -704,6 +708,50 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("RecurringItems");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.SavingsGoal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsStarter")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("ManualSavedCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("MonthlyCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("TargetCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("HouseholdId");
+
+                    b.ToTable("SavingsGoals");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.SweepTask", b =>
@@ -1031,6 +1079,16 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasForeignKey("HouseholdId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.SavingsGoal", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Account");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.SweepTask", b =>

@@ -685,3 +685,50 @@ export const partnerPlanApi = {
     request<void>('PUT', `/partner/contributions/${id}`, { categoryId, amountCents, windowFromDay, windowToDay }),
   removeContribution: (id: string) => request<void>('DELETE', `/partner/contributions/${id}`),
 }
+
+export type PriorityStep = 'StarterFund' | 'Debt' | 'Savings'
+
+export interface SavingsGoal {
+  id: string
+  name: string
+  targetCents: number
+  accountId: string | null
+  accountName: string | null
+  manualSavedCents: number | null
+  /** The monthly amount you set (null: your pace into its account). */
+  monthlyCentsSet: number | null
+  isStarter: boolean
+  savedCents: number
+  remainingCents: number
+  percent: number
+  reached: boolean
+  monthlyCents: number
+  monthlySource: 'you' | 'pace' | 'none'
+  monthsToGo: number | null
+  projectedDate: string | null
+}
+
+export interface SavingsSummary {
+  totalSavedCents: number
+  accounts: { id: string; name: string; mask: string | null; balanceCents: number; balanceFromBank: boolean; paceCents: number }[]
+  goals: SavingsGoal[]
+  priority: PriorityStep[]
+  history: { date: string; balanceCents: number }[]
+}
+
+export interface GoalFields {
+  name: string
+  targetCents: number
+  accountId: string | null
+  manualSavedCents: number | null
+  monthlyCents: number | null
+}
+
+export const savingsApi = {
+  summary: () => request<SavingsSummary>('GET', '/savings'),
+  addGoal: (g: GoalFields) => request<{ id: string }>('POST', '/savings/goals', g),
+  updateGoal: (id: string, g: GoalFields) => request<void>('PUT', `/savings/goals/${id}`, g),
+  removeGoal: (id: string) => request<void>('DELETE', `/savings/goals/${id}`),
+  setPriority: (order: PriorityStep[]) => request<void>('PUT', '/savings/priority', { order }),
+  setBalance: (accountId: string, balanceCents: number) => request<void>('PUT', `/savings/accounts/${accountId}/balance`, { balanceCents }),
+}

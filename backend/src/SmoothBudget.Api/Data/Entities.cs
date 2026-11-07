@@ -43,6 +43,8 @@ public class Household
     public SmoothBudget.Core.Debt.DebtStrategy DebtStrategy { get; set; }
     /// <summary>Extra paid toward debt each month beyond the minimums. Null = whatever the budget plans for card payments.</summary>
     public long? ExtraDebtPaymentCents { get; set; }
+    /// <summary>Where money left over in the budget goes, in order (SPEC 4.5): "StarterFund,Debt,Savings" by default.</summary>
+    public string SavingsPriority { get; set; } = "StarterFund,Debt,Savings";
 
     public DateTime CreatedUtc { get; set; }
 
@@ -352,5 +354,28 @@ public class PartnerArrangement
     public int WindowToDay { get; set; } = 24;
     /// <summary>The first budget month it applies to; earlier months aren't changed.</summary>
     public DateOnly StartsOn { get; set; }
+    public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>
+/// A savings goal (SPEC 4.5; the data model's SavingsGoal). Progress is its savings account's balance (goals sharing an
+/// account fill in priority order) or an amount you track by hand.
+/// </summary>
+public class SavingsGoal
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string Name { get; set; }
+    public long TargetCents { get; set; }
+    /// <summary>The savings account whose balance is this goal's progress. Null: tracked by hand.</summary>
+    public Guid? AccountId { get; set; }
+    public Account? Account { get; set; }
+    /// <summary>Saved so far, for a goal tracked by hand.</summary>
+    public long? ManualSavedCents { get; set; }
+    /// <summary>What you plan to put in each month. Null: your actual pace into its account.</summary>
+    public long? MonthlyCents { get; set; }
+    /// <summary>The starter emergency fund (the rainy-day fund): first in the default priority.</summary>
+    public bool IsStarter { get; set; }
+    public int SortOrder { get; set; }
     public DateTime CreatedUtc { get; set; }
 }

@@ -206,6 +206,51 @@ public class BudgetGeneratorTests
         Assert.Equal("Current price: Maple Court $1,700.00 a month (your 3-month median was $1,650.00).", rent.Explanation);
     }
 
+    // Milestone 8: what's left goes in your priority order. Everything else: groceries 438 + eating out 136 (trimmed)
+    // + rent 1,650 = 2,224.00; income 3,432.86 − 2,224.00 − Visa minimum 60.00 = 1,148.86 left.
+    private static readonly SmoothBudget.Core.Debt.DebtInput Visa = new(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);
+    private static SavingsPlan Plan(long remaining, IReadOnlyList<PriorityStep>? order = null, long? larger = null) =>
+        new(order ?? SavingsPlan.DefaultOrder, "Rainy-day fund", remaining, 1_000_00 - remaining, 1_000_00, larger);
+
+    [Fact]
+    public void The_starter_fund_is_funded_first_then_whats_left_goes_to_debt()
+    {
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa], savings: Plan(750_00));
+        var savings = p.Categories.Single(c => c.CategoryId == Savings);
+        var card = p.Categories.Single(c => c.CategoryId == Card);
+        Assert.Equal((750_00L, 60_00L + 398_86L), (savings.ProposedCents, card.ProposedCents));
+        Assert.Equal("$750.00 toward your rainy-day fund ($250.00 of $1,000.00 saved), first in your priorities.", savings.Explanation);
+        Assert.Contains("plus $398.86 left over after your rainy-day fund", card.Explanation);
+        Assert.Equal(0, p.UnallocatedCents);
+    }
+
+    [Fact]
+    public void Once_the_starter_fund_is_full_everything_left_goes_to_debt()
+    {
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa], savings: Plan(0));
+        Assert.Equal(0, p.Categories.Single(c => c.CategoryId == Savings).ProposedCents);
+        Assert.Equal(60_00 + 1_148_86, p.Categories.Single(c => c.CategoryId == Card).ProposedCents);
+        Assert.Equal("Your rainy-day fund is full.", p.Categories.Single(c => c.CategoryId == Savings).Explanation);
+    }
+
+    [Fact]
+    public void The_order_is_yours_to_change()
+    {
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa],
+            savings: Plan(750_00, [PriorityStep.Debt, PriorityStep.StarterFund, PriorityStep.Savings]));
+        Assert.Equal((0L, 60_00L + 1_148_86L), (p.Categories.Single(c => c.CategoryId == Savings).ProposedCents, p.Categories.Single(c => c.CategoryId == Card).ProposedCents));
+    }
+
+    [Fact]
+    public void Without_card_debt_the_starter_fund_then_larger_savings_share_whats_left()
+    {
+        // No card debt: eating out isn't trimmed (151) and the card line keeps its median (350), so
+        // 3,432.86 − (438 + 151 + 1,650 + 350) = 843.86 left: 300 to the starter fund, 200 to larger goals.
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: false, savings: Plan(300_00, larger: 200_00));
+        Assert.Equal(300_00 + 200_00, p.Categories.Single(c => c.CategoryId == Savings).ProposedCents);
+        Assert.Equal(343_86, p.UnallocatedCents); // beyond what you set for larger goals: shown, not hidden
+    }
+
     [Fact]
     public void When_nothing_is_left_the_debt_proposal_is_just_the_minimums()
     {

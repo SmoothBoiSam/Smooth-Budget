@@ -44,6 +44,10 @@ public sealed class FakePlaid : HttpMessageHandler
     }
 
     public string AccessTokenFor(string publicToken) => _publicTokens[publicToken];
+
+    /// <summary>Changes an account's balance, as the bank would report it on the next sync.</summary>
+    public void SetBalance(string accessToken, string shortName, decimal balance) =>
+        _accounts[accessToken] = [.. _accounts[accessToken].Select(a => a.Id == Id(accessToken, shortName) ? a with { Balance = balance } : a)];
     public static string ItemIdFor(string accessToken) => "item-" + accessToken.Split('-')[3];
 
     /// <summary>The real id Plaid would use for a test's short name under this login.</summary>

@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<DebtAccount> DebtAccounts => Set<DebtAccount>();
     public DbSet<RecurringItem> RecurringItems => Set<RecurringItem>();
     public DbSet<PartnerArrangement> PartnerArrangements => Set<PartnerArrangement>();
+    public DbSet<SavingsGoal> SavingsGoals => Set<SavingsGoal>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -117,6 +118,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Destination).HasMaxLength(120);
             e.HasOne(x => x.BudgetMonth).WithMany().HasForeignKey(x => x.BudgetMonthId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.HouseholdId, x.DoneUtc });
+        });
+
+        b.Entity<SavingsGoal>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.HasOne(x => x.Account).WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(x => x.HouseholdId);
         });
 
         b.Entity<PartnerArrangement>(e =>
