@@ -22,6 +22,9 @@ export interface HomeSummary {
   reviewCount: number
   /** The next 3 bills and subscriptions due. */
   upcomingBills: { name: string; amountCents: number; date: string }[] | null
+  /** The partner's fixed contributions this month (late / different amount flags). */
+  contributions: ContributionStatus[] | null
+  partnerShortfallCents: number
 }
 
 export interface Me {
@@ -218,6 +221,8 @@ export interface BudgetCategoryLine {
   health: Health
   transactionCount: number
   partnerSharePercent: number
+  /** What the partner's fixed contribution covers of this line (Rent: the $800). */
+  partnerOffsetCents: number
 }
 
 export interface BudgetGroup {
@@ -251,6 +256,9 @@ export interface BudgetSummary {
   groups: BudgetGroup[]
   lastMonth: LastMonth | null
   pendingSweeps: PendingSweep[]
+  contributions: ContributionStatus[] | null
+  /** What Left to Spend is missing because a contribution is late or short. */
+  partnerShortfallCents: number
 }
 
 export const budgetSummaryApi = {
@@ -386,6 +394,8 @@ export interface GeneratorProposal {
   hasCardDebt: boolean
   /** No categories yet: build them from your history first. */
   needsCategorySetup: boolean
+  /** Partner money is her fixed contributions, not a median of what she sent. */
+  partnerFromArrangements: boolean
 }
 
 export type SweepTarget = 'Debt' | 'Savings' | 'Split'
@@ -636,4 +646,53 @@ export const recurringApi = {
   summary: () => request<RecurringSummary>('GET', '/recurring'),
   update: (u: RecurringUpdate) => request<void>('PUT', '/recurring', u),
   trackAsBill: (key: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/track-as-bill', { key }),
+}
+
+export interface ContributionStatus {
+  arrangementId: string
+  categoryId: string
+  categoryName: string
+  state: 'expected' | 'received' | 'differentAmount' | 'late'
+  expectedCents: number
+  receivedCents: number
+  windowStart: string
+  windowEnd: string
+  shortfallCents: number
+}
+
+export interface PartnerOverview {
+  partnerName: string | null
+  contributions: {
+    id: string
+    categoryId: string
+    categoryName: string
+    amountCents: number
+    windowFromDay: number
+    windowToDay: number
+    thisMonth: ContributionStatus | null
+  }[]
+  splits: { categoryId: string; name: string; partnerSharePercent: number }[]
+  settleUp: SettleUp
+  recent: {
+    id: string
+    date: string
+    merchant: string
+    amountCents: number
+    purpose: 'contribution' | 'settleUp' | 'paidByPartner' | 'other'
+    categoryName: string | null
+    confirmed: boolean
+  }[]
+}
+
+export const partnerPlanApi = {
+  overview: () => request<PartnerOverview>('GET', '/partner'),
+  addContribution: (categoryId: string, amountCents: number, windowFromDay?: number, windowToDay?: number) =>
+    request<{ id: string }>('POST', '/partner/contributions', { categoryId, amountCents, windowFromDay, windowToDay }),
+  updateContribution: (id: string, categoryId: string, amountCents: number, windowFromDay?: number, windowToDay?: number) =>
+    request<void>('PUT', `/partner/contributions/${id}`, { categoryId, amountCents, windowFromDay, windowToDay }),
+  removeContribution: (id: string) => request<void>('DELETE', `/partner/contributions/${id}`),
+  setSplit: (categoryId: string, partnerSharePercent: number) => request<void>('PUT', `/partner/splits/${categoryId}`, { partnerSharePercent }),
+  addPurchase: (date: string, merchant: string, amountCents: number, categoryId: string, ownerSharePercent?: number) =>
+    request<{ id: string }>('POST', '/partner/purchases', { date, merchant, amountCents, categoryId, ownerSharePercent }),
+  removePurchase: (id: string) => request<void>('DELETE', `/partner/purchases/${id}`),
 }

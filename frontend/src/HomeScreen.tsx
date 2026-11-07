@@ -191,6 +191,21 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
             {s.overBudgetCategoryCount} {s.overBudgetCategoryCount === 1 ? 'category' : 'categories'}
           </li>
         )}
+        {(s.contributions ?? [])
+          .filter((f) => f.state === 'late' || (f.state === 'differentAmount' && f.shortfallCents > 0))
+          .map((f) => (
+            <li key={f.arrangementId}>
+              <a href="#/partner" className="flex justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-red-800">
+                <span>
+                  {f.state === 'late'
+                    ? `The ${formatCents(f.expectedCents)} toward ${f.categoryName} hasn't come yet.`
+                    : `Only ${formatCents(f.receivedCents)} of ${formatCents(f.expectedCents)} came toward ${f.categoryName}.`}{' '}
+                  Left to Spend counts without the missing <span className="font-semibold tabular-nums">{formatCents(f.shortfallCents)}</span>.
+                </span>
+                <span aria-hidden className="font-semibold">›</span>
+              </a>
+            </li>
+          ))}
         {s.reviewCount > 0 && (
           <li>
             <a href="#/review" className="flex justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-900">

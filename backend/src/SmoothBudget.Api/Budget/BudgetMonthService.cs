@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Core.Budgeting;
+using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Budget;
 
@@ -14,7 +15,13 @@ public sealed record MonthCategory(Guid Id, string Name, CategoryType Type, long
 /// <summary>Everything about one budget month that the calculators need.</summary>
 public sealed record MonthData(
     BudgetMonth Row, BudgetMonthRange Range, IReadOnlyList<MonthCategory> Categories,
-    IReadOnlyList<BudgetTransaction> Transactions, long CarriedInDeficitCents);
+    IReadOnlyList<BudgetTransaction> Transactions, long CarriedInDeficitCents,
+    // The partner's fixed contributions this month, and what Left to Spend is missing from late or short ones (SPEC 3).
+    IReadOnlyList<ContributionStatus>? Contributions = null, long PartnerShortfallCents = 0)
+{
+    public MonthCloseResult Close() =>
+        MonthCloseCalculator.Close(Range, Categories.Select(c => c.ForCalculator), Transactions, CarriedInDeficitCents, PartnerShortfallCents);
+}
 
 /// <summary>An ended month's result: frozen if closed, otherwise worked out live (it may still change).</summary>
 public sealed record EndedMonth(BudgetMonth Row, BudgetMonthRange Range, MonthCloseResult Result, bool Closed, DateOnly ClosesOn);
@@ -109,7 +116,8 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             .ToListAsync(ct);
 
         var carried = await CarriedInAsync(householdId, row, ct, depth);
-        return new MonthData(row, range, categories, transactions, carried);
+        var contributions = await ContributionsAsync(householdId, range, ct);
+        return new MonthData(row, range, categories, transactions, carried, contributions, contributions.Sum(c => c.ShortfallCents));
     }
 
     /// <summary>The deficit carried into <paramref name="row"/>: the previous month's, frozen or provisional.</summary>
@@ -126,7 +134,31 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
         if (depth > 24)
             throw new InvalidOperationException("Too many open months in a row.");
         var prev = await LoadAsync(householdId, previous, ct, depth + 1);
-        return MonthCloseCalculator.Close(prev.Range, prev.Categories.Select(c => c.ForCalculator), prev.Transactions, prev.CarriedInDeficitCents).DeficitCents;
+        return prev.Close().DeficitCents;
+    }
+
+    /// <summary>
+    /// The partner's fixed contributions in one budget month, matched to her deposits (DECISIONS.md 97). Only
+    /// arrangements that had started by then apply, so setting one up never rewrites earlier months.
+    /// </summary>
+    public async Task<List<ContributionStatus>> ContributionsAsync(Guid householdId, BudgetMonthRange range, CancellationToken ct)
+    {
+        var arrangements = await db.PartnerArrangements.AsNoTracking()
+            .Where(a => a.HouseholdId == householdId && a.StartsOn <= range.End)
+            .OrderBy(a => a.CreatedUtc)
+            .Select(a => new ContributionArrangement(a.Id, a.CategoryId, a.AmountCents, a.WindowFromDay, a.WindowToDay))
+            .ToListAsync(ct);
+        if (arrangements.Count == 0)
+            return [];
+        var deposits = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer
+                        && t.Date >= range.Start && t.Date <= range.End)
+            .Select(t => new PartnerDeposit(t.Id, t.Date, -t.AmountCents,
+                t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
+                t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution))
+            .ToListAsync(ct);
+        var (_, today, _) = await ContextAsync(householdId, ct);
+        return PartnerContributions.Match(arrangements, range, deposits, today).ToList();
     }
 
     /// <summary>The most recent month that has ended, with its result (frozen or provisional).</summary>
@@ -137,7 +169,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
         if (previous is null)
             return null;
         var data = await LoadAsync(householdId, previous, ct);
-        var result = MonthCloseCalculator.Close(data.Range, data.Categories.Select(c => c.ForCalculator), data.Transactions, data.CarriedInDeficitCents);
+        var result = data.Close();
         if (previous.ClosedUtc is not null)
             result = result with { ClosingNetCents = previous.ClosingNetCents ?? result.ClosingNetCents,
                 SurplusCents = Math.Max(0, previous.ClosingNetCents ?? 0), DeficitCents = Math.Max(0, -(previous.ClosingNetCents ?? 0)) };
@@ -172,7 +204,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
 
         await FreezeLimitsAsync(householdId, row, ct);
         var data = await LoadAsync(householdId, row, ct);
-        var result = MonthCloseCalculator.Close(data.Range, data.Categories.Select(c => c.ForCalculator), data.Transactions, data.CarriedInDeficitCents);
+        var result = data.Close();
 
         row.CarriedInDeficitCents = data.CarriedInDeficitCents;
         row.ClosingNetCents = result.ClosingNetCents;

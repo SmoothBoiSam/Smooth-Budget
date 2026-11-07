@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<SweepTask> SweepTasks => Set<SweepTask>();
     public DbSet<DebtAccount> DebtAccounts => Set<DebtAccount>();
     public DbSet<RecurringItem> RecurringItems => Set<RecurringItem>();
+    public DbSet<PartnerArrangement> PartnerArrangements => Set<PartnerArrangement>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -116,6 +117,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Destination).HasMaxLength(120);
             e.HasOne(x => x.BudgetMonth).WithMany().HasForeignKey(x => x.BudgetMonthId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.HouseholdId, x.DoneUtc });
+        });
+
+        b.Entity<PartnerArrangement>(e =>
+        {
+            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.HouseholdId);
         });
 
         b.Entity<RecurringItem>(e =>

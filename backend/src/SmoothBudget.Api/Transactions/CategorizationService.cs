@@ -106,7 +106,7 @@ public record SuggestedCategoryDto(string Name, string Type, bool IsDiscretionar
 /// sync, and again over everything whenever categories, rules or the partner name change, so transactions
 /// that arrived before a category existed get filed too. Never touches the user's own choices or transfers.
 /// </summary>
-public class CategorizationService(AppDbContext db)
+public class CategorizationService(AppDbContext db, TimeProvider clock)
 {
     public async Task<CategorizationContext> ContextAsync(Guid householdId, CancellationToken ct)
     {
@@ -133,13 +133,67 @@ public class CategorizationService(AppDbContext db)
         return new CategorizationContext(rules, categories, history, h.PartnerName, shares, splits, h.PartnerSettledThrough);
     }
 
-    /// <summary>Purchases the owner split with the partner (her share is owed to him), optionally only after a date.</summary>
+    /// <summary>
+    /// Purchases split with the partner, optionally only after a date: ones you paid (she owes you her share) and
+    /// ones she paid that you entered (you owe her yours).
+    /// </summary>
     public static Task<List<SplitPurchase>> SplitPurchasesAsync(AppDbContext db, Guid householdId, DateOnly? after, CancellationToken ct) =>
         db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && !t.IsTransfer && t.SplitFactor < 1m && t.CategoryId != null
+            .Where(t => t.HouseholdId == householdId && !t.IsTransfer && (t.SplitFactor < 1m || t.PaidByPartner) && t.CategoryId != null
                         && (after == null || t.Date > after))
-            .Select(t => new SplitPurchase(t.Id, t.Date, t.Merchant, t.AmountCents, t.SplitFactor))
+            .Select(t => new SplitPurchase(t.Id, t.Date, t.Merchant, t.AmountCents, t.SplitFactor, t.PaidByPartner))
             .ToListAsync(ct);
+
+    /// <summary>
+    /// Marks the transfer that matched each fixed contribution as her contribution (DECISIONS.md 97): the largest from her
+    /// inside the window, even an unusual amount like $200 that would otherwise look like paying back. Runs after every
+    /// import, sync and re-run. Never touches what you labeled yourself.
+    /// </summary>
+    public async Task MatchContributionsAsync(Guid householdId, CancellationToken ct)
+    {
+        var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId)
+            .OrderBy(a => a.CreatedUtc).Include(a => a.Category).ToListAsync(ct);
+        if (arrangements.Count == 0)
+            return;
+        var h = await db.Households.AsNoTracking().SingleAsync(x => x.Id == householdId, ct);
+        var calendar = new BudgetMonthCalendar(h.BudgetMonthStartDay);
+        var today = Home.HomeSummaryService.TodayIn(h.TimeZoneId, clock);
+        var from = arrangements.Min(a => a.StartsOn);
+        var rows = await db.Transactions
+            .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer && t.Date >= from)
+            .ToListAsync(ct);
+        var first = h.PartnerName is { } n ? n.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] : "Your partner";
+        first = first.Length > 1 ? char.ToUpperInvariant(first[0]) + first[1..].ToLowerInvariant() : first;
+
+        foreach (var month in rows.GroupBy(t => calendar.MonthContaining(t.Date)))
+        {
+            var active = arrangements.Where(a => a.StartsOn <= month.Key.End).ToList();
+            var statuses = PartnerContributions.Match(
+                active.Select(a => new ContributionArrangement(a.Id, a.CategoryId, a.AmountCents, a.WindowFromDay, a.WindowToDay)).ToList(),
+                month.Key,
+                month.Select(t => new PartnerDeposit(t.Id, t.Date, -t.AmountCents,
+                    t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
+                    t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution)).ToList(),
+                today);
+            foreach (var s in statuses.Where(s => s.MatchedDepositId is not null))
+            {
+                var t = month.First(x => x.Id == s.MatchedDepositId);
+                if (!TransactionRules.IsAutomatic(t.CategorySource))
+                    continue;
+                var a = active.First(x => x.Id == s.ArrangementId);
+                t.Kind = TransactionKind.PartnerContribution;
+                t.CategoryUnsure = s.State == ContributionState.DifferentAmount;
+                t.CategoryReason = s.State == ContributionState.Received
+                    ? $"{first}'s contribution toward {a.Category.Name}."
+                    : $"{first}'s contribution toward {a.Category.Name}: {Money(s.ReceivedCents)}, not the usual {Money(s.ExpectedCents)}.";
+                if (h.PartnerSettledThrough is not { } start || t.Date > start)
+                    t.NeedsReview = true; // still yours to confirm
+            }
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static string Money(long cents) => (cents / 100m).ToString("C", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
 
     /// <summary>Re-runs automatic categorization over all of the household's transactions.</summary>
     public async Task<AutoCategorizeResult> RunAsync(Guid householdId, CancellationToken ct)
@@ -149,6 +203,7 @@ public class CategorizationService(AppDbContext db)
         foreach (var t in rows)
             ctx.Apply(t);
         await db.SaveChangesAsync(ct);
+        await MatchContributionsAsync(householdId, ct);
 
         var spending = rows.Where(t => !t.IsTransfer && !TransactionRules.IsMoneyIn(t.Kind) && t.Kind is not (TransactionKind.CardPayment or TransactionKind.Transfer)).ToList();
         return new AutoCategorizeResult(

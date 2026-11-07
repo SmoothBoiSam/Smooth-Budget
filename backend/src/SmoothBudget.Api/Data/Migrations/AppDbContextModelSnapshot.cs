@@ -571,6 +571,42 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("ImportBatches");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.PartnerArrangement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("StartsOn")
+                        .HasColumnType("date");
+
+                    b.Property<int>("WindowFromDay")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("WindowToDay")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("HouseholdId");
+
+                    b.ToTable("PartnerArrangements");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.PlaidItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -783,6 +819,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<bool>("NeedsReview")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("PaidByPartner")
+                        .HasColumnType("boolean");
+
                     b.Property<long>("PartnerOffsetCents")
                         .HasColumnType("bigint");
 
@@ -975,6 +1014,17 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.PartnerArrangement", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Category");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.PlaidItem", b =>

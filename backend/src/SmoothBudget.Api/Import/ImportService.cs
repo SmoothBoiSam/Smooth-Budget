@@ -131,6 +131,8 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
             await db.SaveChangesAsync(ct);
             if (created.Count > 0)
                 await transfers.RunAsync(householdId, created.Min(t => t.Date), created.Max(t => t.Date), ct);
+            if (created.Any(t => t.IsPartnerTransfer))
+                await categorization.MatchContributionsAsync(householdId, ct); // which transfer was her contribution
             await tx.CommitAsync(ct);
         }
 

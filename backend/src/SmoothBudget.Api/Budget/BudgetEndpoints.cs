@@ -24,7 +24,9 @@ public record GeneratorDto(
     IReadOnlyList<ProposedLimit> Categories, long AllocatedCents, long UnallocatedCents, bool SpendsMoreThanIncome,
     int UncategorizedCount, bool HasCardDebt,
     // True when there are no categories yet: set them up from your transactions first (/api/budget/categories/discover).
-    bool NeedsCategorySetup);
+    bool NeedsCategorySetup,
+    // Partner money is her fixed contributions (milestone 7) rather than a median of what she sent.
+    bool PartnerFromArrangements = false);
 
 public record BudgetMonthDtoLite(DateOnly Start, DateOnly End);
 
@@ -263,11 +265,13 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
 
         var cardDebts = await debts.CardInputsAsync(householdId, ct); // milestone 5: minimums + extra to the highest APR
         var bills = await recurring.CurrentBillsAsync(householdId, ct); // milestone 6: bills at their current price
-        var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills);
+        var amounts = await db.PartnerArrangements.Where(a => a.HouseholdId == householdId).Select(a => a.AmountCents).ToListAsync(ct);
+        long? contributions = amounts.Count > 0 ? amounts.Sum() : null; // none set up: the median of what she sent
+        var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills, contributions);
         var partnerName = await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct);
         return new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),
             p.IncomeCents, p.IncomeExplanation, p.PartnerCents, partnerName, filed, p.Categories, p.AllocatedCents, p.UnallocatedCents, p.SpendsMoreThanIncome,
-            p.UncategorizedCount, hasCardDebt, needsSetup);
+            p.UncategorizedCount, hasCardDebt, needsSetup, contributions is not null);
     }
 
     /// <summary>Confirming the proposal sets the usual limits and this month's expected income.</summary>

@@ -52,7 +52,9 @@ public sealed record LeftToSpendResult(
     long SafeToSpendPerDayCents,
     LeftToSpendStatus Status,
     int UncategorizedSpendingCount,
-    IReadOnlyList<CategorySpend> Categories);
+    IReadOnlyList<CategorySpend> Categories,
+    // A late or short partner contribution (SPEC section 3): Left to Spend is recomputed without it.
+    long PartnerShortfallCents = 0);
 
 /// <summary>
 /// Computes the headline number (SPEC section 3, "Left to Spend"):
@@ -77,9 +79,11 @@ public static class LeftToSpendCalculator
         DateOnly today,
         IEnumerable<BudgetCategory> categories,
         IEnumerable<BudgetTransaction> transactions,
-        long carriedInDeficitCents)
+        long carriedInDeficitCents,
+        long partnerShortfallCents = 0)
     {
         ArgumentNullException.ThrowIfNull(month);
+        ArgumentOutOfRangeException.ThrowIfNegative(partnerShortfallCents);
         ArgumentNullException.ThrowIfNull(categories);
         ArgumentNullException.ThrowIfNull(transactions);
         if (carriedInDeficitCents < 0)
@@ -117,7 +121,7 @@ public static class LeftToSpendCalculator
 
         var totalLimit = lines.Sum(l => l.LimitCents);
         var totalSpent = lines.Sum(l => l.SpentCents);
-        var leftToSpend = lines.Sum(l => l.RemainingCents) - carriedInDeficitCents;
+        var leftToSpend = lines.Sum(l => l.RemainingCents) - carriedInDeficitCents - partnerShortfallCents;
         var over = lines.Where(l => l.IsOver).ToList();
 
         return new LeftToSpendResult(
@@ -133,7 +137,8 @@ public static class LeftToSpendCalculator
             SafeToSpendPerDayCents: leftToSpend <= 0 ? 0 : leftToSpend / daysRemaining, // integer division floors: never suggest more than is safe
             Status: StatusFor(leftToSpend, totalLimit),
             UncategorizedSpendingCount: uncategorized,
-            Categories: lines);
+            Categories: lines,
+            PartnerShortfallCents: partnerShortfallCents);
     }
 
     /// <summary>

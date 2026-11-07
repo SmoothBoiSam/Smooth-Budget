@@ -111,9 +111,11 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
           <span className="text-sm font-medium">{p.partnerName ? `From ${p.partnerName.split(' ')[0]}` : 'Partner contributions'}, expected</span>
           <MoneyInput value={partner} onChange={setPartner} label="Partner contributions expected" />
           <span className="mt-1 block text-xs text-slate-500">
-            {p.partnerName
-              ? `Median of what ${p.partnerName} sent each month.`
-              : 'Set your partner’s name in More so their transfers are tracked here instead of as your income.'}
+            {p.partnerFromArrangements
+              ? 'Their fixed contributions (More → Partner), counted once as offsets to the bills they go toward.'
+              : p.partnerName
+                ? `Median of what ${p.partnerName} sent each month. Set up a fixed contribution in More → Partner to use that instead.`
+                : 'Set your partner’s name in More so their transfers are tracked here instead of as your income.'}
           </span>
         </label>
         <dl className="mt-4 grid grid-cols-3 gap-2 text-center">

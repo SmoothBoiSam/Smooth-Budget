@@ -370,7 +370,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         var txns = await All(c);
         Assert.All(txns, t => Assert.Equal(("PartnerContribution", false), (t.Kind, t.NeedsReview))); // her money, as before
         var s = (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!;
-        Assert.Equal((0L, new DateOnly(2026, 11, 20)), (s.OwedToYouCents, s.SettledThrough!.Value));
+        Assert.Equal((0L, new DateOnly(2026, 11, 19)), (s.OwedToYouCents, s.SettledThrough!.Value)); // counts from Nov 20 on
 
         // A new small one after today is a guess to confirm, and moves nothing until you do.
         await ImportAsync(c, checking, ChaseChecking, "CREDIT,11/23/2026,\"Zelle payment from JANE PARTNER 4\",25.00,PARTNERFI_TO_CHASE,1885.75,,");

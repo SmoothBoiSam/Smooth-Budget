@@ -20,7 +20,21 @@ public record BudgetCategoryLineDto(
     string Health,
     int TransactionCount,
     // Split with the partner by default: her share in percent (0 = not split).
-    int PartnerSharePercent = 0);
+    int PartnerSharePercent = 0,
+    // What the partner's fixed contribution covers of this line (Rent: the $800). Your net share is the limit minus this.
+    long PartnerOffsetCents = 0);
+
+/// <param name="State">"expected", "received", "differentAmount" or "late".</param>
+/// <param name="ShortfallCents">What Left to Spend is missing because of it (late, or short after the window).</param>
+public record ContributionStatusDto(
+    Guid ArrangementId, Guid CategoryId, string CategoryName, string State, long ExpectedCents, long ReceivedCents,
+    DateOnly WindowStart, DateOnly WindowEnd, long ShortfallCents)
+{
+    public static List<ContributionStatusDto> From(IReadOnlyList<ContributionStatus>? statuses, IReadOnlyList<MonthCategory> categories) =>
+        (statuses ?? []).Select(s => new ContributionStatusDto(s.ArrangementId, s.CategoryId,
+            categories.FirstOrDefault(c => c.Id == s.CategoryId)?.Name ?? "", char.ToLowerInvariant(s.State.ToString()[0]) + s.State.ToString()[1..],
+            s.ExpectedCents, s.ReceivedCents, s.WindowStart, s.WindowEnd, s.ShortfallCents)).ToList();
+}
 
 public record BudgetGroupDto(
     string Type,
@@ -66,7 +80,10 @@ public record BudgetSummaryDto(
     int ReviewCount,
     IReadOnlyList<BudgetGroupDto> Groups,
     LastMonthDto? LastMonth,
-    IReadOnlyList<PendingSweepDto> PendingSweeps);
+    IReadOnlyList<PendingSweepDto> PendingSweeps,
+    // The partner's fixed contributions this month (milestone 7), and what Left to Spend is missing from late or short ones.
+    IReadOnlyList<ContributionStatusDto>? Contributions = null,
+    long PartnerShortfallCents = 0);
 
 /// <summary>The Budget screen (SPEC section 4.3): every category with its limit, spent and remaining, grouped by type.</summary>
 public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService months, Data.AppDbContext db)
@@ -93,7 +110,8 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
                 {
                     var l = lines[c.Id];
                     return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.IsDiscretionary, l.LimitCents, c.HasMonthOverride,
-                        l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount, c.PartnerSharePercent);
+                        l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount, c.PartnerSharePercent,
+                        (data.Contributions ?? []).Where(s => s.CategoryId == c.Id).Sum(s => s.ExpectedCents));
                 }).ToList();
                 return new BudgetGroupDto(g.Type.ToString(), g.Label, g.Type == CategoryType.Variable,
                     items.Sum(i => i.LimitCents), items.Sum(i => i.SpentCents), items);
@@ -107,7 +125,9 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         long Received(Core.Transactions.TransactionKind kind) =>
             data.Transactions.Where(t => t.Kind == kind && !t.IsTransfer && t.AmountCents < 0).Sum(t => -t.AmountCents);
         var row = data.Row;
-        var moneyIn = row.IncomeExpectedCents + row.PartnerExpectedCents;
+        // With fixed contributions set up, partner money is those contributions, counted once as offsets (DECISIONS.md 97).
+        var partnerExpected = data.Contributions is { Count: > 0 } cs ? cs.Sum(s => s.ExpectedCents) : row.PartnerExpectedCents;
+        var moneyIn = row.IncomeExpectedCents + partnerExpected;
         var partnerName = db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).Single();
         var reviewCount = db.Transactions.Count(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null && !t.IsTransfer
                                                      && t.Date >= data.Month.Start && t.Date <= data.Month.End);
@@ -117,9 +137,9 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             lts.TotalVariableLimitCents, lts.TotalVariableSpentCents, lts.CarriedInDeficitCents,
             lts.DaysRemaining, lts.SafeToSpendPerDayCents, lts.UncategorizedSpendingCount,
             row.IncomeExpectedCents, planned, moneyIn - planned,
-            Received(Core.Transactions.TransactionKind.Income), row.PartnerExpectedCents, Received(Core.Transactions.TransactionKind.PartnerContribution),
+            Received(Core.Transactions.TransactionKind.Income), partnerExpected, Received(Core.Transactions.TransactionKind.PartnerContribution),
             partnerName, reviewCount,
-            groups, last, data.PendingSweeps);
+            groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories), data.PartnerShortfallCents);
     }
 
     private async Task<LastMonthDto?> LastMonthAsync(Guid householdId, Data.BudgetMonth current, CancellationToken ct)

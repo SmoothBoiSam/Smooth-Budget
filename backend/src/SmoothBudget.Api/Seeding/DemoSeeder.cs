@@ -70,6 +70,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         household.SweepTarget = SweepTarget.Debt;
         household.SweepSavingsPercent = 50;
         household.PartnerName = "Partner"; // matches the fake "Zelle payment from Partner" rows
+        household.PartnerSettledThrough = null; // the demo tracks settle-up over all of its (short) history
 
         Account NewAccount(string name, AccountType type, string mask, long balance) => new()
         {
@@ -98,6 +99,11 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         Category C(string name) => categories.Single(c => c.Name == name);
         var (rent, phone, insurance, utilities, subscriptions, cardPayment, rainyDay) =
             (C("Rent"), C("Phone"), C("Car insurance"), C("Utilities & internet"), C("Subscriptions"), C("Credit card payment"), C("Rainy-day fund"));
+        // Her $800 toward rent as a fixed contribution (milestone 7), for every demo month.
+        db.PartnerArrangements.Add(new PartnerArrangement
+        {
+            Id = Guid.NewGuid(), HouseholdId = householdId, CategoryId = rent.Id, AmountCents = 800_00, StartsOn = new DateOnly(2000, 1, 1), CreatedUtc = now,
+        });
         var (groceries, eatingOut, gas, shopping, entertainment, household_, personal) =
             (C("Groceries"), C("Eating out"), C("Gas"), C("Shopping"), C("Entertainment"), C("Household"), C("Personal care"));
 
@@ -191,6 +197,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
                     NeedsReview = back == 0 && p.Category is not null && !p.Transfer,
                     CategoryReason = p.Category is null || p.Transfer ? null : back == 0 ? "Demo: filed automatically." : "Demo: reviewed.",
                     Pending = back == 0 && date >= today.AddDays(-1), Source = DataSource.Seed, CreatedUtc = now,
+                    IsPartnerTransfer = p.Merchant.Contains("Zelle payment from Partner", StringComparison.Ordinal),
                 });
             }
 

@@ -61,7 +61,8 @@ public static class BudgetGenerator
         IReadOnlyList<BudgetTransaction> transactions,
         bool hasCardDebt,
         IReadOnlyList<Debt.DebtInput>? cardDebts = null,
-        IReadOnlyList<CurrentBill>? currentBills = null)
+        IReadOnlyList<CurrentBill>? currentBills = null,
+        long? fixedPartnerCents = null)
     {
         var months = history.OrderBy(m => m.Start).TakeLast(MaxMonths).ToList();
         var n = months.Count;
@@ -79,7 +80,8 @@ public static class BudgetGenerator
         var partnerByMonth = months.Select(m => transactions
             .Where(t => m.Contains(t.Date) && !t.IsTransfer && t.Kind == TransactionKind.PartnerContribution && t.AmountCents < 0)
             .Sum(t => -t.AmountCents)).ToList();
-        var partner = Median(partnerByMonth);
+        // Milestone 7: with fixed contributions set up, partner money is exactly those (DECISIONS.md 97).
+        var partner = fixedPartnerCents ?? Median(partnerByMonth);
 
         var proposals = categories.Select(c =>
         {

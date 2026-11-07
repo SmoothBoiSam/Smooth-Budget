@@ -3,9 +3,18 @@ using System.Text.RegularExpressions;
 
 namespace SmoothBudget.Core.Transactions;
 
-/// <summary>A purchase the owner split with the partner. OwnerShare is the split factor (0.5 = half each).</summary>
-public sealed record SplitPurchase(Guid Id, DateOnly Date, string Merchant, long AmountCents, decimal OwnerShare)
+/// <summary>
+/// A purchase split with the partner. OwnerShare is the split factor (0.5 = half each). <see cref="PaidByPartner"/>: she paid,
+/// so the owner owes her his share (SPEC section 3: "a $120 purchase by the partner creates $60 owed to the partner").
+/// </summary>
+public sealed record SplitPurchase(Guid Id, DateOnly Date, string Merchant, long AmountCents, decimal OwnerShare, bool PaidByPartner = false)
 {
+    /// <summary>The owner's share in cents.</summary>
+    public long OwnerShareCents => AmountCents - PartnerShareCents;
+
+    /// <summary>What this does to the balance: + she owes the owner her share; − the owner owes her his.</summary>
+    public long BalanceEffectCents => PaidByPartner ? -OwnerShareCents : PartnerShareCents;
+
     /// <summary>What the partner owes for it, in cents (positive for a purchase, negative for a refund).</summary>
     public long PartnerShareCents => AmountCents - (OwnerShare == 1m ? AmountCents : (long)Math.Round(AmountCents * OwnerShare, 0, MidpointRounding.AwayFromZero));
 }
@@ -27,7 +36,9 @@ public enum PartnerPurpose
 public sealed record PartnerGuess(PartnerPurpose Purpose, bool Unsure, string Reason, Guid? MatchedPurchaseId = null);
 
 /// <param name="OwedToOwnerCents">Positive: the partner owes the owner. Negative: the owner owes her.</param>
-public sealed record SettleUpBalance(long OwedToOwnerCents, long SplitSharesCents, long SettledByHerCents, long SettledByOwnerCents);
+/// <param name="SplitSharesCents">Her share of what the owner paid for.</param>
+/// <param name="OwnerSharesOfHersCents">The owner's share of what she paid for.</param>
+public sealed record SettleUpBalance(long OwedToOwnerCents, long SplitSharesCents, long SettledByHerCents, long SettledByOwnerCents, long OwnerSharesOfHersCents = 0);
 
 /// <summary>
 /// Partner money beyond the fixed contribution (SPEC section 3, "Partner money", and Appendix D):
@@ -84,16 +95,18 @@ public static partial class PartnerMoney
     public static SettleUpBalance Balance(IReadOnlyList<SplitPurchase> splits, IReadOnlyList<PartnerTransfer> transfers, DateOnly? settledThrough = null)
     {
         bool After(DateOnly d) => settledThrough is not { } s || d > s;
-        var shares = splits.Where(s => After(s.Date)).Sum(s => s.PartnerShareCents);
+        var counted = splits.Where(s => After(s.Date)).ToList();
+        var shares = counted.Where(s => !s.PaidByPartner).Sum(s => s.PartnerShareCents);
+        var ownerSharesOfHers = counted.Where(s => s.PaidByPartner).Sum(s => s.OwnerShareCents);
         var settleUps = transfers.Where(t => t.Kind == TransactionKind.PartnerSettleUp && After(t.Date)).ToList();
         var byHer = settleUps.Where(t => t.AmountCents < 0).Sum(t => -t.AmountCents);
         var byOwner = settleUps.Where(t => t.AmountCents > 0).Sum(t => t.AmountCents);
-        return new SettleUpBalance(shares - byHer + byOwner, shares, byHer, byOwner);
+        return new SettleUpBalance(shares - ownerSharesOfHers - byHer + byOwner, shares, byHer, byOwner, ownerSharesOfHers);
     }
 
     /// <summary>The latest split purchase in the last few weeks whose partner share is exactly this amount.</summary>
     private static SplitPurchase? Match(long cents, DateOnly date, IReadOnlyList<SplitPurchase> splits) =>
-        splits.Where(s => s.Date <= date && s.Date >= date.AddDays(-MatchDays) && s.PartnerShareCents == cents)
+        splits.Where(s => !s.PaidByPartner && s.Date <= date && s.Date >= date.AddDays(-MatchDays) && s.PartnerShareCents == cents)
             .OrderByDescending(s => s.Date).FirstOrDefault();
 
     private static string Normalize(string s) => Whitespace().Replace(s.ToUpperInvariant(), " ").Trim();

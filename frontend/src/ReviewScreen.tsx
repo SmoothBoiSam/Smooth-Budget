@@ -553,7 +553,7 @@ function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void;
 }
 
 /** Who owes whom from split purchases and paying back (SPEC 4.8), with "mark settled". */
-function SettleUpCard({
+export function SettleUpCard({
   settle: s,
   partnerName,
   onSettled,

@@ -8,6 +8,7 @@ import {
   type BudgetGroup,
   type BudgetSummary,
   type Category,
+  type ContributionStatus,
   type Health,
   type LastMonth,
   type ReviewSummary,
@@ -363,6 +364,11 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
         {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
         {c.hasMonthOverride && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">this month only</span>}
       </p>
+      {c.partnerOffsetCents > 0 && (
+        <p className="mt-0.5 text-xs tabular-nums text-slate-500">
+          Partner covers {formatCents(c.partnerOffsetCents)} · your share <span className="font-medium text-slate-700">{formatCents(c.limitCents - c.partnerOffsetCents)}</span>
+        </p>
+      )}
     </>
   )
 }
@@ -512,7 +518,9 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
   const incomeCents = parseDollars(income)
   const partnerCents = parseDollars(partner)
   const over = s.unallocatedCents < 0
-  const partnerLabel = s.partnerName ? `From ${s.partnerName.split(' ')[0]}` : 'Partner contributions'
+  const first = s.partnerName ? titleCase(s.partnerName.split(' ')[0]) : null
+  const partnerLabel = first ? `From ${first}` : 'Partner contributions'
+  const fixed = s.contributions ?? []
 
   return (
     <section aria-labelledby="income-h" className="mt-6 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
@@ -539,7 +547,17 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
           }}
         >
           <MoneyField label="Your expected income" value={income} onChange={setIncome} />
-          <MoneyField label={`${partnerLabel}, expected`} value={partner} onChange={setPartner} />
+          {fixed.length > 0 ? (
+            <p className="text-xs text-slate-500">
+              {partnerLabel}: set on the{' '}
+              <a href="#/partner" className="underline">
+                Partner screen
+              </a>
+              .
+            </p>
+          ) : (
+            <MoneyField label={`${partnerLabel}, expected`} value={partner} onChange={setPartner} />
+          )}
           <button
             type="submit"
             disabled={incomeCents === null || partnerCents === null}
@@ -557,12 +575,16 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
                 {formatCents(s.incomeExpectedCents)} <span className="text-xs text-slate-500">· {formatCents(s.incomeReceivedCents)} in so far</span>
               </dd>
             </div>
+            {fixed.length === 0 ? (
             <div className="flex justify-between gap-3">
               <dt className="text-slate-600">{partnerLabel}</dt>
               <dd className="tabular-nums">
                 {formatCents(s.partnerExpectedCents)} <span className="text-xs text-slate-500">· {formatCents(s.partnerReceivedCents)} in so far</span>
               </dd>
             </div>
+            ) : (
+              fixed.map((f) => <ContributionRow key={f.arrangementId} f={f} who={first ?? 'Partner'} />)
+            )}
           </dl>
           <dl className="mt-3 grid grid-cols-2 gap-2 text-center">
             <div className="rounded-xl bg-slate-50 p-2">
@@ -616,3 +638,28 @@ function MoneyField({ label, value, onChange }: { label: string; value: string; 
   )
 }
 
+
+/** A fixed contribution this month (SPEC section 3): expected until her window passes, then received, short, or late. */
+function ContributionRow({ f, who }: { f: ContributionStatus; who: string }) {
+  const note =
+    f.state === 'received'
+      ? { text: 'received', cls: 'text-emerald-700' }
+      : f.state === 'expected'
+        ? { text: `expected by ${formatDay(f.windowEnd)}`, cls: 'text-slate-500' }
+        : f.state === 'late'
+          ? { text: 'late: Left to Spend counts without it', cls: 'font-medium text-red-600' }
+          : {
+              text: `${formatCents(f.receivedCents)} came, not ${formatCents(f.expectedCents)}${f.shortfallCents > 0 ? ': Left to Spend counts without the rest' : ''}`,
+              cls: 'font-medium text-amber-600',
+            }
+  return (
+    <div className="flex justify-between gap-3">
+      <dt className="text-slate-600">
+        {who} toward {f.categoryName}
+      </dt>
+      <dd className="text-right tabular-nums">
+        {formatCents(f.expectedCents)} <span className={`block text-xs ${note.cls}`}>{note.text}</span>
+      </dd>
+    </div>
+  )
+}

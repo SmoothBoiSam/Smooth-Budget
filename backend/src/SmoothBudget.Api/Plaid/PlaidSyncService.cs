@@ -182,6 +182,8 @@ public class PlaidSyncService(CategorizationService categorization,
             await db.SaveChangesAsync(ct);
             if (touchedDates.Count > 0)
                 await transfers.RunAsync(item.HouseholdId, touchedDates.Min(), touchedDates.Max(), ct);
+            if (touchedDates.Count > 0)
+                await categorization.MatchContributionsAsync(item.HouseholdId, ct); // which transfer was her contribution
             item.Cursor = cursor;
             item.LastSyncedUtc = now;
             item.Status = PlaidItemStatus.Active;

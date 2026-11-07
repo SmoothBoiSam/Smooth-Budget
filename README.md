@@ -3,7 +3,7 @@
 A phone-first budgeting app whose Home screen answers one question: **how much do I have left to spend this month?**
 The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. `DECISIONS.md` records the choices made where the spec is silent.
 
-**Status:** Milestone 6 (bills and subscriptions):
+**Status:** Milestone 7 (partner):
 - **Milestone 1:** auth, database, CI, fake-data seed, and a Home screen showing Left to Spend.
 - **Milestone 2:** CSV import for Chase checking, Chase credit and Apple Card; categorization by bank category and merchant rules; card payment and transfer detection; and an inbox for transactions that still need a category.
 - **Milestone 3:** Plaid Link, cursor-based sync, verified webhooks, background sync, pending-to-posted handling, CSV/Plaid overlap matching, and sync health on Home.
@@ -11,6 +11,7 @@ The full spec (`SPEC.md`) stays out of the repo because its appendices contain r
 - **Since milestone 4:** categories discovered from your own transactions, every automatic category reviewed in its own Review tab, one budget line per bill, no double counting of card payments or transfers, and partner splits with a settle-up balance.
 - **Milestone 5:** the Debt tab: cards followed from their accounts and loans by hand, APR and minimum from the bank where it shares them (Plaid Liabilities), the payoff engine (Avalanche by default, Snowball compared), debt-free date, payoff chart, an "extra each month" what-if slider, utilization and progress. The budget generator proposes card minimums plus what's left to the highest APR, and sweeps go to the highest APR.
 - **Milestone 6:** bills and subscriptions found from your transactions (More → Bills & subscriptions): monthly and annual totals, price changes, charges that stopped, possible duplicates, rename, bill vs subscription, due day, dismiss, and "make it its own bill line". The next 3 bills show on Home, and the budget generator proposes bills at their current price.
+- **Milestone 7:** the Partner screen (More → Partner): a fixed contribution (e.g. $800 toward Rent) shown as an offset on its bill line with your net share, matched to her transfers in a window (the 18th to 24th by default) with expected, received, different-amount and late states (late or short money comes out of Left to Spend), split categories, purchases she paid for, and the settle-up balance.
 - **Also:** dark mode (More → Settings → Appearance: System, Light or Dark).
 
 ## Stack

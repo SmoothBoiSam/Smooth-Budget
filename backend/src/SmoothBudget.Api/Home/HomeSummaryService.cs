@@ -28,7 +28,10 @@ public record HomeSummaryDto(
     // Automatic category guesses this month waiting for you to confirm.
     int ReviewCount = 0,
     // The next 3 bills and subscriptions due (SPEC 4.2).
-    IReadOnlyList<Bills.UpcomingBillDto>? UpcomingBills = null);
+    IReadOnlyList<Bills.UpcomingBillDto>? UpcomingBills = null,
+    // The partner's fixed contributions this month, for the late flag on Home (SPEC section 3).
+    IReadOnlyList<Budget.ContributionStatusDto>? Contributions = null,
+    long PartnerShortfallCents = 0);
 
 /// <summary>A "send $X to …" item from a closed month that the user hasn't marked as sent yet.</summary>
 public record PendingSweepDto(Guid Id, string Kind, long AmountCents, string Destination, string FromMonth);
@@ -44,12 +47,14 @@ public sealed record CurrentMonthData(
     DateTime? LastUpdatedUtc,
     IReadOnlyList<ItemSyncInfo> Connections,
     IReadOnlyList<PendingSweepDto> PendingSweeps,
-    int ReviewCount)
+    int ReviewCount,
+    IReadOnlyList<ContributionStatus>? Contributions = null,
+    long PartnerShortfallCents = 0)
 {
     public IReadOnlyList<BudgetCategory> CalculatorCategories => Categories.Select(c => c.ForCalculator).ToList();
 
     public LeftToSpendResult LeftToSpend() =>
-        LeftToSpendCalculator.Calculate(Month, Today, CalculatorCategories, Transactions, CarriedInDeficitCents);
+        LeftToSpendCalculator.Calculate(Month, Today, CalculatorCategories, Transactions, CarriedInDeficitCents, PartnerShortfallCents);
 
     public BudgetMonthDto MonthDto => new(Month.Start, Month.End, Month.Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture));
 
@@ -98,7 +103,7 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             lastUpdated, connections,
             pendingSweeps.Select(s => new PendingSweepDto(s.Id, s.Kind.ToString(), s.AmountCents, s.Destination,
                 calendar.MonthContaining(s.StartDate).Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture))).ToList(),
-            reviewCount);
+            reviewCount, month.Contributions, month.PartnerShortfallCents);
     }
 }
 
@@ -128,7 +133,9 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             Sync: SyncStatus.For(data.Connections, clock.GetUtcNow().UtcDateTime),
             PendingSweeps: data.PendingSweeps,
             ReviewCount: data.ReviewCount,
-            UpcomingBills: await recurring.UpcomingAsync(householdId, 3, ct));
+            UpcomingBills: await recurring.UpcomingAsync(householdId, 3, ct),
+            Contributions: Budget.ContributionStatusDto.From(data.Contributions, data.Categories),
+            PartnerShortfallCents: data.PartnerShortfallCents);
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

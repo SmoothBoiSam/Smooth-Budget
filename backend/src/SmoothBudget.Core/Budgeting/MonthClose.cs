@@ -29,10 +29,12 @@ public static class MonthCloseCalculator
         BudgetMonthRange month,
         IEnumerable<BudgetCategory> categories,
         IEnumerable<BudgetTransaction> transactions,
-        long carriedInDeficitCents)
+        long carriedInDeficitCents,
+        long partnerShortfallCents = 0)
     {
         if (carriedInDeficitCents < 0)
             throw new ArgumentOutOfRangeException(nameof(carriedInDeficitCents), "A carried-in deficit is a positive amount of cents.");
+        ArgumentOutOfRangeException.ThrowIfNegative(partnerShortfallCents);
 
         var cats = categories.ToList();
         var lines = CategoryBreakdownCalculator.Calculate(month, cats, transactions);
@@ -40,7 +42,8 @@ public static class MonthCloseCalculator
 
         var unspent = spending.Where(l => l.RemainingCents > 0).Sum(l => l.RemainingCents);
         var overspent = spending.Where(l => l.RemainingCents < 0).Sum(l => -l.RemainingCents);
-        var net = unspent - overspent - carriedInDeficitCents;
+        // A partner contribution that never came (or came short) is missing money, like a deficit (SPEC section 3).
+        var net = unspent - overspent - carriedInDeficitCents - partnerShortfallCents;
 
         return new MonthCloseResult(month, unspent, overspent, carriedInDeficitCents, net,
             SurplusCents: Math.Max(0, net),

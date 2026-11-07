@@ -1,5 +1,5 @@
 // Bottom tab bar from SPEC section 4, plus Review (DECISIONS.md 87). Bills, Partner and Settings live under More.
-export type Route = 'home' | 'budget' | 'review' | 'debt' | 'more' | 'bills'
+export type Route = 'home' | 'budget' | 'review' | 'debt' | 'more' | 'bills' | 'partner'
 
 const tabs: { label: string; route?: Route }[] = [
   { label: 'Home', route: 'home' },
@@ -32,7 +32,7 @@ export default function BottomNav({ route, inboxCount }: { route: Route; inboxCo
               </li>
             )
           }
-          const active = tab.route === route || (tab.route === 'more' && route === 'bills') // Bills lives under More
+          const active = tab.route === route || (tab.route === 'more' && (route === 'bills' || route === 'partner')) // Bills and Partner live under More
           return (
             <li key={tab.label} className="flex-1">
               <a

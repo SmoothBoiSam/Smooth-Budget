@@ -7,6 +7,7 @@ import DebtScreen from './DebtScreen'
 import HomeScreen from './HomeScreen'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
+import PartnerScreen from './PartnerScreen'
 import ReviewScreen from './ReviewScreen'
 
 function currentRoute(): Route {
@@ -16,7 +17,7 @@ function currentRoute(): Route {
     window.history.replaceState(null, '', '#/review')
     return 'review'
   }
-  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'bills' ? 'bills' : hash === 'more' ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'bills' ? 'bills' : hash === 'partner' ? 'partner' : hash === 'more' ? 'more' : 'home'
 }
 
 export default function App() {
@@ -61,6 +62,7 @@ export default function App() {
       {route === 'review' && <ReviewScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'bills' && <BillsScreen onSignedOut={signedOut} />}
+      {route === 'partner' && <PartnerScreen onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
       <BottomNav route={route} inboxCount={inboxCount} />
     </>

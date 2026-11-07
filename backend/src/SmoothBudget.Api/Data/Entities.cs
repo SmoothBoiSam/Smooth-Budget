@@ -188,6 +188,8 @@ public class Transaction
     public decimal SplitFactor { get; set; } = 1m;
     /// <summary>Money to or from the partner (by the name in Settings): its purpose waits for the user (DECISIONS.md 86).</summary>
     public bool IsPartnerTransfer { get; set; }
+    /// <summary>A purchase your partner paid for and you entered: your share counts in your budget, and you owe her it (SPEC section 3).</summary>
+    public bool PaidByPartner { get; set; }
 
     public long PartnerOffsetCents { get; set; }
     public DataSource Source { get; set; }
@@ -334,4 +336,24 @@ public class RecurringItem
     /// <summary>The price you acknowledged after a change, so the flag clears until it changes again.</summary>
     public long? AcknowledgedAmountCents { get; set; }
     public DateTime UpdatedUtc { get; set; }
+}
+
+/// <summary>
+/// A fixed contribution from the partner toward one category (SPEC 3 and 4.8; the data model's PartnerArrangement).
+/// Split categories are on <see cref="Category.PartnerSharePercent"/>. Both belong to the household, so a partner
+/// login can be added later without moving them.
+/// </summary>
+public class PartnerArrangement
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public Guid CategoryId { get; set; }
+    public Category Category { get; set; } = null!;
+    public long AmountCents { get; set; }
+    /// <summary>When it usually arrives in the budget month (Appendix D: the 18th to the 24th).</summary>
+    public int WindowFromDay { get; set; } = 18;
+    public int WindowToDay { get; set; } = 24;
+    /// <summary>The first budget month it applies to; earlier months aren't changed.</summary>
+    public DateOnly StartsOn { get; set; }
+    public DateTime CreatedUtc { get; set; }
 }
