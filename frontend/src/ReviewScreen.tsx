@@ -586,7 +586,7 @@ function SettleUpCard({
           <p className="mt-2 text-xs text-slate-500">
             {first}’s share of split purchases {formatCents(s.splitSharesCents)} − paid you back {formatCents(s.paidBackByPartnerCents)} + you paid back{' '}
             {formatCents(s.paidBackByYouCents)}
-            {s.settledThrough && ` · since you marked it settled on ${formatDay(s.settledThrough)}`}.
+            {s.settledThrough && ` · counting what happened after ${formatDay(s.settledThrough)}`}. Only paying back you’ve confirmed counts; the app’s guesses never do.
           </p>
           <ul className="mt-2 divide-y divide-slate-100 text-sm">
             {s.items.slice(0, 8).map((i) => (

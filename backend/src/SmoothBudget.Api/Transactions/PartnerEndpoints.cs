@@ -22,13 +22,16 @@ public static class PartnerEndpoints
             new PartnerSettingsDto(await db.Households.Where(h => h.Id == ctx.User.HouseholdId()).Select(h => h.PartnerName).SingleAsync(ct)));
 
         // Saving re-tags every incoming transfer: from that name it's partner money, otherwise your income.
-        g.MapPut("", async (PartnerSettingsDto req, HttpContext ctx, AppDbContext db, CategorizationService categorization, CancellationToken ct) =>
+        g.MapPut("", async (PartnerSettingsDto req, HttpContext ctx, AppDbContext db, CategorizationService categorization, TimeProvider clock, CancellationToken ct) =>
         {
             var name = string.IsNullOrWhiteSpace(req.PartnerName) ? null : req.PartnerName.Trim();
             if (name is { Length: > 100 or < 2 })
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerName"] = ["Use 2 to 100 characters."] });
             var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
             h.PartnerName = name;
+            // Settle-up starts today: money from her before now is her contribution, as it always was (DECISIONS.md 92).
+            if (name is not null)
+                h.PartnerSettledThrough ??= Home.HomeSummaryService.TodayIn(h.TimeZoneId, clock);
             await db.SaveChangesAsync(ct);
             return Results.Ok(await categorization.RunAsync(h.Id, ct));
         });
@@ -61,7 +64,7 @@ public static class PartnerEndpoints
         p.MapPost("/settle-up/settled", async (HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
-            h.PartnerSettledThrough = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+            h.PartnerSettledThrough = Home.HomeSummaryService.TodayIn(h.TimeZoneId, clock);
             await db.SaveChangesAsync(ct);
             return await SettleUpAsync(db, h.Id, ct);
         });
@@ -73,7 +76,9 @@ public static class PartnerEndpoints
         var after = h.PartnerSettledThrough;
         var splits = await CategorizationService.SplitPurchasesAsync(db, householdId, after, ct);
         var transfers = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.Kind == TransactionKind.PartnerSettleUp && (after == null || t.Date > after))
+            // Only paying back you confirmed: the app's guesses never move money between you (DECISIONS.md 92).
+            .Where(t => t.HouseholdId == householdId && t.Kind == TransactionKind.PartnerSettleUp && t.CategorySource == CategorySource.User
+                        && (after == null || t.Date > after))
             .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant, t.Kind })
             .ToListAsync(ct);
         var b = PartnerMoney.Balance(splits, transfers.Select(t => new PartnerTransfer(t.Id, t.Date, t.AmountCents, t.Kind)).ToList());

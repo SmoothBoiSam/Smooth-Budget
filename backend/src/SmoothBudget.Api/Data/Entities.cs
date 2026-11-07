@@ -34,7 +34,10 @@ public class Household
 
     /// <summary>The partner's name as it appears on incoming transfers ("Zelle payment from ..."); set in Settings.</summary>
     public string? PartnerName { get; set; }
-    /// <summary>The last day the user marked the settle-up balance as settled.</summary>
+    /// <summary>
+    /// Settle-up starts after this day (DECISIONS.md 92): set to the day you first name your partner, and moved up when
+    /// you mark it settled. Partner money before it is her contribution, as it always was.
+    /// </summary>
     public DateOnly? PartnerSettledThrough { get; set; }
     /// <summary>How extra debt payments are aimed: Avalanche (highest APR first, the default) or Snowball.</summary>
     public SmoothBudget.Core.Debt.DebtStrategy DebtStrategy { get; set; }

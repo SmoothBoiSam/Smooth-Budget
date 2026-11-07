@@ -12,7 +12,8 @@ public sealed class CategorizationContext(
     IReadOnlyDictionary<string, MerchantHistory> history,
     string? partnerName,
     IReadOnlyDictionary<Guid, int>? partnerSharePercent = null,
-    IReadOnlyList<SplitPurchase>? recentSplits = null)
+    IReadOnlyList<SplitPurchase>? recentSplits = null,
+    DateOnly? settleUpAfter = null)
 {
     public IReadOnlyDictionary<string, Guid> CategoryIdsByName { get; } = categoryIdsByName;
 
@@ -49,6 +50,12 @@ public sealed class CategorizationContext(
             if (!fromPartner)
             {
                 (t.Kind, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) = (TransactionKind.Income, false, false, null);
+                return;
+            }
+            if (settleUpAfter is null || t.Date <= settleUpAfter)
+            {
+                // Before settle-up tracking started: her money is her contribution, as it always was (DECISIONS.md 92).
+                (t.Kind, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) = (TransactionKind.PartnerContribution, false, false, null);
                 return;
             }
             var g = PartnerMoney.Guess(new PartnerTransfer(t.Id, t.Date, t.AmountCents, t.Kind), recentSplits ?? [], partnerName!);
@@ -118,11 +125,12 @@ public class CategorizationService(AppDbContext db)
         var history = choices.Where(c => live.Contains(c.CategoryId)).GroupBy(c => c.Merchant)
             .ToDictionary(g => g.Key, g => new MerchantHistory(g.Key, g.ToDictionary(x => x.CategoryId, x => x.Count)));
 
-        var partner = await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct);
+        var h = await db.Households.Where(x => x.Id == householdId)
+            .Select(x => new { x.PartnerName, x.PartnerSettledThrough }).SingleAsync(ct);
         var shares = await db.Categories.Where(c => c.HouseholdId == householdId && c.PartnerSharePercent > 0)
             .ToDictionaryAsync(c => c.Id, c => c.PartnerSharePercent, ct);
-        var splits = partner is null ? [] : await SplitPurchasesAsync(db, householdId, null, ct);
-        return new CategorizationContext(rules, categories, history, partner, shares, splits);
+        var splits = h.PartnerName is null ? [] : await SplitPurchasesAsync(db, householdId, null, ct);
+        return new CategorizationContext(rules, categories, history, h.PartnerName, shares, splits, h.PartnerSettledThrough);
     }
 
     /// <summary>Purchases the owner split with the partner (her share is owed to him), optionally only after a date.</summary>
