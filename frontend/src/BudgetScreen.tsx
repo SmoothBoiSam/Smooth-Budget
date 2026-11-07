@@ -12,6 +12,8 @@ import {
   type Health,
   type LastMonth,
   type ReviewSummary,
+  type RecurringItem,
+  recurringApi,
   type Transaction,
 } from './api'
 import BudgetPlanner from './BudgetPlanner'
@@ -48,6 +50,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [month, setMonth] = useState<Transaction[]>([])
   const [inbox, setInbox] = useState<Transaction[]>([])
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null)
+  const [bills, setBills] = useState<RecurringItem[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
@@ -66,17 +69,19 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   const load = useCallback(async () => {
     try {
-      const [s, m, i, c, rs] = await Promise.all([
+      const [s, m, i, c, rs, rec] = await Promise.all([
         budgetSummaryApi.get(),
         budgetApi.monthTransactions(),
         budgetApi.inbox(),
         budgetApi.categories(),
         budgetApi.reviewSummary(),
+        recurringApi.summary().catch(() => null), // the bill list is extra: the budget still shows without it
       ])
       setSummary(s)
       setMonth(m.items)
       setInbox(i)
       setReviewSummary(rs)
+      setBills(rec?.items ?? [])
       setCategories(c)
       setError(null)
     } catch (e) {
@@ -167,6 +172,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {summary && view.kind === 'overview' && (
         <Overview
           summary={summary}
+          bills={bills}
           inboxCount={inbox.length}
           guessCount={reviewSummary?.month.total ?? 0}
           onAdd={() => setEditing(null)}
@@ -225,6 +231,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
 function Overview({
   summary: s,
+  bills,
   inboxCount,
   guessCount,
   onAdd,
@@ -233,6 +240,7 @@ function Overview({
   onIncome,
 }: {
   summary: BudgetSummary
+  bills: RecurringItem[]
   inboxCount: number
   guessCount: number
   onAdd: () => void
@@ -295,7 +303,7 @@ function Overview({
       <IncomeCard summary={s} onIncome={onIncome} />
 
       {s.groups.map((g) => (
-        <Group key={g.type} group={g} />
+        <Group key={g.type} group={g} bills={g.type === 'FixedBill' ? bills : []} month={s.budgetMonth} today={s.today} />
       ))}
 
       <div className="mt-6 grid grid-cols-2 gap-3">
@@ -318,8 +326,23 @@ function Overview({
   )
 }
 
-function Group({ group: g }: { group: BudgetGroup }) {
+function Group({
+  group: g,
+  bills,
+  month,
+  today,
+}: {
+  group: BudgetGroup
+  bills: RecurringItem[]
+  month: { start: string; end: string }
+  today: string
+}) {
   const spending = g.countsTowardLeftToSpend
+  // Each detected bill and subscription under the bill line it's filed in (DECISIONS.md 101); ones filed elsewhere
+  // (a streaming charge in Entertainment) are listed after, so every recurring charge shows here individually.
+  const live = bills.filter((b) => b.status !== 'canceled')
+  const lineIds = new Set(g.categories.map((c) => c.id))
+  const elsewhere = live.filter((b) => !b.categoryId || !lineIds.has(b.categoryId))
   return (
     <section aria-labelledby={`g-${g.type}`} className="mt-7">
       <div className="flex items-baseline justify-between gap-3">
@@ -335,15 +358,75 @@ function Group({ group: g }: { group: BudgetGroup }) {
         <p className="text-xs text-slate-400">Card payments count only what you pay beyond this month’s card purchases, which already count in their own categories.</p>
       )}
       <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
-        {g.categories.map((c) => (
-          <li key={c.id}>
-            <a href={`#/budget/c/${c.id}`} className="block px-4 py-3 hover:bg-slate-50">
-              <CategoryRow line={c} spending={spending} />
-            </a>
-          </li>
-        ))}
+        {g.categories.map((c) => {
+          const items = live.filter((b) => b.categoryId === c.id)
+          return (
+            <li key={c.id}>
+              <a href={`#/budget/c/${c.id}`} className="block px-4 py-3 hover:bg-slate-50">
+                <CategoryRow line={c} spending={spending} />
+              </a>
+              {items.length > 0 && (
+                <ul className="mb-2 ml-4 mr-4 divide-y divide-slate-100 border-l-2 border-slate-100 pl-3">
+                  {items.map((b) => (
+                    <BillItemRow key={b.key} b={b} month={month} today={today} />
+                  ))}
+                </ul>
+              )}
+            </li>
+          )
+        })}
       </ul>
+      {elsewhere.length > 0 && (
+        <>
+          <p className="mt-3 text-xs text-slate-500">
+            Also recurring, but filed under spending categories. Make one its own bill line on the{' '}
+            <a href="#/bills" className="underline">
+              Bills screen
+            </a>
+            .
+          </p>
+          <ul className="mt-1 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white px-4 ring-1 ring-slate-200">
+            {elsewhere.map((b) => (
+              <BillItemRow key={b.key} b={b} month={month} today={today} showCategory />
+            ))}
+          </ul>
+        </>
+      )}
     </section>
+  )
+}
+
+/** One bill or subscription: paid this budget month, due (or late), or next due after it. */
+function BillItemRow({ b, month, today, showCategory }: { b: RecurringItem; month: { start: string; end: string }; today: string; showCategory?: boolean }) {
+  const paidThisMonth = b.lastDate >= month.start && b.lastDate <= month.end
+  const [text, cls] =
+    b.status === 'possiblyCanceled'
+      ? [`Stopped? Last ${formatDay(b.lastDate)}`, 'text-slate-400']
+      : paidThisMonth
+        ? [`Paid ${formatDay(b.lastDate)}`, 'text-emerald-700']
+        : b.nextExpected < today
+          ? [`Due ${formatDay(b.nextExpected)}: not seen yet`, 'text-amber-600']
+          : b.nextExpected <= month.end
+            ? [`Due ${formatDay(b.nextExpected)}`, 'text-slate-500']
+            : [`Next ${formatDay(b.nextExpected)}`, 'text-slate-400']
+  return (
+    <li>
+      <a href="#/bills" className="flex items-baseline justify-between gap-3 py-2 text-sm">
+        <span className="min-w-0">
+          <span className="block truncate">{b.name}</span>
+          <span className={`block text-xs ${cls}`}>
+            {text}
+            {showCategory && b.categoryName && <span className="text-slate-400"> · in {b.categoryName}</span>}
+          </span>
+        </span>
+        <span className="shrink-0 tabular-nums">
+          {formatCents(b.amountCents)}
+          {(b.status === 'priceUp' || b.status === 'priceDown') && (
+            <span className="block text-right text-[11px] text-amber-600">{b.status === 'priceUp' ? 'price went up' : 'price went down'}</span>
+          )}
+        </span>
+      </a>
+    </li>
   )
 }
 

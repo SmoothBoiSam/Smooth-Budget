@@ -180,7 +180,7 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         var today = await TodayAsync(householdId, ct);
         var since = today.AddMonths(-HistoryMonths);
         var txns = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.Date >= since && t.Account.IncludedInBudget && !t.IsTransfer && !t.Pending
+            .Where(t => t.HouseholdId == householdId && t.Date >= since && t.Account.IncludedInBudget && !t.IsTransfer
                         && t.AmountCents > 0 && (t.Kind == TransactionKind.Purchase || t.Kind == TransactionKind.Other))
             .Select(t => new RecurringTxn(t.Id, t.Date, t.AmountCents, t.Merchant, t.AccountId, t.CategoryId,
                 t.Category != null ? t.Category.Type : null))
