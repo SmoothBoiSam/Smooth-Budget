@@ -21,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\SmoothBudget.Core.Tests\PayFixtures.cs" Link="PayFixtures.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\SmoothBudget.Api\SmoothBudget.Api.csproj" />
     <ProjectReference Include="..\..\src\SmoothBudget.Core\SmoothBudget.Core.csproj" />
   </ItemGroup>

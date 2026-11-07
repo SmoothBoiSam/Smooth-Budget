@@ -608,6 +608,165 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("PartnerArrangements");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.PayPeriodForecast", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("ActualGrossCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ActualNetCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ActualSource")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<Guid?>("DepositTransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("HighNetCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("LowNetCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("PayDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("PeriodEnd")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("PeriodStart")
+                        .HasColumnType("date");
+
+                    b.Property<long>("PredictedGrossCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PredictedNetCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId", "PayDate")
+                        .IsUnique();
+
+                    b.ToTable("PayPeriodForecasts");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.PayProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FlatNetPercent")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("FullTime")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("HolidayPay")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ModelJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RulesJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("YearsOfService")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId")
+                        .IsUnique();
+
+                    b.ToTable("PayProfiles");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.PayStub", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("GrossCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Json")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("NetCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("PayDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("PeriodEnd")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("PeriodStart")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId", "PayDate")
+                        .IsUnique();
+
+                    b.ToTable("PayStubs");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.PaydayChecklistItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateOnly>("PayDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId", "PayDate", "Key")
+                        .IsUnique();
+
+                    b.ToTable("PaydayChecklistItems");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.PlaidItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -752,6 +911,52 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasIndex("HouseholdId");
 
                     b.ToTable("SavingsGoals");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.ScheduleMonth", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ImportedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Json")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OvertimeKeys")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PaidEntryKeys")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Reserve")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId", "Year", "Month")
+                        .IsUnique();
+
+                    b.ToTable("ScheduleMonths");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.SweepTask", b =>

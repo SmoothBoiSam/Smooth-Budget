@@ -235,6 +235,20 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
         </li>
       </ul>
 
+      {s.nextPayday && (
+        <a href="#/payday" className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
+          <span>
+            <span className="font-medium">Next payday · {formatDay(s.nextPayday.payDate)}</span>
+            <span className="block text-xs text-slate-500">
+              {s.nextPayday.hasSchedule
+                ? `Range ${formatCents(s.nextPayday.lowNetCents)}–${formatCents(s.nextPayday.highNetCents)}${s.nextPayday.lowConfidence ? ' · low confidence' : ''}`
+                : 'Import the schedule to forecast it'}
+            </span>
+          </span>
+          {s.nextPayday.hasSchedule && <span className="shrink-0 font-semibold tabular-nums">about {formatCents(s.nextPayday.netCents)}</span>}
+        </a>
+      )}
+
       {s.upcomingBills && s.upcomingBills.length > 0 && (
         <section aria-labelledby="upcoming-h" className="mt-6">
           <div className="flex items-baseline justify-between">

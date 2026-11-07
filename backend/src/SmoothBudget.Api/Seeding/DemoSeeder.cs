@@ -5,6 +5,7 @@ using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Core.Budgeting;
 using SmoothBudget.Core.Import;
+using SmoothBudget.Core.Pay;
 using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Seeding;
@@ -212,6 +213,32 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         await months.CloseAsync(householdId, rows[0], ct);
         await months.CloseAsync(householdId, rows[1], ct);
         await db.SweepTasks.Where(s => s.BudgetMonthId == rows[0].Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.DoneUtc, now), ct);
+
+        // Pay (milestone 9): a profile, four invented stubs for the latest checks, and invented trips this month and next.
+        await db.PayProfiles.Where(x => x.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.ScheduleMonths.Where(x => x.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.PayStubs.Where(x => x.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.PayPeriodForecasts.Where(x => x.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        await db.PaydayChecklistItems.Where(x => x.HouseholdId == householdId).ExecuteDeleteAsync(ct);
+        var rules = PayRules.Default;
+        db.PayProfiles.Add(new PayProfile { Id = Guid.NewGuid(), HouseholdId = householdId, UpdatedUtc = now });
+        var paid = PayCalendar.From(today.AddMonths(-3), rules).TakeWhile(p => p.PayDate < today).TakeLast(4).ToList();
+        foreach (var (p, i) in paid.Select((p, i) => (p, i)))
+        {
+            var stub = DemoPay.Stub(p, i);
+            db.PayStubs.Add(new PayStub
+            {
+                Id = Guid.NewGuid(), HouseholdId = householdId, PayDate = stub.PayDate, PeriodStart = stub.PeriodStart, PeriodEnd = stub.PeriodEnd,
+                GrossCents = stub.GrossCents, NetCents = stub.NetCents, Json = System.Text.Json.JsonSerializer.Serialize(stub, Payday.PaydayService.Json), CreatedUtc = now,
+            });
+        }
+        foreach (var first in new[] { new DateOnly(today.Year, today.Month, 1), new DateOnly(today.Year, today.Month, 1).AddMonths(1) })
+            db.ScheduleMonths.Add(new ScheduleMonth
+            {
+                Id = Guid.NewGuid(), HouseholdId = householdId, Year = first.Year, Month = first.Month, Source = "text", ImportedUtc = now,
+                Json = System.Text.Json.JsonSerializer.Serialize(DemoPay.Schedule(first.Year, first.Month, rules), Payday.PaydayService.Json),
+            });
+        await db.SaveChangesAsync(ct);
 
         log.LogInformation("Seeded household {HouseholdId}: budget months {First}..{Last} (today {Today})", householdId, rows[0].StartDate, month.End, today);
     }

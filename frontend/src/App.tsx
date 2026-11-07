@@ -9,6 +9,8 @@ import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
 import PartnerScreen from './PartnerScreen'
 import ReviewScreen from './ReviewScreen'
+import PaydayScreen from './PaydayScreen'
+import PaySetupScreen from './PaySetupScreen'
 import SavingsScreen from './SavingsScreen'
 
 function currentRoute(): Route {
@@ -18,7 +20,7 @@ function currentRoute(): Route {
     window.history.replaceState(null, '', '#/review')
     return 'review'
   }
-  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'bills' ? 'bills' : hash === 'partner' ? 'partner' : hash === 'more' ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash === 'payday/setup' ? 'paysetup' : hash === 'bills' ? 'bills' : hash === 'partner' ? 'partner' : hash === 'more' ? 'more' : 'home'
 }
 
 export default function App() {
@@ -63,6 +65,8 @@ export default function App() {
       {route === 'review' && <ReviewScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
+      {route === 'payday' && <PaydayScreen onSignedOut={signedOut} />}
+      {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
       {route === 'bills' && <BillsScreen onSignedOut={signedOut} />}
       {route === 'partner' && <PartnerScreen onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}

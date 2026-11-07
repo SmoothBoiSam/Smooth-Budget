@@ -1,0 +1,189 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using SmoothBudget.Api.Auth;
+using SmoothBudget.Api.Data;
+using SmoothBudget.Api.Home;
+using SmoothBudget.Api.Import;
+using SmoothBudget.Api.Payday;
+using SmoothBudget.Core.Pay;
+using SmoothBudget.Core.Tests;
+using SmoothBudget.Core.Transactions;
+
+namespace SmoothBudget.Api.Tests;
+
+/// <summary>
+/// Milestone 9: schedule import, pay stub import and learning, the forecast and payday plan, and predicted vs actual.
+/// Every schedule, stub and amount is invented (PayFixtures).
+/// </summary>
+public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
+{
+    private static readonly JsonSerializerOptions Json = PaydayService.Json;
+
+    private async Task<HttpClient> NewUserAsync(DateTimeOffset now)
+    {
+        app.Clock.SetUtcNow(now);
+        var client = app.CreateClient();
+        await client.PostAsJsonAsync("/api/auth/register", new RegisterRequest($"{Guid.NewGuid():N}@example.test", "Test-password-1"));
+        return client;
+    }
+
+    private static async Task<HttpResponseMessage> Upload(HttpClient c, string url, byte[] bytes, string fileName, string type, bool? confirm = null)
+    {
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue(type);
+        form.Add(file, "file", fileName);
+        if (confirm is not null) form.Add(new StringContent(confirm.Value ? "true" : "false"), "confirm");
+        return await c.PostAsync(url, form);
+    }
+
+    private static Task<HttpResponseMessage> Schedule(HttpClient c, string text, string name, bool confirm) =>
+        Upload(c, "/api/payday/schedule", Encoding.UTF8.GetBytes(text), name, "text/plain", confirm);
+
+    private static async Task<PaydayDto> Payday(HttpClient c) => (await c.GetFromJsonAsync<PaydayDto>("/api/payday", Json))!;
+
+    [Fact]
+    public async Task A_schedule_is_previewed_then_saved_and_each_check_is_forecast_by_day()
+    {
+        var c = await NewUserAsync(new DateTimeOffset(2027, 1, 25, 18, 0, 0, TimeSpan.Zero));
+
+        // Preview: the grouped trips to confirm, nothing saved yet.
+        var preview = await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: false);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var month = (await preview.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("month").Deserialize<ScheduleMonthDto>(Json)!;
+        Assert.Equal((2027, 2, "text", 2, 1834, 80 * 60 - 1834), (month.Year, month.Month, month.Source, month.Trips.Count, month.CreditMinutes, month.ShortfallMinutes));
+        Assert.Equal((1078, 4311, 10), (month.Trips[0].CreditMinutes, month.Trips[0].TafbMinutes, month.Trips[0].RevenueLegs));
+        Assert.Equal(Hm.Pay(1078, 30_32) + 75_80 + 161_66, month.Trips[0].PayCents); // credit + boarding + per diem
+        Assert.Empty(month.Warnings);
+        Assert.Empty((await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))!);
+
+        Assert.Equal(HttpStatusCode.OK, (await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true)).StatusCode);
+        var p = await Payday(c);
+        Assert.Equal([new DateOnly(2027, 2, 8), new DateOnly(2027, 2, 22), new DateOnly(2027, 3, 8)], p.Checks.Select(x => x.PayDate));
+        Assert.False(p.Checks[0].HasSchedule); // January isn't imported
+        var feb22 = p.Checks[1];
+        Assert.Equal([("Regular", 799_44L), ("Boarding Pay", 83_38L), ("NonTax Per Diem", 239_85L)], feb22.Lines.Select(l => (l.Name, l.Cents)));
+        Assert.True(feb22.LowConfidence); // no stubs yet: a flat 80% of gross
+        Assert.Equal((long)Math.Round(feb22.GrossCents * 0.8m), feb22.NetCents);
+        Assert.Equal("spending", feb22.Plan!.Items[^1].Kind);
+
+        // Overtime on the first trip adds the extra half on the check that covers it; a re-import keeps the choice.
+        await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, ["T1001 02/04"], []), Json);
+        Assert.Equal(feb22.GrossCents + 272_37, (await Payday(c)).Checks[1].GrossCents);
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        Assert.True((await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0].Trips[0].Overtime);
+
+        // The CSV export is the fallback; a file that's neither is refused.
+        var csv = await Schedule(c, PayFixtures.Csv, "schedule.csv", confirm: false);
+        Assert.Equal("csv", (await csv.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("month").GetProperty("source").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, (await Schedule(c, "hello", "notes.txt", confirm: false)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Stubs_are_reviewed_then_saved_the_model_is_learned_and_predicted_vs_actual_is_tracked()
+    {
+        var c = await NewUserAsync(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
+
+        foreach (var stub in PayFixtures.Stubs)
+        {
+            var review = await Upload(c, "/api/payday/paystubs", FakeStubPdf.Build(stub), "stub.pdf", "application/pdf");
+            var body = await review.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, review.StatusCode);
+            foreach (var personal in new[] { FakeStubPdf.Name, FakeStubPdf.Street, FakeStubPdf.Ssn, FakeStubPdf.EmployeeId, FakeStubPdf.BankAccount, "4321" })
+                Assert.DoesNotContain(personal, body);
+            var parsed = JsonSerializer.Deserialize<StubReviewDto>(body, Json)!;
+            Assert.Empty(parsed.Problems);
+            Assert.Equal((stub.PayDate, stub.PeriodStart, stub.PeriodEnd, stub.GrossCents, stub.FedTaxableCents, stub.NetCents, stub.RateCents),
+                (parsed.Stub.PayDate, parsed.Stub.PeriodStart, parsed.Stub.PeriodEnd, parsed.Stub.GrossCents, parsed.Stub.FedTaxableCents, parsed.Stub.NetCents, parsed.Stub.RateCents));
+            Assert.Equal(stub.Earnings.Select(e => (e.Name, e.CurrentCents)), parsed.Stub.Earnings.Select(e => (e.Name, e.CurrentCents)));
+            Assert.Equal(stub.Taxes, parsed.Stub.Taxes);
+            Assert.Equal((stub.UserHoursEarned, stub.VacationHoursEarned), (parsed.Stub.UserHoursEarned, parsed.Stub.VacationHoursEarned));
+            Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync("/api/payday/paystubs/confirm", parsed.Stub, Json)).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await Upload(c, "/api/payday/paystubs", [1, 2, 3], "stub.jpg", "image/jpeg")).StatusCode);
+
+        var model = (await c.GetFromJsonAsync<ModelDto>("/api/payday/model", Json))!;
+        Assert.Equal(5, model.StubCount);
+        Assert.Equal(["Commuter Subsid", "NonTax Per Diem", "Uni Allowance"], model.Model!.NonTaxable);
+        Assert.All(model.BackTests, b => Assert.InRange(b.ErrorCents, -1, 1));
+
+        // A schedule for November (the invented February trips moved to November 2026), then the forecast for Nov 23.
+        var nov = PayFixtures.Csv.Replace("/2027", "/2026").Replace(",02/", ",11/");
+        Assert.Equal(HttpStatusCode.OK, (await Schedule(c, nov, "schedule.csv", confirm: true)).StatusCode);
+        var p = await Payday(c);
+        var check = p.Checks[0];
+        Assert.Equal((new DateOnly(2026, 11, 23), true), (check.PayDate, check.HasSchedule));
+        Assert.Contains(check.Lines, l => l.Name == "Uni Allowance");
+        Assert.DoesNotContain(check.Lines, l => l.Name == "Commuter Subsid"); // only on the check paid on the 7th
+        Assert.Equal(check.GrossCents - check.Taxes.Sum(t => t.Cents) - check.Deductions.Sum(d => d.Cents), check.NetCents);
+        Assert.True(check.LowNetCents < check.NetCents && check.NetCents < check.HighNetCents);
+        var home = (await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!;
+        Assert.Equal((new DateOnly(2026, 11, 23), check.NetCents), (home.NextPayday!.PayDate, home.NextPayday.NetCents));
+
+        // The paycheck lands in checking: predicted vs actual from the deposit.
+        var checking = (await (await c.PostAsJsonAsync("/api/accounts", new { name = "Test Checking", type = "Checking", mask = "1111" }, Json)).Content.ReadFromJsonAsync<AccountDto>(Json))!.Id;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var acct = await db.Accounts.SingleAsync(a => a.Id == checking);
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = acct.HouseholdId, AccountId = checking, Date = new DateOnly(2026, 11, 23), AmountCents = -(check.NetCents + 12_34),
+                Merchant = "TEST AIRLINE PAYROLL", Description = "TEST AIRLINE PAYROLL", Kind = TransactionKind.Income, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 25, 19, 0, 0, TimeSpan.Zero));
+        var landed = (await Payday(c)).History.Single(h => h.PayDate == new DateOnly(2026, 11, 23));
+        Assert.Equal((check.NetCents, check.NetCents + 12_34, 12_34L, "deposit"), (landed.PredictedNetCents, landed.ActualNetCents!.Value, landed.VarianceCents!.Value, landed.Source));
+
+        // Its stub arrives: the stub wins, the variance is stored, and the model refits with six stubs.
+        var sixth = PayFixtures.Stub(new DateOnly(2026, 11, 23), 26m, 11, 106m);
+        var saved = await (await c.PostAsJsonAsync("/api/payday/paystubs/confirm", sixth, Json)).Content.ReadFromJsonAsync<StubSavedDto>(Json);
+        Assert.Equal((check.NetCents, sixth.NetCents - check.NetCents), (saved!.PredictedNetCents!.Value, saved.VarianceCents!.Value));
+        var after = await Payday(c);
+        Assert.Equal(("stub", sixth.NetCents), (after.History.Single(h => h.PayDate == new DateOnly(2026, 11, 23)).Source, after.History[0].ActualNetCents!.Value));
+        Assert.Equal(6, after.StubCount);
+
+        // The plan's checklist remembers what you sent.
+        var next = after.Checks[0];
+        await c.PutAsJsonAsync($"/api/payday/plan/{next.PayDate:yyyy-MM-dd}/spending", new ChecklistRequest(true), Json);
+        Assert.True((await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Key == "spending").Done);
+    }
+
+    [Fact]
+    public async Task Profile_rules_and_model_are_editable()
+    {
+        var c = await NewUserAsync(new DateTimeOffset(2027, 1, 25, 18, 0, 0, TimeSpan.Zero));
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/payday/profile", new ProfileRequest(10, true, true, 75), Json)).StatusCode);
+        Assert.Equal(41_14, (await c.GetFromJsonAsync<ProfileDto>("/api/payday/profile", Json))!.RateCents);
+
+        var rules = PayRules.Default with { PerDiemCentsPerHour = 2_50 };
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/payday/rules", JsonContent.Create(rules, options: Json))).StatusCode);
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var month = (await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0];
+        Assert.Equal(Hm.Pay(4311, 2_50), month.Trips[0].PerDiemCents);
+
+        var bad = PayRules.Default with { Airports = [new("ZZZ", "Not/AZone")] };
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsync("/api/payday/rules", JsonContent.Create(bad, options: Json))).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync("/api/payday/rules")).StatusCode);
+
+        foreach (var s in PayFixtures.Stubs.Take(3))
+            await c.PostAsJsonAsync("/api/payday/paystubs/confirm", s, Json);
+        var m = (await c.GetFromJsonAsync<ModelDto>("/api/payday/model", Json))!.Model!;
+        var edited = m with { PtoHoursPerCheck = 0 };
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/payday/model", JsonContent.Create(edited, options: Json))).StatusCode);
+        var view = (await c.GetFromJsonAsync<ModelDto>("/api/payday/model", Json))!;
+        Assert.True(view.Edited);
+        Assert.Equal(0m, view.Model!.PtoHoursPerCheck);
+
+        // A new stub refits the model (your edits are replaced by the recalibrated fit).
+        await c.PostAsJsonAsync("/api/payday/paystubs/confirm", PayFixtures.Stubs[3], Json);
+        Assert.False((await c.GetFromJsonAsync<ModelDto>("/api/payday/model", Json))!.Edited);
+    }
+}

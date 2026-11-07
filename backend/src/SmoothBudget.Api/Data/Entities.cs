@@ -379,3 +379,88 @@ public class SavingsGoal
     public int SortOrder { get; set; }
     public DateTime CreatedUtc { get; set; }
 }
+
+/// <summary>
+/// The pay profile (SPEC 5.1), with the pay rules table and any edits to the learned withholding model stored as JSON
+/// (null = the defaults from Appendix A, and the model learned from your stubs).
+/// </summary>
+public class PayProfile
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    /// <summary>Completed years of service: picks the hourly rate from the rules table.</summary>
+    public int YearsOfService { get; set; }
+    public bool FullTime { get; set; } = true;
+    /// <summary>Eligible for holiday pay (full-time, past 90 days).</summary>
+    public bool HolidayPay { get; set; } = true;
+    /// <summary>With fewer than 2 stubs: net pay as a percent of gross (the flat, low-confidence estimate).</summary>
+    public int FlatNetPercent { get; set; } = 80;
+    public string? RulesJson { get; set; }
+    public string? ModelJson { get; set; }
+    public DateTime UpdatedUtc { get; set; }
+}
+
+/// <summary>One month's imported schedule (SPEC 5.2). Re-importing replaces it. Only what the pay engine needs is kept.</summary>
+public class ScheduleMonth
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public int Year { get; set; }
+    public int Month { get; set; }
+    /// <summary>"text" (printed values) or "csv" (estimated).</summary>
+    public required string Source { get; set; }
+    /// <summary>The parsed pairings, days and legs (SmoothBudget.Core.Pay.ParsedSchedule).</summary>
+    public required string Json { get; set; }
+    /// <summary>Awarded reserve this month: the 76-hour guarantee replaces trip credit for base pay.</summary>
+    public bool Reserve { get; set; }
+    /// <summary>Pairing keys you flew as overtime, newline-separated.</summary>
+    public string OvertimeKeys { get; set; } = "";
+    /// <summary>Non-flying entries you switched on as paid, newline-separated.</summary>
+    public string PaidEntryKeys { get; set; } = "";
+    public DateTime ImportedUtc { get; set; }
+}
+
+/// <summary>A confirmed pay stub's numbers (SPEC 5.3). Never the file, name, address, SSN or bank account.</summary>
+public class PayStub
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public DateOnly PayDate { get; set; }
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public long GrossCents { get; set; }
+    public long NetCents { get; set; }
+    /// <summary>Every parsed line (SmoothBudget.Core.Pay.PayStubData).</summary>
+    public required string Json { get; set; }
+    public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>Predicted vs actual for one check (SPEC 5.5). The prediction is kept as it stood on payday.</summary>
+public class PayPeriodForecast
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public DateOnly PayDate { get; set; }
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public long PredictedGrossCents { get; set; }
+    public long PredictedNetCents { get; set; }
+    public long LowNetCents { get; set; }
+    public long HighNetCents { get; set; }
+    public long? ActualGrossCents { get; set; }
+    public long? ActualNetCents { get; set; }
+    /// <summary>"deposit" (matched in your checking account) or "stub" (from the uploaded pay stub, which wins).</summary>
+    public string? ActualSource { get; set; }
+    public Guid? DepositTransactionId { get; set; }
+    public DateTime UpdatedUtc { get; set; }
+}
+
+/// <summary>A payday plan item you checked off.</summary>
+public class PaydayChecklistItem
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public DateOnly PayDate { get; set; }
+    public required string Key { get; set; }
+    public DateTime CreatedUtc { get; set; }
+}

@@ -31,7 +31,12 @@ public record HomeSummaryDto(
     IReadOnlyList<Bills.UpcomingBillDto>? UpcomingBills = null,
     // The partner's fixed contributions this month, for the late flag on Home (SPEC section 3).
     IReadOnlyList<Budget.ContributionStatusDto>? Contributions = null,
-    long PartnerShortfallCents = 0);
+    long PartnerShortfallCents = 0,
+    // The next paycheck (SPEC 4.2, 6.3), once a schedule or pay stub is in. Null before that.
+    NextPaydayDto? NextPayday = null);
+
+/// <param name="HasSchedule">False until that month's schedule is imported (date only).</param>
+public record NextPaydayDto(DateOnly PayDate, bool HasSchedule, long NetCents, long LowNetCents, long HighNetCents, bool LowConfidence);
 
 /// <summary>A "send $X to …" item from a closed month that the user hasn't marked as sent yet.</summary>
 public record PendingSweepDto(Guid Id, string Kind, long AmountCents, string Destination, string FromMonth);
@@ -107,7 +112,7 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
     }
 }
 
-public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, Bills.RecurringService recurring)
+public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, Bills.RecurringService recurring, Payday.PaydayService payday)
 {
     public async Task<HomeSummaryDto> GetAsync(Guid householdId, CancellationToken ct = default)
     {
@@ -135,7 +140,10 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             ReviewCount: data.ReviewCount,
             UpcomingBills: await recurring.UpcomingAsync(householdId, 3, ct),
             Contributions: Budget.ContributionStatusDto.From(data.Contributions, data.Categories),
-            PartnerShortfallCents: data.PartnerShortfallCents);
+            PartnerShortfallCents: data.PartnerShortfallCents,
+            NextPayday: await payday.NextAsync(householdId, ct) is { } n
+                ? new NextPaydayDto(n.Period.PayDate, n.HasSchedule, n.NetCents, n.LowNetCents, n.HighNetCents, n.LowConfidence)
+                : null);
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

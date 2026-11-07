@@ -3,7 +3,7 @@
 A phone-first budgeting app whose Home screen answers one question: **how much do I have left to spend this month?**
 The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. `DECISIONS.md` records the choices made where the spec is silent.
 
-**Status:** Milestone 8 (savings):
+**Status:** Milestone 9 (payday):
 - **Milestone 1:** auth, database, CI, fake-data seed, and a Home screen showing Left to Spend.
 - **Milestone 2:** CSV import for Chase checking, Chase credit and Apple Card; categorization by bank category and merchant rules; card payment and transfer detection; and an inbox for transactions that still need a category.
 - **Milestone 3:** Plaid Link, cursor-based sync, verified webhooks, background sync, pending-to-posted handling, CSV/Plaid overlap matching, and sync health on Home.
@@ -13,6 +13,7 @@ The full spec (`SPEC.md`) stays out of the repo because its appendices contain r
 - **Milestone 6:** bills and subscriptions found from your transactions (More → Bills & subscriptions): monthly and annual totals, price changes, charges that stopped, possible duplicates, rename, bill vs subscription, due day, dismiss, and "make it its own bill line". The next 3 bills show on Home, and the budget generator proposes bills at their current price.
 - **Milestone 7:** the Partner screen (More → Partner): a fixed contribution (e.g. $800 toward Rent) shown as an offset on its bill line with your net share, matched to her transfers in a window (the 18th to 24th by default) with expected, received, different-amount and late states (late or short money comes out of Left to Spend). Other money between you has no tally: each transfer waits in Review until you say what it was for (paying you back for a category, her money, or your share of something).
 - **Milestone 8:** the Savings tab: total saved, savings accounts and balances, goals with progress from their account balance and a projected date at your monthly amount or recent pace, a rainy-day fund created for you, a 12-month savings chart, and the order money left over goes in (rainy-day fund, high-APR debt, larger savings), which the budget generator follows.
+- **Milestone 9:** the Payday tab: import the monthly SkedPlus+ schedule (the detailed text export, or the older CSV with estimated times), add past pay stub PDFs (reviewed before saving; the app learns your taxes and deductions from them), and see the next 3 checks with a low/likely/high range, a payday plan for each (bills due before the next payday, card payment, sweep, savings, spending money), and predicted vs actual once a check lands. Every pay rule is editable. Home shows the next payday.
 - **Also:** dark mode (More → Settings → Appearance: System, Light or Dark).
 
 ## Stack
@@ -108,6 +109,14 @@ Plaid is replaced by an in-process fake in every test, except `PlaidSandboxLiveT
 dotnet test SmoothBudget.slnx --filter "FullyQualifiedName~PlaidSandboxLiveTests"
 ```
 
+`PrivateSampleTests` checks the pay engine against your real schedule and pay stubs. Put them in the git-ignored `private/pay` folder as `schedule.txt` (the detailed text export), `schedule.csv` and `stub1.pdf`, `stub2.pdf`, … and run:
+
+```bash
+dotnet test SmoothBudget.slnx --filter "FullyQualifiedName~PrivateSampleTests" --logger "console;verbosity=detailed"
+```
+
+It's skipped when the folder is missing (as in CI), and it never writes your numbers anywhere.
+
 CI (`.github/workflows/ci.yml`) runs all of the above on every push and PR, with Postgres as a service container. It also fails if the EF model has changes that no migration covers.
 
 ## Database migrations
@@ -153,6 +162,15 @@ In Development, migrations apply automatically on startup.
 | POST | `/api/sync` | Sync every connection now (pull to refresh) |
 | POST | `/api/plaid/webhook` | Plaid only; signature-verified |
 | POST | `/api/plaid/sandbox/link`, `/api/plaid/sandbox/items/{id}/refresh` | Development + sandbox only |
+| GET | `/api/payday` | The next 3 checks (lines, taxes, deductions, low/likely/high, confidence), each check's payday plan, and predicted vs actual |
+| PUT | `/api/payday/plan/{payDate}/{key}` | `{ done }`: check off a plan item |
+| POST | `/api/payday/schedule` | Multipart `file` (.txt or .csv) and `confirm`: preview the grouped trips, or save the month (replaces it) |
+| GET / PUT / DELETE | `/api/payday/schedule`, `/api/payday/schedule/{year}/{month}` | Months with trips and pay; `{ reserve, overtime, paidEntries }` |
+| POST | `/api/payday/paystubs`, `/api/payday/paystubs/confirm` | Multipart PDF → parsed numbers for review (nothing saved); then save the reviewed stub |
+| GET / DELETE | `/api/payday/paystubs`, `/api/payday/paystubs/{id}` | |
+| GET / PUT / DELETE | `/api/payday/model` | The learned withholding model with back-tests; save edits; back to the learned fit |
+| GET / PUT | `/api/payday/profile` | `{ yearsOfService, fullTime, holidayPay, flatNetPercent }` |
+| GET / PUT / DELETE | `/api/payday/rules` | The pay rules table; reset to the manual |
 | GET | `/api/health` | |
 
 ## Data safety

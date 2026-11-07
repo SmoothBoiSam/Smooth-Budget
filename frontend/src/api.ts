@@ -25,6 +25,8 @@ export interface HomeSummary {
   /** The partner's fixed contributions this month (late / different amount flags). */
   contributions: ContributionStatus[] | null
   partnerShortfallCents: number
+  /** The next paycheck, once a schedule or pay stub is in. */
+  nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
 }
 
 export interface Me {
@@ -731,4 +733,235 @@ export const savingsApi = {
   removeGoal: (id: string) => request<void>('DELETE', `/savings/goals/${id}`),
   setPriority: (order: PriorityStep[]) => request<void>('PUT', '/savings/priority', { order }),
   setBalance: (accountId: string, balanceCents: number) => request<void>('PUT', `/savings/accounts/${accountId}/balance`, { balanceCents }),
+}
+
+// Payday (milestone 9). The pay engine runs on the server; these only carry its results.
+export interface PayLine {
+  name: string
+  cents: number
+  note: string
+}
+export interface PayAmount {
+  name: string
+  cents: number
+}
+export interface PlanItem {
+  key: string
+  kind: 'bill' | 'debt' | 'sweep' | 'savings' | 'spending'
+  label: string
+  cents: number
+  destination: string
+  why: string
+  done: boolean
+}
+export interface PayCheck {
+  payDate: string
+  periodStart: string
+  periodEnd: string
+  hasSchedule: boolean
+  grossCents: number
+  taxableCents: number
+  netCents: number
+  lowNetCents: number
+  highNetCents: number
+  lowConfidence: boolean
+  reasons: string[]
+  notes: string[]
+  lines: PayLine[]
+  taxes: PayAmount[]
+  deductions: PayAmount[]
+  plan: { items: PlanItem[]; shortCents: number } | null
+}
+export interface PayHistory {
+  payDate: string
+  predictedNetCents: number
+  lowNetCents: number
+  highNetCents: number
+  actualNetCents: number | null
+  varianceCents: number | null
+  source: 'deposit' | 'stub' | null
+}
+export interface PayProfile {
+  yearsOfService: number
+  rateCents: number
+  fullTime: boolean
+  holidayPay: boolean
+  flatNetPercent: number
+}
+export interface PaydaySummary {
+  profile: PayProfile
+  stubCount: number
+  modelLearned: boolean
+  modelEdited: boolean
+  checks: PayCheck[]
+  history: PayHistory[]
+  scheduleMonths: string[]
+}
+export interface Trip {
+  key: string
+  code: string
+  start: string
+  end: string
+  creditMinutes: number
+  tafbMinutes: number
+  revenueLegs: number
+  overtime: boolean
+  payCents: number
+  creditPayCents: number
+  boardingCents: number
+  perDiemCents: number
+  days: { date: string; report: string; release: string; creditMinutes: number; dutyMinutes: number; legs: number; route: string }[]
+}
+export interface ScheduleEntry {
+  key: string
+  code: string
+  start: string
+  end: string
+  creditMinutes: number
+  paid: boolean
+}
+export interface ScheduleMonth {
+  year: number
+  month: number
+  source: 'text' | 'csv'
+  reserve: boolean
+  importedUtc: string | null
+  creditMinutes: number
+  shortfallMinutes: number
+  overrideMinutes: number
+  trips: Trip[]
+  entries: ScheduleEntry[]
+  checks: string[]
+  warnings: string[]
+}
+export interface StubData {
+  payDate: string
+  periodStart: string
+  periodEnd: string
+  rateCents: number
+  grossCents: number
+  fedTaxableCents: number
+  totalTaxesCents: number
+  totalDeductionsCents: number
+  netCents: number
+  earnings: { name: string; rateCents: number | null; hours: number | null; currentCents: number }[]
+  taxes: { name: string; currentCents: number }[]
+  preTax: { name: string; currentCents: number }[]
+  afterTax: { name: string; currentCents: number }[]
+  userHoursEarned: number | null
+  vacationHoursEarned: number | null
+  ytdGrossCents: number | null
+  ytdNetCents: number | null
+}
+export interface StubReview {
+  stub: StubData
+  checks: string[]
+  problems: string[]
+  replaces: boolean
+}
+export interface StubListItem {
+  id: string
+  payDate: string
+  periodStart: string
+  periodEnd: string
+  grossCents: number
+  netCents: number
+}
+export type CheckSchedule = 'Every' | 'SecondHalf' | 'FirstHalf'
+export interface TaxRule {
+  name: string
+  kind: 'Rate' | 'Flat'
+  schedule: CheckSchedule
+  rate: number
+  interceptCents: number
+  base: 'FederalTaxable' | 'WagesBeforePreTax'
+  roundToDollar: boolean
+  flatCents: number
+}
+export interface DeductionRule {
+  name: string
+  cents: number
+  schedule: CheckSchedule
+  percentOfGross: number | null
+}
+export interface WithholdingModel {
+  nonTaxable: string[]
+  preTax: DeductionRule[]
+  afterTax: DeductionRule[]
+  taxes: TaxRule[]
+  recurringEarnings: { name: string; cents: number; schedule: CheckSchedule }[]
+  leftOut: string[]
+  ptoHoursPerCheck: number
+  minTaxableCents: number
+  maxTaxableCents: number
+  stubCount: number
+  notes: string[]
+}
+export interface ModelView {
+  model: WithholdingModel | null
+  edited: boolean
+  backTests: { payDate: string; actualNetCents: number; predictedNetCents: number; taxErrorCents: number; errorCents: number }[]
+  stubCount: number
+}
+export interface PayRules {
+  rates: { years: number; centsPerHour: number }[]
+  perDiemCentsPerHour: number
+  minDayCreditMinutes: number
+  dutyHoursPerCreditHour: number
+  tafbHoursPerCreditHour: number
+  lineGuaranteeHours: number
+  reserveGuaranteeHours: number
+  partTimeGuaranteeHours: number
+  overrideAboveHours: number
+  overrideCentsPerHour: number
+  overtimeMultiplier: number
+  holidayCreditMinutes: number
+  holidays: string[]
+  boardingHoursPerLeg: number
+  boardingRateFactor: number
+  reportMinutesBefore: number
+  reportMinutesBeforeInternational: number
+  releaseMinutesAfter: number
+  pairingBreakHours: number
+  base: string
+  airports: { code: string; timeZoneId: string; international: boolean }[]
+  firstHalfPayDay: number
+  secondHalfPayDay: number
+  lines: { regular: string; boarding: string; perDiem: string; override: string; holiday: string; overtime: string; pto: string[] }
+}
+
+function fileForm(file: File, extra?: Record<string, string>) {
+  const form = new FormData()
+  form.append('file', file)
+  for (const [k, v] of Object.entries(extra ?? {})) form.append(k, v)
+  return form
+}
+
+export const paydayApi = {
+  summary: () => request<PaydaySummary>('GET', '/payday'),
+  setDone: (payDate: string, key: string, done: boolean) =>
+    request<void>('PUT', `/payday/plan/${payDate}/${encodeURIComponent(key)}`, { done }),
+  setProfile: (p: Omit<PayProfile, 'rateCents'>) => request<void>('PUT', '/payday/profile', p),
+  rules: () => request<{ rules: PayRules; edited: boolean }>('GET', '/payday/rules'),
+  setRules: (r: PayRules) => request<void>('PUT', '/payday/rules', r),
+  resetRules: () => request<void>('DELETE', '/payday/rules'),
+  previewSchedule: (file: File) =>
+    upload<{ month: ScheduleMonth; replaces: boolean }>('/payday/schedule', fileForm(file, { confirm: 'false' })),
+  importSchedule: (file: File) => upload<{ month: ScheduleMonth }>('/payday/schedule', fileForm(file, { confirm: 'true' })),
+  schedule: () => request<ScheduleMonth[]>('GET', '/payday/schedule'),
+  setChoices: (year: number, month: number, reserve: boolean, overtime: string[], paidEntries: string[]) =>
+    request<void>('PUT', `/payday/schedule/${year}/${month}`, { reserve, overtime, paidEntries }),
+  removeMonth: (year: number, month: number) => request<void>('DELETE', `/payday/schedule/${year}/${month}`),
+  reviewStub: (file: File) => upload<StubReview>('/payday/paystubs', fileForm(file)),
+  confirmStub: (stub: StubData) =>
+    request<{ id: string; predictedNetCents: number | null; actualNetCents: number; varianceCents: number | null }>(
+      'POST',
+      '/payday/paystubs/confirm',
+      stub,
+    ),
+  stubs: () => request<StubListItem[]>('GET', '/payday/paystubs'),
+  removeStub: (id: string) => request<void>('DELETE', `/payday/paystubs/${id}`),
+  model: () => request<ModelView>('GET', '/payday/model'),
+  setModel: (m: WithholdingModel) => request<void>('PUT', '/payday/model', m),
+  resetModel: () => request<void>('DELETE', '/payday/model'),
 }

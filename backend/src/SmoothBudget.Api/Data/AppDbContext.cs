@@ -21,6 +21,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<RecurringItem> RecurringItems => Set<RecurringItem>();
     public DbSet<PartnerArrangement> PartnerArrangements => Set<PartnerArrangement>();
     public DbSet<SavingsGoal> SavingsGoals => Set<SavingsGoal>();
+    public DbSet<PayProfile> PayProfiles => Set<PayProfile>();
+    public DbSet<ScheduleMonth> ScheduleMonths => Set<ScheduleMonth>();
+    public DbSet<PayStub> PayStubs => Set<PayStub>();
+    public DbSet<PayPeriodForecast> PayPeriodForecasts => Set<PayPeriodForecast>();
+    public DbSet<PaydayChecklistItem> PaydayChecklistItems => Set<PaydayChecklistItem>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -118,6 +123,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Destination).HasMaxLength(120);
             e.HasOne(x => x.BudgetMonth).WithMany().HasForeignKey(x => x.BudgetMonthId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.HouseholdId, x.DoneUtc });
+        });
+
+        b.Entity<PayProfile>(e => e.HasIndex(x => x.HouseholdId).IsUnique());
+        b.Entity<ScheduleMonth>(e =>
+        {
+            e.Property(x => x.Source).HasMaxLength(10);
+            e.HasIndex(x => new { x.HouseholdId, x.Year, x.Month }).IsUnique();
+        });
+        b.Entity<PayStub>(e => e.HasIndex(x => new { x.HouseholdId, x.PayDate }).IsUnique());
+        b.Entity<PayPeriodForecast>(e =>
+        {
+            e.Property(x => x.ActualSource).HasMaxLength(10);
+            e.HasIndex(x => new { x.HouseholdId, x.PayDate }).IsUnique();
+        });
+        b.Entity<PaydayChecklistItem>(e =>
+        {
+            e.Property(x => x.Key).HasMaxLength(200);
+            e.HasIndex(x => new { x.HouseholdId, x.PayDate, x.Key }).IsUnique();
         });
 
         b.Entity<SavingsGoal>(e =>
