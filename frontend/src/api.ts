@@ -98,7 +98,7 @@ export interface Transaction {
   kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution' | 'PartnerTransfer'
   categoryId: string | null
   categoryName: string | null
-  categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User' | 'Learned'
+  categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User' | 'Learned' | 'BestGuess'
   isTransfer: boolean
   pending: boolean
   accountId: string
@@ -176,6 +176,10 @@ export const budgetApi = {
   review: (scope: ReviewScope = 'month') => request<Transaction[]>('GET', `/transactions/review?scope=${scope}`),
   reviewSummary: () => request<ReviewSummary>('GET', '/transactions/review/summary'),
   confirmLikely: (scope: ReviewScope | 'all') => request<{ confirmed: number }>('POST', '/transactions/review/confirm-likely', { scope }),
+  /** "I don't remember": keep the app's best guess, or file it under Other. */
+  bestGuess: (id: string) => request<Transaction>('POST', `/transactions/${id}/best-guess`),
+  bestGuessAll: (scope: ReviewScope | 'all') => request<{ settled: number }>('POST', '/transactions/review/best-guess', { scope }),
+  context: (id: string) => request<TransactionContext>('GET', `/transactions/${id}/context`),
   confirmGuesses: (ids: string[]) => request<{ confirmed: number }>('POST', '/transactions/review/confirm', { ids }),
   autoCategorize: () => request<AutoCategorizeResult>('POST', '/transactions/auto-categorize'),
   suggestedCategories: () => request<SuggestedCategory[]>('GET', '/transactions/suggested-categories'),
@@ -454,7 +458,8 @@ export const partnerApi = {
 /** Money from your partner that's her contribution or just money from her. Paying you back is a category instead. */
 export type PartnerPurpose = 'contribution'
 
-export type ReviewScope = 'month' | 'earlier'
+/** month: this budget month. earlier: before it, inside the months your budget is built from. older: before those. */
+export type ReviewScope = 'month' | 'earlier' | 'older'
 
 export interface ReviewCounts {
   total: number
@@ -465,6 +470,15 @@ export interface ReviewCounts {
 export interface ReviewSummary {
   month: ReviewCounts
   earlier: ReviewCounts
+  /** Before the months your budget is built from: doesn't affect your budget. */
+  older: ReviewCounts
+  monthStart: string
+  windowStart: string
+}
+
+export interface TransactionContext {
+  history: { categoryName: string; count: number }[]
+  sameDay: { merchant: string; amountCents: number; categoryName: string | null; accountName: string }[]
 }
 
 export interface DiscoveredCategory {

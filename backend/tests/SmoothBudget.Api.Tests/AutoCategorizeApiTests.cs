@@ -231,6 +231,81 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Empty((await c.GetFromJsonAsync<List<SuggestedCategoryDto>>("/api/transactions/suggested-categories", Json))!);
     }
 
+    // ---- Old transactions you don't remember (DECISIONS.md 102) ----------------------------------------
+
+    [Fact]
+    public async Task Waiting_items_are_split_into_this_month_the_budget_window_and_older()
+    {
+        var c = await NewUserAsync(); // today Nov 20: this budget month is Nov 6 - Dec 6
+        var checking = await AccountAsync(c, "Checking", "1111");
+        await ImportAsync(c, checking, ChaseChecking,
+            "DEBIT,11/10/2026,\"MYSTERY SHOP\",-10.00,DEBIT_CARD,990.00,,",
+            "DEBIT,09/10/2026,\"MYSTERY SHOP\",-20.00,DEBIT_CARD,970.00,,",
+            "DEBIT,02/10/2026,\"MYSTERY SHOP\",-30.00,DEBIT_CARD,940.00,,");
+
+        var s = (await c.GetFromJsonAsync<ReviewSummaryDto>("/api/transactions/review/summary", Json))!;
+        Assert.Equal((1, 1, 1), (s.Month.Total, s.Earlier.Total, s.Older.Total)); // purchases with no category count too
+        Assert.Equal((new DateOnly(2026, 11, 6), 5), (s.MonthStart, s.WindowStart.Month)); // the budget is built from May on
+        Assert.Equal([30_00L], (await Review(c, "older")).Select(t => t.AmountCents)); // just the February one
+        var count = await c.GetFromJsonAsync<JsonElement>("/api/transactions/inbox/count");
+        Assert.Equal(1, count.GetProperty("count").GetInt32()); // the badge only counts this month
+    }
+
+    [Fact]
+    public async Task I_dont_remember_keeps_the_guess_or_files_it_under_other_and_teaches_nothing()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        var checking = await AccountAsync(c, "Checking", "1111");
+        await ImportAsync(c, card, ChaseCard, "09/12/2026,09/13/2026,FRESH MARKET,Groceries,Sale,-80.00,");
+        await ImportAsync(c, checking, ChaseChecking,
+            "DEBIT,02/10/2026,\"MYSTERY SHOP\",-30.00,DEBIT_CARD,970.00,,",
+            "DEBIT,03/10/2026,\"ANOTHER MYSTERY\",-12.00,DEBIT_CARD,958.00,,");
+
+        // One at a time: the app's guess is kept.
+        var fresh = (await All(c)).Single(t => t.Merchant == "FRESH MARKET");
+        var res = await c.PostAsync($"/api/transactions/{fresh.Id}/best-guess", null);
+        var kept = (await res.Content.ReadFromJsonAsync<TransactionDto>(Json))!;
+        Assert.Equal(("Groceries", "BestGuess", false), (kept.CategoryName, kept.CategorySource, kept.NeedsReview));
+
+        // In bulk, everything older than the budget window: no guess, so "Other".
+        res = await c.PostAsJsonAsync("/api/transactions/review/best-guess", new ConfirmLikelyRequest("older"), Json);
+        Assert.Equal(2, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("settled").GetInt32());
+        Assert.All((await All(c)).Where(t => t.Merchant.Contains("MYSTERY")), t => Assert.Equal(("Other", "BestGuess"), (t.CategoryName, t.CategorySource)));
+        var other = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Other");
+        Assert.Equal("Variable", other.Type); // a visible spending line, so nothing disappears
+        Assert.Equal(0, (await c.GetFromJsonAsync<ReviewSummaryDto>("/api/transactions/review/summary", Json))!.Older.Total);
+
+        // A best guess doesn't teach the categorizer: the next one is still the bank's call, not "what you chose".
+        await ImportAsync(c, card, ChaseCard, "11/12/2026,11/13/2026,FRESH MARKET,Groceries,Sale,-55.00,");
+        Assert.Equal("Bank", (await All(c)).Single(t => t.Date == new DateOnly(2026, 11, 12)).CategorySource);
+
+        // And re-sorting never changes it.
+        await c.PostAsync("/api/transactions/auto-categorize", null);
+        Assert.Equal("BestGuess", (await All(c)).Single(t => t.Id == fresh.Id).CategorySource);
+    }
+
+    [Fact]
+    public async Task A_card_shows_how_you_filed_the_merchant_before_and_what_else_you_bought_that_day()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard,
+            "08/03/2026,08/04/2026,WAL-MART #1234,Shopping,Sale,-50.00,",
+            "08/17/2026,08/18/2026,WAL-MART #1234,Shopping,Sale,-40.00,",
+            "09/03/2026,09/04/2026,WAL-MART #1234,Shopping,Sale,-30.00,",
+            "09/20/2026,09/21/2026,WAL-MART #1234,Shopping,Sale,-25.00,",
+            "09/20/2026,09/21/2026,CORNER BISTRO,Food & Drink,Sale,-18.00,");
+        var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        var walmart = (await All(c)).Where(t => t.Merchant.StartsWith("WAL-MART")).OrderBy(t => t.Date).ToList();
+        foreach (var (t, name) in walmart.Take(3).Zip(["Groceries", "Groceries", "Household"]))
+            await c.PatchAsJsonAsync($"/api/transactions/{t.Id}", new UpdateTransactionRequest(cats.Single(x => x.Name == name).Id, false, null), Json);
+
+        var ctx = (await c.GetFromJsonAsync<TransactionContextDto>($"/api/transactions/{walmart[3].Id}/context", Json))!;
+        Assert.Equal([("Groceries", 2), ("Household", 1)], ctx.History.Select(h => (h.CategoryName, h.Count)));
+        Assert.Equal("CORNER BISTRO", Assert.Single(ctx.SameDay).Merchant);
+    }
+
     // ---- Nothing counted twice -----------------------------------------------------------------------
 
     [Fact]

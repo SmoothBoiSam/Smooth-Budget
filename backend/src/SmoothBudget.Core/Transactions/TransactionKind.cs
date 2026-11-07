@@ -42,6 +42,11 @@ public enum CategorySource
     User = 4,
     /// <summary>Copied from what the user chose before for the same merchant.</summary>
     Learned = 5,
+    /// <summary>
+    /// You didn't remember, so the app's best guess was kept (or "Other" when it had none) (DECISIONS.md 102). Settled like
+    /// your own choice, never re-sorted, but it doesn't teach the categorizer anything.
+    /// </summary>
+    BestGuess = 6,
 }
 
 public static class TransactionRules

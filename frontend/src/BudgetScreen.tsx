@@ -519,7 +519,13 @@ function Tag({ t }: { t: Transaction }) {
         {t.unsure ? '?' : <span className="text-amber-500"> •</span>}
       </span>
     )
-  if (t.categoryName) return <span className="text-xs text-slate-500">{t.categoryName}</span>
+  if (t.categoryName)
+    return (
+      <span className="text-xs text-slate-500">
+        {t.categoryName}
+        {t.categorySource === 'BestGuess' && <span className="text-slate-400"> · best guess</span>}
+      </span>
+    )
   if (t.kind === 'Income') return <span className="text-xs text-emerald-600">Income</span>
   if (t.kind === 'PartnerContribution') return <span className="text-xs text-emerald-600">Partner</span>
   return <span className="text-xs font-medium text-amber-600">Needs category</span>

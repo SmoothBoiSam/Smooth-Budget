@@ -265,7 +265,7 @@ public class CategoryDiscoveryService(AppDbContext db, CategorizationService cat
 
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId).ToListAsync(ct);
         var confirmed = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.CategorySource == CategorySource.User && t.CategoryId != null)
+            .Where(t => t.HouseholdId == householdId && (t.CategorySource == CategorySource.User || t.CategorySource == CategorySource.BestGuess) && t.CategoryId != null) // in use, even as a best guess (so "Other" isn't offered for hiding)
             .GroupBy(t => t.CategoryId!.Value).Select(g => new { g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
         var existing = categories.Select(c => new ExistingCategory(c.Id, c.Name, c.Type, c.IsHidden, confirmed.GetValueOrDefault(c.Id))).ToList();

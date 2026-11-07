@@ -8,10 +8,11 @@ import {
   type ReviewScope,
   type ReviewSummary,
   type Transaction,
+  type TransactionContext,
 } from './api'
-import { formatDay, formatSigned, titleCase } from './format'
+import { formatCents, formatDay, formatSigned, titleCase } from './format'
 
-type Scope = 'todo' | 'earlier'
+type Scope = 'todo' | 'earlier' | 'older'
 
 const typeOrder: Category['type'][] = ['Variable', 'FixedBill', 'DebtPayment', 'SavingsTransfer']
 const typeLabels: Record<Category['type'], string> = { Variable: 'Spending', FixedBill: 'Bills', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
@@ -56,10 +57,7 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   const loadQueue = useCallback(
     async (which: Scope) => {
-      const items =
-        which === 'todo'
-          ? (await Promise.all([budgetApi.inbox(), budgetApi.review('month')])).flat()
-          : await budgetApi.review('earlier')
+      const items = await budgetApi.review(which === 'todo' ? 'month' : which) // includes purchases with no category
       const unique = [...new Map(items.map((t) => [t.id, t])).values()]
       setQueue(unique.sort((a, b) => rank(a) - rank(b) || b.date.localeCompare(a.date)))
     },
@@ -92,9 +90,9 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
     }
   }
 
-  const counts = scope === 'todo' ? summary?.month : summary?.earlier
+  const counts = scope === 'todo' ? summary?.month : scope === 'earlier' ? summary?.earlier : summary?.older
   const likely = counts?.likely ?? 0
-  const reviewScope: ReviewScope = scope === 'todo' ? 'month' : 'earlier'
+  const reviewScope: ReviewScope = scope === 'todo' ? 'month' : scope
   const current = queue?.[0]
 
   return (
@@ -124,8 +122,8 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
       </p>
 
       <div className="mt-4 flex gap-2" role="tablist" aria-label="Which transactions">
-        {(['todo', 'earlier'] as const).map((s) => {
-          const n = s === 'todo' ? todoCount : summary?.earlier.total
+        {(['todo', 'earlier', 'older'] as const).map((s) => {
+          const n = s === 'todo' ? todoCount : s === 'earlier' ? summary?.earlier.total : summary?.older.total
           return (
             <button
               key={s}
@@ -139,7 +137,7 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
               }}
               className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 ${scope === s ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
             >
-              {s === 'todo' ? 'This month' : 'Earlier months'}
+              {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
               {n != null && n > 0 && <span className="ml-1.5 opacity-70">{n}</span>}
             </button>
           )
@@ -158,13 +156,43 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
         </p>
       )}
 
+      {scope !== 'todo' && summary && (
+        <div className="mt-4 rounded-xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
+          <p className="text-slate-600">
+            {scope === 'earlier'
+              ? `These months (since ${formatDay(summary.windowStart)}) shape your budget proposal. If you can’t remember one, the app’s best guess is fine: what matters is that each has some category.`
+              : `Before ${formatDay(summary.windowStart)}: these don’t affect your budget. There’s no need to remember them.`}
+          </p>
+          {(counts?.total ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={async () => {
+                const n = counts!.total
+                if (!window.confirm(`Use the app’s best guess for all ${n}? Any without a guess go under “Other”. You can still change any of them later.`)) return
+                try {
+                  const r = await budgetApi.bestGuessAll(reviewScope)
+                  setNotice(`Settled ${r.settled} with the app’s best guess.`)
+                  onChanged()
+                  await Promise.all([loadQueue(scope), loadSide()])
+                } catch (e) {
+                  fail(e)
+                }
+              }}
+              className="mt-2 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              I can’t remember these: use best guesses ({counts!.total})
+            </button>
+          )}
+        </div>
+      )}
+
       {queue === null ? (
         <p className="mt-10 text-center text-slate-400">Loading…</p>
       ) : queue.length === 0 ? (
         <div className="mt-8 rounded-2xl bg-white px-5 py-8 text-center ring-1 ring-slate-200">
           <p className="text-lg font-semibold">All caught up</p>
           <p className="mt-1 text-sm text-slate-500">
-            {scope === 'todo' ? 'Everything this month has a category you confirmed.' : 'Nothing from earlier months is waiting.'}
+            {scope === 'todo' ? 'Everything this month has a category you confirmed.' : scope === 'earlier' ? 'Nothing from these months is waiting.' : 'Nothing older is waiting.'}
           </p>
           {scope === 'todo' && (summary?.earlier.total ?? 0) > 0 && (
             <button type="button" onClick={() => setScope('earlier')} className="mt-4 text-sm font-medium text-slate-700 underline">
@@ -197,6 +225,7 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
               categories={categories}
               partnerName={partnerName}
               onDone={(message) => void done(current.id, message)}
+              older={!!summary && current.date < summary.windowStart}
               onSkip={() => setQueue((q) => (q && q.length > 1 ? [...q.slice(1), q[0]] : q))}
               onCategoryCreated={loadCategories}
               onError={fail}
@@ -243,6 +272,7 @@ function ReviewCard({
   t,
   categories,
   partnerName,
+  older,
   onDone,
   onSkip,
   onCategoryCreated,
@@ -251,6 +281,8 @@ function ReviewCard({
   t: Transaction
   categories: Category[]
   partnerName: string | null
+  /** Before the months the budget is built from. */
+  older?: boolean
   onDone: (message: string) => void
   onSkip: () => void
   onCategoryCreated: () => Promise<void>
@@ -268,6 +300,34 @@ function ReviewCard({
   const [showAll, setShowAll] = useState(false)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [context, setContext] = useState<TransactionContext | null>(null)
+
+  // Memory aids: how you filed this merchant before, and what else you bought that day (DECISIONS.md 102).
+  useEffect(() => {
+    let live = true
+    budgetApi.context(t.id).then((c) => live && setContext(c)).catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [t.id])
+
+  async function dontRemember() {
+    setBusy(true)
+    try {
+      const r = await budgetApi.bestGuess(t.id)
+      const guessed = t.categoryId ?? t.suggestedCategoryId
+      onDone(
+        !r.categoryName
+          ? `Counted as money from ${first}.`
+          : guessed
+            ? `Kept the best guess: ${r.categoryName}.`
+            : `Filed under ${r.categoryName}. You can change it any time.`,
+      )
+    } catch (e) {
+      onError(e)
+      setBusy(false)
+    }
+  }
 
   const selected = categories.find((c) => c.id === categoryId) ?? null
   const needsCategory = partnerIn ? mode === 'payback' : true
@@ -328,6 +388,35 @@ function ReviewCard({
       )}
       {t.isPartnerTransfer && t.kind === 'PartnerTransfer' && (
         <p className="mt-2 text-xs text-slate-500">Not counted anywhere until you say what it was for.</p>
+      )}
+      {older && <p className="mt-2 text-xs text-slate-500">This is older than the months your budget is built from, so it doesn’t affect your budget.</p>}
+      {context && (context.history.length > 0 || context.sameDay.length > 0) && (
+        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {context.history.length > 0 && (
+            <p>
+              You’ve filed {titleCase(t.merchant)} as{' '}
+              {context.history.map((h, i) => (
+                <span key={h.categoryName}>
+                  {i > 0 && (i === context.history.length - 1 ? ' and ' : ', ')}
+                  <span className="font-medium text-slate-700">{h.categoryName}</span> {h.count === 1 ? 'once' : `${h.count} times`}
+                </span>
+              ))}
+              .
+            </p>
+          )}
+          {context.sameDay.length > 0 && (
+            <p className={context.history.length > 0 ? 'mt-1' : ''}>
+              Same day:{' '}
+              {context.sameDay.map((d, i) => (
+                <span key={i}>
+                  {i > 0 && ', '}
+                  {titleCase(d.merchant)} {formatCents(d.amountCents)}
+                  {d.categoryName && <span className="text-slate-400"> ({d.categoryName})</span>}
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
       )}
 
       {partnerIn && (
@@ -423,9 +512,12 @@ function ReviewCard({
                 ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
                 : 'Pick a category'}
       </button>
-      <div className="mt-2 flex justify-between text-sm">
+      <div className="mt-2 flex flex-wrap justify-between gap-x-4 text-sm">
         <button type="button" onClick={onSkip} className="py-2 font-medium text-slate-500">
           Skip for now
+        </button>
+        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="py-2 font-medium text-slate-500">
+          I don’t remember
         </button>
         {!partnerIn && (
           <button type="button" onClick={() => void save({ transfer: true })} disabled={busy} className="py-2 font-medium text-slate-500">

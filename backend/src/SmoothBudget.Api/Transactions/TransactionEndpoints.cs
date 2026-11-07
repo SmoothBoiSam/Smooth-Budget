@@ -23,7 +23,12 @@ public record TransactionDto(
 public record ConfirmRequest(List<Guid> Ids);
 public record ConfirmLikelyRequest(string Scope);
 public record ReviewCounts(int Total, int Likely, int Unsure);
-public record ReviewSummaryDto(ReviewCounts Month, ReviewCounts Earlier);
+/// <param name="Earlier">Before this month, inside the months the budget is built from (from <paramref name="WindowStart"/>).</param>
+/// <param name="Older">Before <paramref name="WindowStart"/>: doesn't affect your budget.</param>
+public record ReviewSummaryDto(ReviewCounts Month, ReviewCounts Earlier, ReviewCounts Older, DateOnly MonthStart, DateOnly WindowStart);
+public record MerchantHistoryDto(string CategoryName, int Count);
+public record SameDayDto(string Merchant, long AmountCents, string? CategoryName, string AccountName);
+public record TransactionContextDto(IReadOnlyList<MerchantHistoryDto> History, IReadOnlyList<SameDayDto> SameDay);
 
 public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<TransactionDto> Items);
 
@@ -68,40 +73,41 @@ public static partial class TransactionEndpoints
         group.MapGet("/transactions/inbox", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
             await Project(Inbox(db, ctx.User.HouseholdId())).Take(InboxLimit).ToListAsync(ct));
 
-        // Badge counts: uncategorized (all time) and unconfirmed automatic categories this budget month.
+        // Badge counts: purchases with no category and unconfirmed automatic categories, both this budget month.
         group.MapGet("/transactions/inbox/count", async (HttpContext ctx, AppDbContext db, BudgetMonthService months, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
-            var (start, end) = await CurrentMonthAsync(householdId, db, months, ct);
+            var w = await WindowAsync(householdId, months, ct);
             return new
             {
-                count = await Inbox(db, householdId).CountAsync(ct),
-                review = await Review(db, householdId).CountAsync(t => t.Date >= start && t.Date <= end, ct),
+                count = await Inbox(db, householdId).CountAsync(t => t.Date >= w.MonthStart && t.Date <= w.MonthEnd, ct),
+                review = await Review(db, householdId).CountAsync(t => t.Date >= w.MonthStart && t.Date <= w.MonthEnd, ct),
             };
         });
 
-        // Unconfirmed automatic categories (every one waits for the user). scope=month (default): this budget
-        // month, newest first. scope=earlier: before it, real guesses ("unsure") first.
+        // Everything waiting for you (unconfirmed categories, purchases with no category, partner transfers to label),
+        // by scope (DECISIONS.md 102): "month" (this budget month), "earlier" (before it, inside the months the budget is
+        // built from), "older" (before those: doesn't affect your budget), or "all" earlier ones.
         group.MapGet("/transactions/review", async (string? scope, HttpContext ctx, AppDbContext db, BudgetMonthService months, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
-            var (start, end) = await CurrentMonthAsync(householdId, db, months, ct);
-            var q = Review(db, householdId);
-            if (scope == "earlier")
-                return await Project(q.Where(t => t.Date < start).OrderByDescending(t => t.CategoryUnsure)).Take(InboxLimit).ToListAsync(ct);
-            return await Project(q.Where(t => t.Date >= start && t.Date <= end)).Take(InboxLimit).ToListAsync(ct);
+            var w = await WindowAsync(householdId, months, ct);
+            var q = InScope(Todo(db, householdId), scope ?? "month", w);
+            return await Project(q.OrderByDescending(t => t.CategoryId == null).ThenByDescending(t => t.CategoryUnsure)).Take(InboxLimit).ToListAsync(ct);
         });
 
         group.MapGet("/transactions/review/summary", async (HttpContext ctx, AppDbContext db, BudgetMonthService months, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
-            var (start, end) = await CurrentMonthAsync(householdId, db, months, ct);
-            var q = Review(db, householdId);
-            var month = q.Where(t => t.Date >= start && t.Date <= end);
-            var earlier = q.Where(t => t.Date < start);
-            return new ReviewSummaryDto(
-                new ReviewCounts(await month.CountAsync(ct), await month.CountAsync(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer, ct), await month.CountAsync(t => t.CategoryUnsure || t.Kind == TransactionKind.PartnerTransfer, ct)),
-                new ReviewCounts(await earlier.CountAsync(ct), await earlier.CountAsync(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer, ct), await earlier.CountAsync(t => t.CategoryUnsure || t.Kind == TransactionKind.PartnerTransfer, ct)));
+            var w = await WindowAsync(householdId, months, ct);
+            async Task<ReviewCounts> Count(string scope)
+            {
+                var q = InScope(Todo(db, householdId), scope, w);
+                var likely = await q.CountAsync(t => t.CategoryId != null && !t.CategoryUnsure && t.NeedsReview, ct);
+                var total = await q.CountAsync(ct);
+                return new ReviewCounts(total, likely, total - likely);
+            }
+            return new ReviewSummaryDto(await Count("month"), await Count("earlier"), await Count("older"), w.MonthStart, w.WindowStart);
         });
 
         // Confirming makes the category the user's own (and teaches the categorizer that merchant).
@@ -112,15 +118,48 @@ public static partial class TransactionEndpoints
         group.MapPost("/transactions/review/confirm-likely", async (ConfirmLikelyRequest req, HttpContext ctx, AppDbContext db, BudgetMonthService months, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
-            var (start, end) = await CurrentMonthAsync(householdId, db, months, ct);
-            var q = Review(db, householdId).Where(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer);
-            q = req.Scope switch
-            {
-                "earlier" => q.Where(t => t.Date < start),
-                "month" => q.Where(t => t.Date >= start && t.Date <= end),
-                _ => q,
-            };
+            var w = await WindowAsync(householdId, months, ct);
+            var q = InScope(Review(db, householdId).Where(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer), req.Scope, w);
             return Results.Ok(new { confirmed = await Confirm(q, ct) });
+        });
+
+        // "I don't remember": keep the app's best guess, or "Other" when it has none (DECISIONS.md 102).
+        group.MapPost("/transactions/{id:guid}/best-guess", async (Guid id, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var rows = await Todo(db, householdId).Where(t => t.Id == id).ToListAsync(ct);
+            if (rows.Count == 0) return Results.NotFound();
+            await BestGuessAsync(db, householdId, rows, clock, ct);
+            return Results.Ok(await Project(db.Transactions.Where(t => t.Id == id)).SingleAsync(ct));
+        });
+
+        group.MapPost("/transactions/review/best-guess", async (ConfirmLikelyRequest req, HttpContext ctx, AppDbContext db, BudgetMonthService months, TimeProvider clock, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var w = await WindowAsync(householdId, months, ct);
+            var rows = await InScope(Todo(db, householdId), req.Scope, w).ToListAsync(ct);
+            await BestGuessAsync(db, householdId, rows, clock, ct);
+            return Results.Ok(new { settled = rows.Count });
+        });
+
+        // Memory aids for a card: how you filed this merchant before, and what else you bought that day.
+        group.MapGet("/transactions/{id:guid}/context", async (Guid id, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var t = await db.Transactions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
+            if (t is null) return Results.NotFound();
+            var history = await db.Transactions.AsNoTracking()
+                .Where(x => x.HouseholdId == householdId && x.Merchant == t.Merchant && x.Id != id && x.CategoryId != null
+                            && x.CategorySource == CategorySource.User && !x.IsTransfer)
+                .Select(x => x.Category!.Name).ToListAsync(ct);
+            var counts = history.GroupBy(n => n).Select(g => new MerchantHistoryDto(g.Key, g.Count()))
+                .OrderByDescending(x => x.Count).ThenBy(x => x.CategoryName, StringComparer.Ordinal).Take(4).ToList();
+            var sameDay = await db.Transactions.AsNoTracking()
+                .Where(x => x.HouseholdId == householdId && x.Date == t.Date && x.Id != id && !x.IsTransfer && x.AmountCents > 0)
+                .OrderByDescending(x => x.AmountCents).Take(6)
+                .Select(x => new SameDayDto(x.Merchant, x.AmountCents, x.Category != null ? x.Category.Name : null, x.Account.Name))
+                .ToListAsync(ct);
+            return Results.Ok(new TransactionContextDto(counts, sameDay));
         });
 
         group.MapPost("/transactions/auto-categorize", async (HttpContext ctx, CategorizationService svc, CancellationToken ct) =>
@@ -244,10 +283,81 @@ public static partial class TransactionEndpoints
             .SetProperty(t => t.CategorySource, CategorySource.User)
             .SetProperty(t => t.CategoryReason, "You confirmed this."), ct);
 
-    private static async Task<(DateOnly Start, DateOnly End)> CurrentMonthAsync(Guid householdId, AppDbContext db, BudgetMonthService months, CancellationToken ct)
+    /// <summary>This budget month, and where the months the budget is built from begin (the generator's last 6).</summary>
+    public sealed record ReviewWindow(DateOnly MonthStart, DateOnly MonthEnd, DateOnly WindowStart);
+
+    private static async Task<ReviewWindow> WindowAsync(Guid householdId, BudgetMonthService months, CancellationToken ct)
     {
         var row = await months.EnsureCurrentAsync(householdId, ct);
-        return (row.StartDate, row.EndDate);
+        var (_, _, calendar) = await months.ContextAsync(householdId, ct);
+        // Step back whole budget months: the generator uses the last 6 complete ones.
+        var windowStart = row.StartDate;
+        for (var i = 0; i < Core.Budgeting.BudgetGenerator.MaxMonths; i++)
+            windowStart = calendar.MonthContaining(windowStart.AddDays(-1)).Start;
+        return new ReviewWindow(row.StartDate, row.EndDate, windowStart);
+    }
+
+    /// <summary>Everything waiting for you: unconfirmed automatic categories and partner transfers, and purchases with no category.</summary>
+    public static IQueryable<Transaction> Todo(AppDbContext db, Guid householdId) =>
+        db.Transactions.Where(t => t.HouseholdId == householdId && !t.IsTransfer
+            && ((t.NeedsReview && (t.CategoryId != null || t.Kind == TransactionKind.PartnerContribution || t.Kind == TransactionKind.PartnerTransfer))
+                || (t.CategoryId == null && t.Kind != TransactionKind.Income && t.Kind != TransactionKind.PartnerContribution
+                    && t.Kind != TransactionKind.CardPayment && t.Kind != TransactionKind.Transfer && t.Kind != TransactionKind.PartnerTransfer
+                    && (t.AmountCents > 0 || t.Kind == TransactionKind.Refund))));
+
+    private static IQueryable<Transaction> InScope(IQueryable<Transaction> q, string scope, ReviewWindow w) => scope switch
+    {
+        "earlier" => q.Where(t => t.Date < w.MonthStart && t.Date >= w.WindowStart),
+        "older" => q.Where(t => t.Date < w.WindowStart),
+        "all" => q.Where(t => t.Date < w.MonthStart),
+        _ => q.Where(t => t.Date >= w.MonthStart && t.Date <= w.MonthEnd),
+    };
+
+    /// <summary>
+    /// "I don't remember" (DECISIONS.md 102): keep the app's guess, or file it under "Other" (created when first needed) when
+    /// there's none. Money from your partner with no suggestion counts as her money; with one, it pays back that category.
+    /// Settled like your own choice, but marked as a best guess and never used to teach the categorizer.
+    /// </summary>
+    private static async Task BestGuessAsync(AppDbContext db, Guid householdId, List<Transaction> rows, TimeProvider clock, CancellationToken ct)
+    {
+        if (rows.Count == 0) return;
+        Guid? otherId = null;
+        async Task<Guid> OtherAsync()
+        {
+            if (otherId is { } id) return id;
+            var other = await db.Categories.FirstOrDefaultAsync(c => c.HouseholdId == householdId && c.Name.ToLower() == "other", ct);
+            if (other is null)
+            {
+                var order = await db.Categories.Where(c => c.HouseholdId == householdId).MaxAsync(c => (int?)c.SortOrder, ct) ?? -1;
+                db.Categories.Add(other = new Category
+                {
+                    Id = Guid.NewGuid(), HouseholdId = householdId, Name = "Other", Type = Core.Budgeting.CategoryType.Variable,
+                    MonthlyLimitCents = 0, SortOrder = order + 1,
+                });
+            }
+            other.IsHidden = false;
+            otherId = other.Id;
+            return other.Id;
+        }
+
+        foreach (var t in rows)
+        {
+            if (t.Kind == TransactionKind.PartnerTransfer && t.AmountCents < 0)
+            {
+                (t.Kind, t.CategoryId) = t.SuggestedCategoryId is { } paid ? (TransactionKind.Refund, paid) : (TransactionKind.PartnerContribution, (Guid?)null);
+            }
+            else if (t.Kind == TransactionKind.PartnerTransfer)
+            {
+                (t.Kind, t.CategoryId) = (TransactionKind.Purchase, t.SuggestedCategoryId ?? await OtherAsync());
+            }
+            else if (t.CategoryId is null)
+            {
+                t.CategoryId = await OtherAsync();
+            }
+            (t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.SuggestedCategoryId) = (CategorySource.BestGuess, false, false, null);
+            t.CategoryReason = "Best guess: you didn't remember.";
+        }
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>Automatic categories the user hasn't confirmed yet.</summary>
