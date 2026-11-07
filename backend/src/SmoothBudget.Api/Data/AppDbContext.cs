@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BudgetMonthCategory> BudgetMonthCategories => Set<BudgetMonthCategory>();
     public DbSet<SweepTask> SweepTasks => Set<SweepTask>();
     public DbSet<DebtAccount> DebtAccounts => Set<DebtAccount>();
+    public DbSet<RecurringItem> RecurringItems => Set<RecurringItem>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -115,6 +116,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Destination).HasMaxLength(120);
             e.HasOne(x => x.BudgetMonth).WithMany().HasForeignKey(x => x.BudgetMonthId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.HouseholdId, x.DoneUtc });
+        });
+
+        b.Entity<RecurringItem>(e =>
+        {
+            e.Property(x => x.Key).HasMaxLength(200);
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.HasIndex(x => new { x.HouseholdId, x.Key }).IsUnique();
         });
 
         b.Entity<DebtAccount>(e =>

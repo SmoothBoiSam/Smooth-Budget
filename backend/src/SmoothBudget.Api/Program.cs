@@ -74,6 +74,7 @@ builder.Services.AddScoped<ImportService>();
 builder.Services.AddScoped<CategorizationService>();
 builder.Services.AddScoped<CategoryDiscoveryService>();
 builder.Services.AddScoped<SmoothBudget.Api.Debt.DebtService>();
+builder.Services.AddScoped<SmoothBudget.Api.Bills.RecurringService>();
 
 // Plaid (milestone 3). Credentials and the token-encryption key come only from environment variables.
 var plaidOptions = new PlaidOptions
@@ -140,6 +141,7 @@ app.MapBudgetEndpoints();
 app.MapPlaidEndpoints();
 app.MapPartnerEndpoints();
 SmoothBudget.Api.Debt.DebtEndpoints.MapDebtEndpoints(app);
+SmoothBudget.Api.Bills.RecurringEndpoints.MapRecurringEndpoints(app);
 app.MapGet("/api/home/summary", (HttpContext ctx, HomeSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct))
     .RequireAuthorization();
 

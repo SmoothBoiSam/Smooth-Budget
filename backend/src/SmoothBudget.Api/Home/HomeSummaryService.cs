@@ -26,7 +26,9 @@ public record HomeSummaryDto(
     SyncStatusDto Sync,
     IReadOnlyList<PendingSweepDto> PendingSweeps,
     // Automatic category guesses this month waiting for you to confirm.
-    int ReviewCount = 0);
+    int ReviewCount = 0,
+    // The next 3 bills and subscriptions due (SPEC 4.2).
+    IReadOnlyList<Bills.UpcomingBillDto>? UpcomingBills = null);
 
 /// <summary>A "send $X to …" item from a closed month that the user hasn't marked as sent yet.</summary>
 public record PendingSweepDto(Guid Id, string Kind, long AmountCents, string Destination, string FromMonth);
@@ -100,7 +102,7 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
     }
 }
 
-public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock)
+public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, Bills.RecurringService recurring)
 {
     public async Task<HomeSummaryDto> GetAsync(Guid householdId, CancellationToken ct = default)
     {
@@ -125,7 +127,8 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock)
             ComputedUtc: clock.GetUtcNow().UtcDateTime,
             Sync: SyncStatus.For(data.Connections, clock.GetUtcNow().UtcDateTime),
             PendingSweeps: data.PendingSweeps,
-            ReviewCount: data.ReviewCount);
+            ReviewCount: data.ReviewCount,
+            UpcomingBills: await recurring.UpcomingAsync(householdId, 3, ct));
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

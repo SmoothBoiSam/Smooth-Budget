@@ -166,7 +166,7 @@ public class CategoryDiscoveryTests
         {
             txns.Add(T(m, 3, 15_49, "NETFLIX.COM"));
             txns.Add(T(m, 5, 11_99, "SPOTIFY USA"));
-            txns.Add(T(m, 7, 80_00, "XCEL ENERGY 5550001 PMT"));
+            txns.Add(T(m, 7, 80_00, "BRIGHTPATH ENERGY 5550001 PMT"));
             txns.Add(T(m, 9, 60_00, "COMCAST CABLE"));
         }
         txns.Add(T(11, 3, 15_49, "NETFLIX.COM"));
@@ -174,11 +174,11 @@ public class CategoryDiscoveryTests
 
         var r = CategoryDiscovery.Discover(txns, [grouped], includeRainyDayGoal: false);
 
-        Assert.Equal(["Xcel Energy", "Comcast Cable", "Netflix", "Spotify"], r.Proposed.Select(p => p.Name));
+        Assert.Equal(["Brightpath Energy", "Comcast Cable", "Netflix", "Spotify"], r.Proposed.Select(p => p.Name));
         Assert.All(r.Proposed, p => Assert.Equal(CategoryType.FixedBill, p.Type));
         var netflix = r.Proposed.Single(p => p.Name == "Netflix");
         Assert.Equal(("NETFLIX.COM", "Subscriptions", 15_49L), (netflix.MerchantPattern, netflix.Replaces, netflix.MonthlyCents));
-        Assert.Equal("XCEL ENERGY", r.Proposed[0].MerchantPattern);
+        Assert.Equal("BRIGHTPATH ENERGY", r.Proposed[0].MerchantPattern);
         Assert.Null(r.Proposed[0].Replaces); // you had no "Utilities & internet" to split
         // Your grouped Subscriptions is offered for hiding even though you filed things there yourself.
         Assert.Equal("Replaced by one line per bill above.", Assert.Single(r.Unused).Reason);
@@ -207,9 +207,11 @@ public class CategoryDiscoveryTests
 
     [Theory]
     [InlineData("WAL-MART #1234", "WAL-MART")]
-    [InlineData("XCEL ENERGY 5550001 PMT", "XCEL ENERGY")]
+    [InlineData("BRIGHTPATH ENERGY 5550001 PMT", "BRIGHTPATH ENERGY")]
     [InlineData("APPLE.COM/BILL", "APPLE.COM/BILL")]
     [InlineData("SQ *CORNER CAFE", "SQ *CORNER CAFE")] // too short a prefix: keep it whole
+    [InlineData("TUNEWAVE NY", "TUNEWAVE")] // a trailing state code is where it was charged
+    [InlineData("CITY OF DENVER CO", "CITY OF DENVER")]
     public void Merchant_keys_drop_store_numbers(string merchant, string key) => Assert.Equal(key, CategoryDiscovery.MerchantKey(merchant));
 
     [Theory]
@@ -217,5 +219,9 @@ public class CategoryDiscoveryTests
     [InlineData("VERIZON WIRELESS", "Verizon Wireless")]
     [InlineData("AT&T", "AT&T")]
     [InlineData("HBO MAX", "HBO Max")]
+    [InlineData("BEACON FIBER BEACON FI", "Beacon Fiber")]
+    [InlineData("BRIGHTPATH ENERGY BRIGHTPATHENERGY", "Brightpath Energy")]
+    [InlineData("LEARNLY LEARNLY.CO", "Learnly")]
+    [InlineData("APPSTORE.COM/BILL", "Appstore")]
     public void Bill_names_read_well(string key, string name) => Assert.Equal(name, CategoryDiscovery.BillName(key));
 }

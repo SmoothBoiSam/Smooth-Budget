@@ -308,3 +308,30 @@ public class DebtAccount
     public bool IsHidden { get; set; }
     public DateTime CreatedUtc { get; set; }
 }
+
+/// <summary>
+/// What you decided about one detected bill or subscription (SPEC 4.7). Detection itself runs fresh from the
+/// transactions each time; this only keeps your choices, matched by the series' key (merchant, plus amount when
+/// one merchant bills several).
+/// </summary>
+public class RecurringItem
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string Key { get; set; }
+    /// <summary>Your name for it (null = the detected name).</summary>
+    public string? Name { get; set; }
+    /// <summary>Bill or subscription, when you changed it (null = the detected guess).</summary>
+    public SmoothBudget.Core.Transactions.RecurringKind? Kind { get; set; }
+    /// <summary>The day of the month it's due, when you set one.</summary>
+    public int? DueDay { get; set; }
+    /// <summary>You said yes, it's recurring.</summary>
+    public bool Confirmed { get; set; }
+    /// <summary>You said it isn't recurring (a false positive): hidden from the list and totals.</summary>
+    public bool Dismissed { get; set; }
+    /// <summary>You said you canceled it. A charge after this day brings it back.</summary>
+    public DateOnly? CanceledOn { get; set; }
+    /// <summary>The price you acknowledged after a change, so the flag clears until it changes again.</summary>
+    public long? AcknowledgedAmountCents { get; set; }
+    public DateTime UpdatedUtc { get; set; }
+}

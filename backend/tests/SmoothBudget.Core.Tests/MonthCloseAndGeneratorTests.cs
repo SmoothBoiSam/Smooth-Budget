@@ -197,6 +197,16 @@ public class BudgetGeneratorTests
     }
 
     [Fact]
+    public void A_bill_whose_price_rose_is_proposed_at_the_new_price()
+    {
+        // Rent was $1,650 for three months; the detected bill says it's $1,700 now.
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: false, currentBills: [new CurrentBill(Rent, "Maple Court", 1_700_00)]);
+        var rent = p.Categories.Single(c => c.CategoryId == Rent);
+        Assert.Equal((1_650_00L, 1_700_00L), (rent.MedianCents, rent.ProposedCents));
+        Assert.Equal("Current price: Maple Court $1,700.00 a month (your 3-month median was $1,650.00).", rent.Explanation);
+    }
+
+    [Fact]
     public void When_nothing_is_left_the_debt_proposal_is_just_the_minimums()
     {
         var visa = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);

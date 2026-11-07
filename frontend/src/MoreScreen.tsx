@@ -60,6 +60,14 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         </p>
       )}
 
+      <a href="#/bills" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
+        <span>
+          <span className="block font-semibold">Bills &amp; subscriptions</span>
+          <span className="block text-sm text-slate-500">Found from your transactions: prices, due dates, and what stopped</span>
+        </span>
+        <span aria-hidden className="font-semibold text-slate-400">›</span>
+      </a>
+
       <BankConnections onChanged={changed} />
 
       <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />

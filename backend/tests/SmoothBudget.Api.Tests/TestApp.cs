@@ -73,10 +73,23 @@ public class TestApp : WebApplicationFactory<Program>
         await base.DisposeAsync();
         WebhookKeys.Dispose();
         NpgsqlConnection.ClearAllPools();
-        await using var conn = new NpgsqlConnection(_adminConnectionString);
-        await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE)", conn);
-        await cmd.ExecuteNonQueryAsync();
+        // Test classes run in parallel, and Postgres can refuse a DROP DATABASE while another class is creating or
+        // dropping its own; retry a few times rather than failing a run whose tests all passed.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await using var conn = new NpgsqlConnection(_adminConnectionString);
+                await conn.OpenAsync();
+                await using var cmd = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE)", conn);
+                await cmd.ExecuteNonQueryAsync();
+                break;
+            }
+            catch (PostgresException) when (attempt < 5)
+            {
+                await Task.Delay(200 * attempt);
+            }
+        }
         GC.SuppressFinalize(this);
     }
 }

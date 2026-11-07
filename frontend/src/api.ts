@@ -20,6 +20,8 @@ export interface HomeSummary {
   sync: SyncStatus
   pendingSweeps: PendingSweep[]
   reviewCount: number
+  /** The next 3 bills and subscriptions due. */
+  upcomingBills: { name: string; amountCents: number; date: string }[] | null
 }
 
 export interface Me {
@@ -581,4 +583,57 @@ export const debtApi = {
   remove: (id: string) => request<void>('DELETE', `/debt/${id}`),
   saveSettings: (strategy: DebtStrategy, extraCents: number | null) => request<void>('PUT', '/debt/settings', { strategy, extraCents }),
   fromBank: () => request<{ updated: number; message: string | null }>('POST', '/debt/from-bank'),
+}
+
+export type RecurringStatus = 'active' | 'priceUp' | 'priceDown' | 'possiblyCanceled' | 'canceled'
+
+export interface RecurringItem {
+  key: string
+  name: string
+  detectedName: string
+  kind: 'Bill' | 'Subscription'
+  frequency: 'Weekly' | 'Biweekly' | 'Monthly' | 'Quarterly' | 'Yearly'
+  status: RecurringStatus
+  amountCents: number
+  previousAmountCents: number | null
+  priceChangedOn: string | null
+  monthlyCents: number
+  lastDate: string
+  nextExpected: string
+  dueDay: number | null
+  occurrences: number
+  accountName: string
+  categoryId: string | null
+  categoryName: string | null
+  /** Filed in a bill category, so the budget plans for it as a bill. */
+  inBillCategory: boolean
+  confirmed: boolean
+  possibleDuplicate: boolean
+}
+
+export interface RecurringSummary {
+  subscriptionsMonthlyCents: number
+  subscriptionsAnnualCents: number
+  billsMonthlyCents: number
+  alertCount: number
+  items: RecurringItem[]
+  dismissed: RecurringItem[]
+}
+
+export interface RecurringUpdate {
+  key: string
+  name?: string
+  kind?: 'Bill' | 'Subscription'
+  dueDay?: number
+  clearDueDay?: boolean
+  confirmed?: boolean
+  dismissed?: boolean
+  canceled?: boolean
+  acknowledgePrice?: boolean
+}
+
+export const recurringApi = {
+  summary: () => request<RecurringSummary>('GET', '/recurring'),
+  update: (u: RecurringUpdate) => request<void>('PUT', '/recurring', u),
+  trackAsBill: (key: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/track-as-bill', { key }),
 }

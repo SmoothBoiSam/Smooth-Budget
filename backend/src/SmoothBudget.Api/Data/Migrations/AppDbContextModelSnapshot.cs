@@ -626,6 +626,53 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("PlaidItems");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.RecurringItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("AcknowledgedAmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly?>("CanceledOn")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("Confirmed")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Dismissed")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("DueDay")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("RecurringItems");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.SweepTask", b =>
                 {
                     b.Property<Guid>("Id")

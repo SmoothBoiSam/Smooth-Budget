@@ -220,7 +220,7 @@ public static class BudgetEndpoints
 }
 
 /// <summary>Runs <see cref="BudgetGenerator"/> on the household's last complete budget months and applies the result.</summary>
-public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, CategorizationService categorization, Debt.DebtService debts)
+public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, CategorizationService categorization, Debt.DebtService debts, Bills.RecurringService recurring)
 {
     public async Task<GeneratorDto> ProposeAsync(Guid householdId, CancellationToken ct)
     {
@@ -262,7 +262,8 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
             && a.Type == AccountType.CreditCard && a.CurrentBalanceCents < 0, ct);
 
         var cardDebts = await debts.CardInputsAsync(householdId, ct); // milestone 5: minimums + extra to the highest APR
-        var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts);
+        var bills = await recurring.CurrentBillsAsync(householdId, ct); // milestone 6: bills at their current price
+        var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills);
         var partnerName = await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct);
         return new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),
             p.IncomeCents, p.IncomeExplanation, p.PartnerCents, partnerName, filed, p.Categories, p.AllocatedCents, p.UnallocatedCents, p.SpendsMoreThanIncome,

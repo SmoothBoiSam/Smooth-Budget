@@ -219,6 +219,29 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
           </span>
         </li>
       </ul>
+
+      {s.upcomingBills && s.upcomingBills.length > 0 && (
+        <section aria-labelledby="upcoming-h" className="mt-6">
+          <div className="flex items-baseline justify-between">
+            <h2 id="upcoming-h" className="text-sm font-semibold text-slate-700">
+              Coming up
+            </h2>
+            <a href="#/bills" className="text-xs font-medium text-slate-500 underline">
+              All bills
+            </a>
+          </div>
+          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white text-sm ring-1 ring-slate-200">
+            {s.upcomingBills.map((b) => (
+              <li key={b.name + b.date} className="flex justify-between gap-3 px-4 py-2.5">
+                <span className="min-w-0 truncate">
+                  {b.name} <span className="text-slate-400">· {formatDay(b.date)}</span>
+                </span>
+                <span className="shrink-0 tabular-nums">{formatCents(b.amountCents)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </>
   )
 }

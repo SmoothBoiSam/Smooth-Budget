@@ -195,14 +195,40 @@ public static class CategoryDiscovery
         var upper = merchant.Trim().ToUpperInvariant();
         var cut = upper.IndexOfAny(['#', '*', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
         var key = (cut > 0 ? upper[..cut] : upper).Trim().TrimEnd('-', '.', ',').Trim();
+        // A trailing state code is where the card was charged, not the merchant ("TUNEWAVE NY" is "TUNEWAVE").
+        var words = key.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        while (words.Count > 1 && StateCodes.Contains(words[^1]))
+            words.RemoveAt(words.Count - 1);
+        key = string.Join(' ', words);
         return key.Length >= 3 ? key : upper;
     }
+
+    private static readonly HashSet<string> StateCodes =
+    [
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD",
+        "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    ];
 
     /// <summary>A readable category name for one bill: "NETFLIX.COM" → "Netflix", "VERIZON WIRELESS" → "Verizon Wireless".</summary>
     public static string BillName(string merchantKey)
     {
-        var words = merchantKey.Replace("WWW.", "").Replace(".COM", "").Replace(".NET", "")
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        var kept = new List<string>();
+        foreach (var w in merchantKey.Replace("WWW.", "").Replace(".COM/BILL", "").Replace(".COM", "").Replace(".NET", "").Replace(".CO ", " ")
+                     .Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            // Banks repeat the merchant ("BEACON FIBER BEACON FI", "BRIGHTPATH ENERGY BRIGHTPATHENERGY"): drop a word that repeats,
+            // abbreviates or glues together what came before.
+            if (w.EndsWith(".CO", StringComparison.Ordinal) && w.Length > 3 && kept.Count > 0 && kept[^1].StartsWith(w[..^3], StringComparison.Ordinal))
+                continue; // "LEARNLY LEARNLY.CO"
+            var letters = new string(w.Where(char.IsLetter).ToArray());
+            var sofar = string.Concat(kept.Select(k => new string(k.Where(char.IsLetter).ToArray())));
+            if (kept.Count > 0 && letters.Length > 0
+                && (kept.Any(k => k.StartsWith(letters, StringComparison.Ordinal)) || sofar.StartsWith(letters, StringComparison.Ordinal)))
+                continue;
+            kept.Add(w);
+        }
+        var words = kept
             .Where(w => w is not ("INC" or "LLC" or "CO" or "CORP" or "USA" or "US" or "PAYMENT" or "PMT" or "PMTS" or "BILL" or "AUTOPAY" or "WEB"))
             .Select((w, i) => w.Contains('&') || (i == 0 && w.Length <= 3 && w.All(char.IsLetter) && w is not ("THE" or "CAR" or "GAS"))
                 ? w // brand initials up front (HBO, AT&T) stay as they are

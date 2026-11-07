@@ -11,6 +11,9 @@ public sealed record ProposedLimit(
     Guid CategoryId, string Name, CategoryType Type, long CurrentLimitCents, long MedianCents, long ProposedCents,
     string Explanation, IReadOnlyList<long> MonthlyCents);
 
+/// <summary>A detected bill or subscription filed in a category, at its current price per month (milestone 6).</summary>
+public sealed record CurrentBill(Guid CategoryId, string Name, long MonthlyCents);
+
 public sealed record BudgetProposal(
     int MonthsUsed,
     long IncomeCents,
@@ -57,7 +60,8 @@ public static class BudgetGenerator
         IReadOnlyList<GeneratorCategory> categories,
         IReadOnlyList<BudgetTransaction> transactions,
         bool hasCardDebt,
-        IReadOnlyList<Debt.DebtInput>? cardDebts = null)
+        IReadOnlyList<Debt.DebtInput>? cardDebts = null,
+        IReadOnlyList<CurrentBill>? currentBills = null)
     {
         var months = history.OrderBy(m => m.Start).TakeLast(MaxMonths).ToList();
         var n = months.Count;
@@ -96,6 +100,13 @@ public static class BudgetGenerator
                 why = median == 0
                     ? $"No spending here in the last {Months(n)}."
                     : $"Your {n}-month median is {Money(median)}" + (trim ? $", trimmed {DiscretionaryTrimPercent}% while you have card debt." : ".");
+            }
+            else if (c.Type == CategoryType.FixedBill && (currentBills ?? []).Where(b => b.CategoryId == c.Id).ToList() is { Count: > 0 } bills)
+            {
+                // Milestone 6 (DECISIONS.md 95): the bill's current price, so a price increase is picked up right away.
+                proposed = bills.Sum(b => b.MonthlyCents);
+                why = "Current price: " + string.Join(" + ", bills.Select(b => $"{b.Name} {Money(b.MonthlyCents)}")) + " a month"
+                      + (median != proposed ? $" (your {n}-month median was {Money(median)})." : ".");
             }
             else
             {
