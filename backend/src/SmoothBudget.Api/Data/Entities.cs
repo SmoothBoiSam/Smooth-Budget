@@ -35,10 +35,10 @@ public class Household
     /// <summary>The partner's name as it appears on incoming transfers ("Zelle payment from ..."); set in Settings.</summary>
     public string? PartnerName { get; set; }
     /// <summary>
-    /// Settle-up starts after this day (DECISIONS.md 92): set to the day you first name your partner, and moved up when
-    /// you mark it settled. Partner money before it is her contribution, as it always was.
+    /// Labeling transfers between you starts after this day (DECISIONS.md 92, 100): the day before you first named your
+    /// partner. Money from her on or before it is her contribution, as it always was; after it, transfers wait for a label.
     /// </summary>
-    public DateOnly? PartnerSettledThrough { get; set; }
+    public DateOnly? PartnerLabelsStartAfter { get; set; }
     /// <summary>How extra debt payments are aimed: Avalanche (highest APR first, the default) or Snowball.</summary>
     public SmoothBudget.Core.Debt.DebtStrategy DebtStrategy { get; set; }
     /// <summary>Extra paid toward debt each month beyond the minimums. Null = whatever the budget plans for card payments.</summary>
@@ -120,8 +120,6 @@ public class Category
 
     /// <summary>Eating out, shopping, entertainment: trimmed first when income falls short (SPEC section 3).</summary>
     public bool IsDiscretionary { get; set; }
-    /// <summary>Split with the partner by default: her share of each purchase, in percent (0 = not split).</summary>
-    public int PartnerSharePercent { get; set; }
 
     public bool IsSplit { get; set; }
     public decimal SplitPercent { get; set; } = 50m;
@@ -186,10 +184,10 @@ public class Transaction
 
     /// <summary>Owner's share, 0..1. 1 = all of it.</summary>
     public decimal SplitFactor { get; set; } = 1m;
-    /// <summary>Money to or from the partner (by the name in Settings): its purpose waits for the user (DECISIONS.md 86).</summary>
+    /// <summary>Money to or from the partner (by the name in Settings): it waits for you to say what it was for (DECISIONS.md 100).</summary>
     public bool IsPartnerTransfer { get; set; }
-    /// <summary>A purchase your partner paid for and you entered: your share counts in your budget, and you owe her it (SPEC section 3).</summary>
-    public bool PaidByPartner { get; set; }
+    /// <summary>For a transfer waiting for a label: the category the app thinks it was for (shown pre-selected, counted nowhere).</summary>
+    public Guid? SuggestedCategoryId { get; set; }
 
     public long PartnerOffsetCents { get; set; }
     public DataSource Source { get; set; }
@@ -340,8 +338,7 @@ public class RecurringItem
 
 /// <summary>
 /// A fixed contribution from the partner toward one category (SPEC 3 and 4.8; the data model's PartnerArrangement).
-/// Split categories are on <see cref="Category.PartnerSharePercent"/>. Both belong to the household, so a partner
-/// login can be added later without moving them.
+/// It belongs to the household, so a partner login can be added later without moving it.
 /// </summary>
 public class PartnerArrangement
 {

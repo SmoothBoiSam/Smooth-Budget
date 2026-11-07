@@ -2,67 +2,33 @@ using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Core.Tests;
 
-/// <summary>SPEC section 3 partner examples and Appendix D transfers. Names invented.</summary>
+/// <summary>Money between you and your partner beyond her fixed contribution (DECISIONS.md 100). Names invented.</summary>
 public class PartnerMoneyTests
 {
-    private static readonly DateOnly Nov3 = new(2026, 11, 3);
-    private static SplitPurchase Split(long cents, string merchant = "FRESH MARKET", int day = 3, decimal share = 0.5m) =>
-        new(Guid.NewGuid(), new DateOnly(2026, 11, day), merchant, cents, share);
+    private static readonly Guid Groceries = Guid.NewGuid();
+    private static readonly RecentPurchase FreshMarket = new(new DateOnly(2026, 11, 10), "FRESH MARKET", 120_00, Groceries);
 
     [Fact]
-    public void A_120_grocery_run_split_50_50_means_she_owes_60()
+    public void Exactly_half_of_a_recent_purchase_suggests_its_category()
     {
-        var s = Split(120_00);
-        Assert.Equal(60_00, s.PartnerShareCents);
-        Assert.Equal(60_00, PartnerMoney.Balance([s], []).OwedToOwnerCents);
+        var s = PartnerMoney.Suggest(new DateOnly(2026, 11, 12), -60_00, [FreshMarket], "JANE PARTNER");
+        Assert.Equal((Groceries, "Looks like half of FRESH MARKET $120.00 on Nov 10."), (s.CategoryId!.Value, s.Reason));
     }
 
     [Fact]
-    public void Paying_back_moves_the_balance_both_ways()
+    public void Odd_cents_still_match_half()
     {
-        var splits = new[] { Split(120_00), Split(80_00, "TAQUERIA UNO", 8) };
-        var transfers = new[]
-        {
-            new PartnerTransfer(Guid.NewGuid(), new DateOnly(2026, 11, 10), -60_00, TransactionKind.PartnerSettleUp), // she paid back
-            new PartnerTransfer(Guid.NewGuid(), new DateOnly(2026, 11, 12), 25_00, TransactionKind.PartnerSettleUp),  // he paid her back
-            new PartnerTransfer(Guid.NewGuid(), new DateOnly(2026, 11, 21), -800_00, TransactionKind.PartnerContribution), // rent: not settle-up
-        };
-        var b = PartnerMoney.Balance(splits, transfers);
-        Assert.Equal((100_00L, 60_00L, 25_00L), (b.SplitSharesCents, b.SettledByHerCents, b.SettledByOwnerCents));
-        Assert.Equal(100_00 - 60_00 + 25_00, b.OwedToOwnerCents);
+        var odd = FreshMarket with { AmountCents = 85_01 };
+        Assert.Equal(Groceries, PartnerMoney.Suggest(new DateOnly(2026, 11, 12), -42_50, [odd], "JANE PARTNER").CategoryId);
     }
 
     [Fact]
-    public void Marking_settled_starts_the_balance_over()
+    public void Anything_else_just_asks()
     {
-        var b = PartnerMoney.Balance([Split(120_00, day: 3), Split(40_00, day: 15)], [], settledThrough: new DateOnly(2026, 11, 10));
-        Assert.Equal(20_00, b.OwedToOwnerCents);
-    }
-
-    [Fact]
-    public void Her_800_looks_like_her_contribution()
-    {
-        var g = PartnerMoney.Guess(new PartnerTransfer(Guid.NewGuid(), new DateOnly(2026, 11, 21), -800_00, TransactionKind.PartnerContribution), [], "JANE PARTNER");
-        Assert.Equal((PartnerPurpose.Contribution, false), (g.Purpose, g.Unsure));
-        Assert.Equal("Looks like Jane's regular contribution toward bills.", g.Reason);
-    }
-
-    [Fact]
-    public void Her_half_of_a_recent_split_purchase_is_matched()
-    {
-        var groceries = Split(120_00);
-        var g = PartnerMoney.Guess(new PartnerTransfer(Guid.NewGuid(), new DateOnly(2026, 11, 5), -60_00, TransactionKind.PartnerContribution), [groceries], "JANE PARTNER");
-        Assert.Equal((PartnerPurpose.SettleUp, false, groceries.Id), (g.Purpose, g.Unsure, g.MatchedPurchaseId));
-        Assert.Equal("Matches Jane's share of FRESH MARKET $120.00 on Nov 3.", g.Reason);
-    }
-
-    [Fact]
-    public void A_small_unmatched_amount_is_an_unsure_settle_up_and_money_out_asks_what_it_was()
-    {
-        var small = PartnerMoney.Guess(new PartnerTransfer(Guid.NewGuid(), Nov3, -23_50, TransactionKind.PartnerContribution), [Split(120_00, day: 1)], "JANE PARTNER");
-        Assert.Equal((PartnerPurpose.SettleUp, true), (small.Purpose, small.Unsure));
-        var sent = PartnerMoney.Guess(new PartnerTransfer(Guid.NewGuid(), Nov3, 40_00, TransactionKind.Purchase), [], "JANE PARTNER");
-        Assert.Equal((PartnerPurpose.MyShareOfHers, true), (sent.Purpose, sent.Unsure));
+        var other = PartnerMoney.Suggest(new DateOnly(2026, 11, 12), -23_50, [FreshMarket], "JANE PARTNER");
+        Assert.Equal(((Guid?)null, "From Jane: what was it for?"), (other.CategoryId, other.Reason));
+        Assert.Null(PartnerMoney.Suggest(new DateOnly(2026, 12, 20), -60_00, [FreshMarket], "JANE PARTNER").CategoryId); // too long after
+        Assert.Equal("Sent to Jane: what was it for?", PartnerMoney.Suggest(new DateOnly(2026, 11, 12), 30_00, [FreshMarket], "JANE PARTNER").Reason);
     }
 
     [Theory]

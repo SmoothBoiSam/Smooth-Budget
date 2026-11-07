@@ -3,7 +3,7 @@ using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Core.Tests;
 
-/// <summary>Milestone 7: SPEC section 3's rent and grocery examples, and Appendix D's contribution matching. All data invented.</summary>
+/// <summary>Milestone 7: SPEC section 3's rent example (the fixed contribution) and Appendix D's matching. All data invented.</summary>
 public class PartnerContributionsTests
 {
     private static readonly BudgetMonthRange Nov = new BudgetMonthCalendar().MonthOf(2026, 11); // Nov 6 - Dec 6 (the 7th is a Saturday)
@@ -15,37 +15,6 @@ public class PartnerContributionsTests
 
     private static ContributionStatus Status(DateOnly today, params PartnerDeposit[] deposits) =>
         Assert.Single(PartnerContributions.Match([RentFromPartner], Nov, deposits, today));
-
-    // ---- SPEC section 3, groceries ------------------------------------------------------------------
-
-    [Fact]
-    public void Groceries_you_buy_count_60_against_groceries_and_she_owes_60()
-    {
-        var mine = new SplitPurchase(Guid.NewGuid(), new DateOnly(2026, 11, 10), "FRESH MARKET", 120_00, 0.5m);
-        Assert.Equal((60_00L, 60_00L), (mine.OwnerShareCents, mine.PartnerShareCents));
-        Assert.Equal(60_00, PartnerMoney.Balance([mine], []).OwedToOwnerCents); // owed by the partner
-
-        var lts = LeftToSpendCalculator.Calculate(Nov, new DateOnly(2026, 11, 12),
-            [new BudgetCategory(Groceries, CategoryType.Variable, 450_00)],
-            [new BudgetTransaction(Groceries, mine.Date, 120_00, SplitFactor: 0.5m)], 0);
-        Assert.Equal(60_00, lts.TotalVariableSpentCents); // $60 against Groceries
-    }
-
-    [Fact]
-    public void Groceries_she_buys_mean_you_owe_her_60()
-    {
-        var hers = new SplitPurchase(Guid.NewGuid(), new DateOnly(2026, 11, 10), "FRESH MARKET", 120_00, 0.5m, PaidByPartner: true);
-        var b = PartnerMoney.Balance([hers], []);
-        Assert.Equal((-60_00L, 60_00L), (b.OwedToOwnerCents, b.OwnerSharesOfHersCents)); // owed to the partner
-    }
-
-    [Fact]
-    public void Both_grocery_runs_cancel_out()
-    {
-        var mine = new SplitPurchase(Guid.NewGuid(), new DateOnly(2026, 11, 10), "FRESH MARKET", 120_00, 0.5m);
-        var hers = new SplitPurchase(Guid.NewGuid(), new DateOnly(2026, 11, 12), "CORNER GROCERY", 120_00, 0.5m, PaidByPartner: true);
-        Assert.Equal(0, PartnerMoney.Balance([mine, hers], []).OwedToOwnerCents);
-    }
 
     // ---- SPEC section 3, rent: the fixed contribution --------------------------------------------------
 

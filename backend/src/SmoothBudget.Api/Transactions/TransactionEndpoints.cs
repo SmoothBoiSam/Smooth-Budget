@@ -17,8 +17,8 @@ public record TransactionDto(
     bool NeedsReview = false, string? CategoryReason = null,
     // The automatic category is a real guess, not just "likely right".
     bool Unsure = false,
-    // Money to or from the partner, and the owner's share of a split purchase (1 = not split).
-    bool IsPartnerTransfer = false, decimal OwnerShare = 1m);
+    // Money to or from the partner; while it waits for a label, the category the app suggests (counted nowhere).
+    bool IsPartnerTransfer = false, Guid? SuggestedCategoryId = null);
 
 public record ConfirmRequest(List<Guid> Ids);
 public record ConfirmLikelyRequest(string Scope);
@@ -30,14 +30,13 @@ public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<Trans
 /// <param name="CategoryId">The category to use; null leaves it uncategorized.</param>
 /// <param name="IsTransfer">True marks it as a transfer (never spending).</param>
 /// <param name="RulePattern">When set, also creates a merchant rule: any merchant containing this text goes to the category.</param>
-/// <param name="OwnerShare">Your share of a purchase you split with your partner (0.5 = half each; 1 = not split). Null leaves it.</param>
-/// <param name="PartnerPurpose">For money to or from your partner: "contribution" (hers, toward bills), "settleUp" (paying back),
-/// or "myShare" (your share of something she bought: spending in the category you pick).</param>
-public record UpdateTransactionRequest(Guid? CategoryId, bool IsTransfer, string? RulePattern, decimal? OwnerShare = null, string? PartnerPurpose = null);
+/// <param name="PartnerPurpose">"contribution" for money from your partner that's her contribution or just money from her. To say it paid you
+/// back for something, send the category instead (DECISIONS.md 100).</param>
+public record UpdateTransactionRequest(Guid? CategoryId, bool IsTransfer, string? RulePattern, string? PartnerPurpose = null);
 
 public record UpdateTransactionResult(TransactionDto Transaction, int RuleAppliedTo);
 
-public record CategoryDto(Guid Id, string Name, string Type, long MonthlyLimitCents, bool IsDiscretionary, int SortOrder, int PartnerSharePercent = 0);
+public record CategoryDto(Guid Id, string Name, string Type, long MonthlyLimitCents, bool IsDiscretionary, int SortOrder);
 public record RuleDto(Guid Id, string Pattern, Guid CategoryId, string CategoryName, DateTime CreatedUtc);
 
 public static partial class TransactionEndpoints
@@ -101,8 +100,8 @@ public static partial class TransactionEndpoints
             var month = q.Where(t => t.Date >= start && t.Date <= end);
             var earlier = q.Where(t => t.Date < start);
             return new ReviewSummaryDto(
-                new ReviewCounts(await month.CountAsync(ct), await month.CountAsync(t => !t.CategoryUnsure, ct), await month.CountAsync(t => t.CategoryUnsure, ct)),
-                new ReviewCounts(await earlier.CountAsync(ct), await earlier.CountAsync(t => !t.CategoryUnsure, ct), await earlier.CountAsync(t => t.CategoryUnsure, ct)));
+                new ReviewCounts(await month.CountAsync(ct), await month.CountAsync(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer, ct), await month.CountAsync(t => t.CategoryUnsure || t.Kind == TransactionKind.PartnerTransfer, ct)),
+                new ReviewCounts(await earlier.CountAsync(ct), await earlier.CountAsync(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer, ct), await earlier.CountAsync(t => t.CategoryUnsure || t.Kind == TransactionKind.PartnerTransfer, ct)));
         });
 
         // Confirming makes the category the user's own (and teaches the categorizer that merchant).
@@ -114,7 +113,7 @@ public static partial class TransactionEndpoints
         {
             var householdId = ctx.User.HouseholdId();
             var (start, end) = await CurrentMonthAsync(householdId, db, months, ct);
-            var q = Review(db, householdId).Where(t => !t.CategoryUnsure);
+            var q = Review(db, householdId).Where(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer);
             q = req.Scope switch
             {
                 "earlier" => q.Where(t => t.Date < start),
@@ -139,38 +138,28 @@ public static partial class TransactionEndpoints
             if (req.CategoryId is { } cid && !await db.Categories.AnyAsync(c => c.Id == cid && c.HouseholdId == householdId, ct))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = ["Unknown category."] });
 
-            if (req.OwnerShare is { } share && (share is <= 0m or > 1m || t.AmountCents < 0 && t.Kind != TransactionKind.Refund))
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["ownerShare"] = ["Your share must be more than 0% and at most 100%, on a purchase or refund."] });
-
-            // What money to or from the partner was for (DECISIONS.md 86).
-            switch (req.PartnerPurpose)
+            // Money from your partner that's her contribution or just money from her (DECISIONS.md 100): partner money in.
+            if (req.PartnerPurpose is not null)
             {
-                case null:
-                    break;
-                case "contribution" when t.AmountCents < 0:
-                case "settleUp":
-                    t.Kind = req.PartnerPurpose == "contribution" ? TransactionKind.PartnerContribution : TransactionKind.PartnerSettleUp;
-                    (t.CategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.IsTransfer, t.SplitFactor) =
-                        (null, CategorySource.User, false, false, false, 1m);
-                    t.CategoryReason = req.PartnerPurpose == "contribution" ? "Your partner's contribution toward bills." : "Paying back between you and your partner.";
-                    await db.SaveChangesAsync(ct);
-                    return Results.Ok(new UpdateTransactionResult(await Project(db.Transactions.Where(x => x.Id == t.Id)).SingleAsync(ct), 0));
-                case "myShare" when t.AmountCents > 0 && req.CategoryId is not null:
-                    t.Kind = TransactionKind.Purchase; // your share of something she bought: spending in that category
-                    break;
-                default:
+                if (req.PartnerPurpose != "contribution" || t.AmountCents >= 0)
                     return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerPurpose"] = ["That doesn't fit this transaction."] });
+                (t.Kind, t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.IsTransfer) =
+                    (TransactionKind.PartnerContribution, null, null, CategorySource.User, false, false, false);
+                t.CategoryReason = "Your partner's money: you said so.";
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new UpdateTransactionResult(await Project(db.Transactions.Where(x => x.Id == t.Id)).SingleAsync(ct), 0));
             }
 
             t.CategoryId = req.CategoryId;
+            t.SuggestedCategoryId = null;
             t.CategorySource = CategorySource.User; // locks this row against rules and transfer detection
             t.NeedsReview = false;
             t.CategoryUnsure = false;
             t.CategoryReason = "You chose this.";
-            if (req.OwnerShare is { } own)
-                t.SplitFactor = own;
-            if (t.Kind == TransactionKind.PartnerSettleUp && req.PartnerPurpose is null && req.CategoryId is not null)
-                t.Kind = TransactionKind.Purchase; // filed in a category: it's spending after all
+            // Money between you, labeled with what it was for: from her it pays back that category (like a refund);
+            // to her it's your share of something, spending in that category.
+            if (t.Kind == TransactionKind.PartnerTransfer && req.CategoryId is not null)
+                t.Kind = t.AmountCents < 0 ? TransactionKind.Refund : TransactionKind.Purchase;
             if (req.IsTransfer && !t.IsTransfer)
             {
                 t.IsTransfer = true;
@@ -220,7 +209,7 @@ public static partial class TransactionEndpoints
         group.MapGet("/budget/categories", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
             await db.Categories.Where(c => c.HouseholdId == ctx.User.HouseholdId() && !c.IsHidden)
                 .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
-                .Select(c => new CategoryDto(c.Id, c.Name, c.Type.ToString(), c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder, c.PartnerSharePercent))
+                .Select(c => new CategoryDto(c.Id, c.Name, c.Type.ToString(), c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder))
                 .ToListAsync(ct));
 
         group.MapGet("/rules", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
@@ -245,11 +234,12 @@ public static partial class TransactionEndpoints
                                    && t.Kind != TransactionKind.PartnerContribution
                                    && t.Kind != TransactionKind.CardPayment
                                    && t.Kind != TransactionKind.Transfer
-                                   && t.Kind != TransactionKind.PartnerSettleUp
+                                   && t.Kind != TransactionKind.PartnerTransfer
                                    && (t.AmountCents > 0 || t.Kind == TransactionKind.Refund));
 
+    /// <summary>Confirms automatic categories. A transfer with your partner that's still waiting needs a label, not a ✓, so it's skipped.</summary>
     private static Task<int> Confirm(IQueryable<Transaction> q, CancellationToken ct) =>
-        q.ExecuteUpdateAsync(s => s.SetProperty(t => t.NeedsReview, false)
+        q.Where(t => t.Kind != TransactionKind.PartnerTransfer).ExecuteUpdateAsync(s => s.SetProperty(t => t.NeedsReview, false)
             .SetProperty(t => t.CategoryUnsure, false)
             .SetProperty(t => t.CategorySource, CategorySource.User)
             .SetProperty(t => t.CategoryReason, "You confirmed this."), ct);
@@ -263,14 +253,14 @@ public static partial class TransactionEndpoints
     /// <summary>Automatic categories the user hasn't confirmed yet.</summary>
     public static IQueryable<Transaction> Review(AppDbContext db, Guid householdId) =>
         db.Transactions.Where(t => t.HouseholdId == householdId && t.NeedsReview && !t.IsTransfer
-            && (t.CategoryId != null || t.Kind == TransactionKind.PartnerContribution || t.Kind == TransactionKind.PartnerSettleUp));
+            && (t.CategoryId != null || t.Kind == TransactionKind.PartnerContribution || t.Kind == TransactionKind.PartnerTransfer));
 
     private static IQueryable<TransactionDto> Project(IQueryable<Transaction> q) =>
         q.OrderByDescending(t => t.Date).ThenByDescending(t => t.CreatedUtc).ThenBy(t => t.Id)
             .Select(t => new TransactionDto(
                 t.Id, t.Date, t.AmountCents, t.Merchant, t.Description, t.Kind.ToString(),
                 t.CategoryId, t.Category != null ? t.Category.Name : null, t.CategorySource.ToString(), t.IsTransfer, t.Pending,
-                t.AccountId, t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason, t.CategoryUnsure, t.IsPartnerTransfer, t.SplitFactor));
+                t.AccountId, t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason, t.CategoryUnsure, t.IsPartnerTransfer, t.SuggestedCategoryId));
 
     public static string? NormalizePattern(string? pattern)
     {

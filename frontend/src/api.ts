@@ -87,8 +87,6 @@ export interface Category {
   monthlyLimitCents: number
   isDiscretionary: boolean
   sortOrder: number
-  /** Split with the partner by default: her share in percent (0 = not split). */
-  partnerSharePercent: number
 }
 
 export interface Transaction {
@@ -97,7 +95,7 @@ export interface Transaction {
   amountCents: number
   merchant: string
   description: string
-  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution' | 'PartnerSettleUp'
+  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution' | 'PartnerTransfer'
   categoryId: string | null
   categoryName: string | null
   categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User' | 'Learned'
@@ -112,8 +110,8 @@ export interface Transaction {
   unsure: boolean
   /** Money to or from the partner (by the name in More). */
   isPartnerTransfer: boolean
-  /** Your share of a split purchase: 0.5 = half each, 1 = not split. */
-  ownerShare: number
+  /** While money between you waits for a label: the category the app suggests (counted nowhere). */
+  suggestedCategoryId: string | null
   categoryReason: string | null
 }
 
@@ -186,13 +184,12 @@ export const budgetApi = {
     categoryId: string | null,
     isTransfer: boolean,
     rulePattern: string | null,
-    extra: { ownerShare?: number; partnerPurpose?: PartnerPurpose } = {},
+    extra: { partnerPurpose?: PartnerPurpose } = {},
   ) =>
     request<{ transaction: Transaction; ruleAppliedTo: number }>('PATCH', `/transactions/${id}`, {
       categoryId,
       isTransfer,
       rulePattern,
-      ownerShare: extra.ownerShare ?? null,
       partnerPurpose: extra.partnerPurpose ?? null,
     }),
   importCsv: (accountId: string, file: File) => {
@@ -220,7 +217,6 @@ export interface BudgetCategoryLine {
   remainingCents: number
   health: Health
   transactionCount: number
-  partnerSharePercent: number
   /** What the partner's fixed contribution covers of this line (Rent: the $800). */
   partnerOffsetCents: number
 }
@@ -412,7 +408,6 @@ export const budgetEditApi = {
       isDiscretionary: boolean
       isHidden: boolean
       applyTo: 'month' | 'permanent'
-      partnerSharePercent?: number
     },
   ) => request<void>('PUT', `/budget/categories/${id}`, body),
   reorder: (ids: string[]) => request<void>('POST', '/budget/categories/order', { ids }),
@@ -454,23 +449,10 @@ export const partnerApi = {
   get: () => request<{ partnerName: string | null }>('GET', '/settings/partner'),
   save: (partnerName: string | null) => request<AutoCategorizeResult>('PUT', '/settings/partner', { partnerName }),
   suggestions: () => request<{ name: string; count: number; totalCents: number }[]>('GET', '/settings/partner/suggestions'),
-  settleUp: () => request<SettleUp>('GET', '/partner/settle-up'),
-  markSettled: () => request<SettleUp>('POST', '/partner/settle-up/settled'),
 }
 
-/** What money to or from the partner was for: hers toward bills, paying back, or your share of something she bought. */
-export type PartnerPurpose = 'contribution' | 'settleUp' | 'myShare'
-
-export interface SettleUp {
-  partnerName: string | null
-  /** Positive: your partner owes you. Negative: you owe her. */
-  owedToYouCents: number
-  splitSharesCents: number
-  paidBackByPartnerCents: number
-  paidBackByYouCents: number
-  settledThrough: string | null
-  items: { transactionId: string; date: string; merchant: string; effectCents: number; kind: 'split' | 'paidByPartner' | 'paidByYou' }[]
-}
+/** Money from your partner that's her contribution or just money from her. Paying you back is a category instead. */
+export type PartnerPurpose = 'contribution'
 
 export type ReviewScope = 'month' | 'earlier'
 
@@ -671,16 +653,13 @@ export interface PartnerOverview {
     windowToDay: number
     thisMonth: ContributionStatus | null
   }[]
-  splits: { categoryId: string; name: string; partnerSharePercent: number }[]
-  settleUp: SettleUp
+  /** Transfers between you: waiting for a label, her money in, paying you back (in a category), or your share (in a category). */
   recent: {
     id: string
     date: string
-    merchant: string
     amountCents: number
-    purpose: 'contribution' | 'settleUp' | 'paidByPartner' | 'other'
+    purpose: 'waiting' | 'contribution' | 'payback' | 'yourShare'
     categoryName: string | null
-    confirmed: boolean
   }[]
 }
 
@@ -691,8 +670,4 @@ export const partnerPlanApi = {
   updateContribution: (id: string, categoryId: string, amountCents: number, windowFromDay?: number, windowToDay?: number) =>
     request<void>('PUT', `/partner/contributions/${id}`, { categoryId, amountCents, windowFromDay, windowToDay }),
   removeContribution: (id: string) => request<void>('DELETE', `/partner/contributions/${id}`),
-  setSplit: (categoryId: string, partnerSharePercent: number) => request<void>('PUT', `/partner/splits/${categoryId}`, { partnerSharePercent }),
-  addPurchase: (date: string, merchant: string, amountCents: number, categoryId: string, ownerSharePercent?: number) =>
-    request<{ id: string }>('POST', '/partner/purchases', { date, merchant, amountCents, categoryId, ownerSharePercent }),
-  removePurchase: (id: string) => request<void>('DELETE', `/partner/purchases/${id}`),
 }

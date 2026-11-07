@@ -15,7 +15,7 @@ using SmoothBudget.Core.Budgeting;
 
 namespace SmoothBudget.Api.Tests;
 
-/// <summary>Milestone 7: SPEC section 3's rent and grocery examples, contribution matching (Appendix D), and the late flag. All data invented.</summary>
+/// <summary>Milestone 7: the fixed contribution (SPEC section 3 rent example, Appendix D matching, late flag) and paying back without a tally (DECISIONS.md 100). All data invented.</summary>
 public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
@@ -94,7 +94,7 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
         var two = txns.Single(t => t.Description.EndsWith("A2"));
         Assert.Equal(("PartnerContribution", true), (two.Kind, two.Unsure));       // $200 would otherwise look like paying back
         Assert.Equal("Jane's contribution toward Rent: $200.00, not the usual $800.00.", two.CategoryReason);
-        Assert.Equal("PartnerSettleUp", txns.Single(t => t.Description.EndsWith("A1")).Kind);
+        Assert.Equal("PartnerTransfer", txns.Single(t => t.Description.EndsWith("A1")).Kind);
 
         var during = await Budget(c);
         var status = Assert.Single(during.Contributions!);
@@ -122,29 +122,26 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task Grocery_example_both_ways_through_the_api()
+    public async Task Paying_you_back_for_groceries_nets_out_and_the_overview_shows_it()
     {
-        var (c, _, _, groceries) = await SetupAsync();
+        var (c, checking, rent, groceries) = await SetupAsync();
+        await c.PostAsJsonAsync("/api/partner/contributions", new ArrangementRequest(rent, 800_00), Json);
         At(11, 12);
-        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/partner/splits/{groceries}", new SplitRequest(50), Json)).StatusCode);
         var card = (await (await c.PostAsJsonAsync("/api/accounts", new { name = "Test Card", type = "CreditCard", mask = "4321" }, Json))
             .Content.ReadFromJsonAsync<AccountDto>(Json))!.Id;
         await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,FRESH MARKET,Groceries,Sale,-120.00,");
+        await ImportAsync(c, checking, ChaseChecking, Zelle(11, 60m, "HALF"));
 
-        // You bought $120: $60 against Groceries, and she owes you $60.
-        Assert.Equal(60_00, Line(await Budget(c), "Groceries").SpentCents);
-        Assert.Equal(60_00, (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!.OwedToYouCents);
-
-        // She bought $120: your $60 counts against Groceries too, and you owe her $60, so you're square.
-        var res = await c.PostAsJsonAsync("/api/partner/purchases", new PartnerPurchaseRequest(new DateOnly(2026, 11, 11), "Corner Grocery", 120_00, groceries), Json);
-        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        // No split, no tally: the  counts in full until you label her $60 as paying you back for groceries.
         Assert.Equal(120_00, Line(await Budget(c), "Groceries").SpentCents);
-        var s = (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!;
-        Assert.Equal(0, s.OwedToYouCents);
+        var half = (await c.GetFromJsonAsync<TransactionListDto>("/api/transactions", Json))!.Items.Single(t => t.Description.EndsWith("HALF"));
+        Assert.Equal(groceries, half.SuggestedCategoryId);
+        await c.PatchAsJsonAsync($"/api/transactions/{half.Id}", new UpdateTransactionRequest(groceries, false, null), Json);
+        Assert.Equal(60_00, Line(await Budget(c), "Groceries").SpentCents);
 
-        var overview = (await c.GetFromJsonAsync<PartnerOverviewDto>("/api/partner", Json))!;
-        Assert.Equal(50, overview.Splits.Single(x => x.Name == "Groceries").PartnerSharePercent);
-        Assert.Contains(overview.Recent, a => a.Purpose == "paidByPartner" && a.AmountCents == 120_00);
+        var o = (await c.GetFromJsonAsync<PartnerOverviewDto>("/api/partner", Json))!;
+        Assert.Equal(("Rent", 800_00L, "expected"), (Assert.Single(o.Contributions).CategoryName, o.Contributions[0].AmountCents, o.Contributions[0].ThisMonth!.State));
+        Assert.Contains(o.Recent, a => a.Purpose == "payback" && a.CategoryName == "Groceries" && a.AmountCents == -60_00);
     }
 
     [Fact]

@@ -11,9 +11,8 @@ public sealed class CategorizationContext(
     IReadOnlyDictionary<string, Guid> categoryIdsByName,
     IReadOnlyDictionary<string, MerchantHistory> history,
     string? partnerName,
-    IReadOnlyDictionary<Guid, int>? partnerSharePercent = null,
-    IReadOnlyList<SplitPurchase>? recentSplits = null,
-    DateOnly? settleUpAfter = null)
+    IReadOnlyList<RecentPurchase>? recentPurchases = null,
+    DateOnly? partnerLabelsStartAfter = null)
 {
     public IReadOnlyDictionary<string, Guid> CategoryIdsByName { get; } = categoryIdsByName;
 
@@ -22,57 +21,63 @@ public sealed class CategorizationContext(
         rules, history.GetValueOrDefault(t.Merchant), CategoryIdsByName);
 
     /// <summary>
-    /// Applies automatic decisions to one row: tags money to and from the partner (by the name in Settings) and
-    /// guesses what it was for, files purchases in a category, and applies the category's default split. Never
-    /// touches what the user chose, or transfers. Every automatic decision waits for the user (DECISIONS.md 80, 86).
+    /// Applies automatic decisions to one row: recognizes money to and from the partner (by the name in Settings), files
+    /// purchases in a category, and tells income from partner money. Never touches what the user chose, or transfers.
+    /// Every automatic category waits for the user (DECISIONS.md 80). Money between you and your partner waits too,
+    /// counted nowhere, with the app's suggestion, until you say what it was for (DECISIONS.md 100); her fixed
+    /// contribution is matched separately (<see cref="CategorizationService.MatchContributionsAsync"/>).
     /// </summary>
     public void Apply(Transaction t)
     {
         if (t.IsTransfer)
             return;
-        var userChose = !TransactionRules.IsAutomatic(t.CategorySource);
-        var fromPartner = t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerSettleUp
+        var fromPartner = t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerTransfer
                           && PartnerDetector.IsFromPartner(t.Description, t.AmountCents, partnerName);
-        var toPartner = t.AmountCents > 0 && PartnerMoney.IsToPartner(t.Description, t.AmountCents, partnerName);
+        var toPartner = t.AmountCents > 0 && t.Kind is TransactionKind.Purchase or TransactionKind.Other or TransactionKind.PartnerTransfer
+                        && PartnerMoney.IsToPartner(t.Description, t.AmountCents, partnerName);
         t.IsPartnerTransfer = fromPartner || toPartner;
 
-        // Money in: income, or partner money whose purpose the app guesses (her contribution, or paying back).
-        if (t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerSettleUp)
+        if (!TransactionRules.IsAutomatic(t.CategorySource))
         {
-            if (userChose)
-            {
-                // The user said what it was for; only a "contribution" from someone who's no longer the partner reverts.
-                if (!fromPartner && t.Kind == TransactionKind.PartnerContribution)
-                    t.Kind = TransactionKind.Income;
-                return;
-            }
-            (t.CategoryId, t.CategorySource) = (null, CategorySource.None);
-            if (!fromPartner)
-            {
-                (t.Kind, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) = (TransactionKind.Income, false, false, null);
-                return;
-            }
-            if (settleUpAfter is null || t.Date <= settleUpAfter)
-            {
-                // Before settle-up tracking started: her money is her contribution, as it always was (DECISIONS.md 92).
-                (t.Kind, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) = (TransactionKind.PartnerContribution, false, false, null);
-                return;
-            }
-            var g = PartnerMoney.Guess(new PartnerTransfer(t.Id, t.Date, t.AmountCents, t.Kind), recentSplits ?? [], partnerName!);
-            t.Kind = g.Purpose == PartnerPurpose.Contribution ? TransactionKind.PartnerContribution : TransactionKind.PartnerSettleUp;
-            (t.NeedsReview, t.CategoryUnsure, t.CategoryReason) = (true, g.Unsure, Clip(g.Reason));
+            // You said what it was for; only a "contribution" from someone who's no longer the partner reverts.
+            if (t.AmountCents < 0 && !fromPartner && t.Kind == TransactionKind.PartnerContribution)
+                t.Kind = TransactionKind.Income;
+            return;
+        }
+        t.SuggestedCategoryId = null;
+        var labeling = partnerLabelsStartAfter is { } start && t.Date > start; // before that, as it always was
+
+        if (fromPartner)
+        {
+            if (labeling)
+                Wait(t, PartnerMoney.Suggest(t.Date, t.AmountCents, recentPurchases ?? [], partnerName!));
+            else
+                (t.Kind, t.CategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) =
+                    (TransactionKind.PartnerContribution, null, CategorySource.None, false, false, null);
+            return;
+        }
+        if (t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerTransfer)
+        {
+            (t.Kind, t.CategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) =
+                (TransactionKind.Income, null, CategorySource.None, false, false, null);
             return;
         }
 
-        if (userChose)
-            return;
-
         var guess = Guess(t);
+        if (toPartner && labeling)
+        {
+            // Your share of something she bought, or something else: you say. What you chose for her before is a suggestion.
+            var asked = PartnerMoney.Suggest(t.Date, t.AmountCents, [], partnerName!);
+            Wait(t, new PartnerSuggestion(guess.CategoryId, asked.Reason));
+            return;
+        }
+        if (t.Kind == TransactionKind.PartnerTransfer)
+            t.Kind = TransactionKind.Purchase; // no longer to the partner (the name changed)
+
         // Re-running only improves things: with no opinion now, keep a category that still exists.
         if (guess.CategoryId is null && t.CategoryId is { } current && CategoryIdsByName.Values.Contains(current))
         {
             t.NeedsReview = true; // still automatic, so still waiting for the user
-            ApplySplit(t);
             return;
         }
         t.CategoryId = guess.CategoryId;
@@ -81,16 +86,13 @@ public sealed class CategorizationContext(
         t.NeedsReview = guess.CategoryId is not null;
         t.CategoryUnsure = guess.CategoryId is not null && guess.Unsure;
         t.CategoryReason = Clip(guess.Reason);
-        if (toPartner && t.CategoryId is null)
-            t.CategoryReason = Clip(PartnerMoney.Guess(new PartnerTransfer(t.Id, t.Date, t.AmountCents, t.Kind), [], partnerName!).Reason);
-        ApplySplit(t);
     }
 
-    /// <summary>A category split with the partner by default sets the owner's share; the user can change it per purchase.</summary>
-    private void ApplySplit(Transaction t)
+    /// <summary>Money between you, waiting for a label: no category (so it counts nowhere), the suggestion pre-selected in Review.</summary>
+    private static void Wait(Transaction t, PartnerSuggestion s)
     {
-        var percent = t.CategoryId is { } id ? partnerSharePercent?.GetValueOrDefault(id) ?? 0 : 0;
-        t.SplitFactor = percent is > 0 and < 100 ? 1m - percent / 100m : 1m;
+        (t.Kind, t.CategoryId, t.CategorySource, t.NeedsReview) = (TransactionKind.PartnerTransfer, null, CategorySource.None, true);
+        (t.SuggestedCategoryId, t.CategoryUnsure, t.CategoryReason) = (s.CategoryId, s.CategoryId is null, Clip(s.Reason));
     }
 
     private static string Clip(string reason) => reason.Length <= 200 ? reason : reason[..200];
@@ -126,23 +128,17 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
             .ToDictionary(g => g.Key, g => new MerchantHistory(g.Key, g.ToDictionary(x => x.CategoryId, x => x.Count)));
 
         var h = await db.Households.Where(x => x.Id == householdId)
-            .Select(x => new { x.PartnerName, x.PartnerSettledThrough }).SingleAsync(ct);
-        var shares = await db.Categories.Where(c => c.HouseholdId == householdId && c.PartnerSharePercent > 0)
-            .ToDictionaryAsync(c => c.Id, c => c.PartnerSharePercent, ct);
-        var splits = h.PartnerName is null ? [] : await SplitPurchasesAsync(db, householdId, null, ct);
-        return new CategorizationContext(rules, categories, history, h.PartnerName, shares, splits, h.PartnerSettledThrough);
+            .Select(x => new { x.PartnerName, x.PartnerLabelsStartAfter }).SingleAsync(ct);
+        // Your purchases from the last few months, to recognize "half of the groceries" when she pays you back.
+        var since = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime).AddDays(-120);
+        var recent = h.PartnerName is null ? [] : await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.Date >= since && t.AmountCents > 0 && !t.IsTransfer && !t.IsPartnerTransfer
+                        && t.CategoryId != null && t.Kind == TransactionKind.Purchase)
+            .Select(t => new RecentPurchase(t.Date, t.Merchant, t.AmountCents, t.CategoryId!.Value))
+            .ToListAsync(ct);
+        return new CategorizationContext(rules, categories, history, h.PartnerName, recent, h.PartnerLabelsStartAfter);
     }
 
-    /// <summary>
-    /// Purchases split with the partner, optionally only after a date: ones you paid (she owes you her share) and
-    /// ones she paid that you entered (you owe her yours).
-    /// </summary>
-    public static Task<List<SplitPurchase>> SplitPurchasesAsync(AppDbContext db, Guid householdId, DateOnly? after, CancellationToken ct) =>
-        db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && !t.IsTransfer && (t.SplitFactor < 1m || t.PaidByPartner) && t.CategoryId != null
-                        && (after == null || t.Date > after))
-            .Select(t => new SplitPurchase(t.Id, t.Date, t.Merchant, t.AmountCents, t.SplitFactor, t.PaidByPartner))
-            .ToListAsync(ct);
 
     /// <summary>
     /// Marks the transfer that matched each fixed contribution as her contribution (DECISIONS.md 97): the largest from her
@@ -181,12 +177,12 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
                 if (!TransactionRules.IsAutomatic(t.CategorySource))
                     continue;
                 var a = active.First(x => x.Id == s.ArrangementId);
-                t.Kind = TransactionKind.PartnerContribution;
+                (t.Kind, t.CategoryId, t.SuggestedCategoryId) = (TransactionKind.PartnerContribution, null, null);
                 t.CategoryUnsure = s.State == ContributionState.DifferentAmount;
                 t.CategoryReason = s.State == ContributionState.Received
                     ? $"{first}'s contribution toward {a.Category.Name}."
                     : $"{first}'s contribution toward {a.Category.Name}: {Money(s.ReceivedCents)}, not the usual {Money(s.ExpectedCents)}.";
-                if (h.PartnerSettledThrough is not { } start || t.Date > start)
+                if (h.PartnerLabelsStartAfter is not { } start || t.Date > start)
                     t.NeedsReview = true; // still yours to confirm
             }
         }

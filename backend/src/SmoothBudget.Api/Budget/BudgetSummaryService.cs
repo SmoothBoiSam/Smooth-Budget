@@ -19,8 +19,6 @@ public record BudgetCategoryLineDto(
     // "onTrack", "low" or "over".
     string Health,
     int TransactionCount,
-    // Split with the partner by default: her share in percent (0 = not split).
-    int PartnerSharePercent = 0,
     // What the partner's fixed contribution covers of this line (Rent: the $800). Your net share is the limit minus this.
     long PartnerOffsetCents = 0);
 
@@ -110,7 +108,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
                 {
                     var l = lines[c.Id];
                     return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.IsDiscretionary, l.LimitCents, c.HasMonthOverride,
-                        l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount, c.PartnerSharePercent,
+                        l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount,
                         (data.Contributions ?? []).Where(s => s.CategoryId == c.Id).Sum(s => s.ExpectedCents));
                 }).ToList();
                 return new BudgetGroupDto(g.Type.ToString(), g.Label, g.Type == CategoryType.Variable,

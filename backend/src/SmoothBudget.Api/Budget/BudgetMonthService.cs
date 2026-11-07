@@ -7,7 +7,7 @@ using SmoothBudget.Core.Transactions;
 namespace SmoothBudget.Api.Budget;
 
 /// <summary>A category with the limit that applies in one particular budget month.</summary>
-public sealed record MonthCategory(Guid Id, string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, int SortOrder, bool HasMonthOverride, int PartnerSharePercent = 0)
+public sealed record MonthCategory(Guid Id, string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, int SortOrder, bool HasMonthOverride)
 {
     public BudgetCategory ForCalculator => new(Id, Type, LimitCents);
 }
@@ -96,7 +96,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             var ids = perMonth.Where(p => p.ClosingLimitCents is not null).Select(p => p.CategoryId).ToList();
             var cats = await db.Categories.AsNoTracking().Where(c => ids.Contains(c.Id)).ToListAsync(ct);
             categories = cats.Select(c => new MonthCategory(c.Id, c.Name, c.Type, perMonth.Single(p => p.CategoryId == c.Id).ClosingLimitCents!.Value,
-                c.IsDiscretionary, c.SortOrder, false, c.PartnerSharePercent)).ToList();
+                c.IsDiscretionary, c.SortOrder, false)).ToList();
         }
         else
         {
@@ -104,7 +104,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             categories = cats.Select(c =>
             {
                 var o = perMonth.SingleOrDefault(p => p.CategoryId == c.Id)?.LimitOverrideCents;
-                return new MonthCategory(c.Id, c.Name, c.Type, o ?? c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder, o is not null, c.PartnerSharePercent);
+                return new MonthCategory(c.Id, c.Name, c.Type, o ?? c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder, o is not null);
             }).ToList();
         }
         categories = categories.OrderBy(c => c.SortOrder).ThenBy(c => c.Name).ToList();

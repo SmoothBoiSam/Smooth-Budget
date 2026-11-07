@@ -1,24 +1,23 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, partnerPlanApi, type Category, type ContributionStatus, type PartnerOverview } from './api'
 import { centsToInput, formatCents, formatDay, parseDollars, titleCase } from './format'
-import { SettleUpCard } from './ReviewScreen'
 
 const purposeLabel: Record<PartnerOverview['recent'][number]['purpose'], string> = {
+  waiting: 'Waiting for a label',
   contribution: 'Contribution',
-  settleUp: 'Paying back',
-  paidByPartner: 'Paid by partner',
-  other: 'Your share of hers',
+  payback: 'Paid you back',
+  yourShare: 'Your share',
 }
 
 /**
- * The Partner screen (SPEC 4.8): her fixed contributions with this month's expected vs received and the late flag,
- * split categories, purchases she paid for, the settle-up balance, and her recent transfers.
+ * The Partner screen (SPEC 4.8): her fixed contributions with this month's expected vs received and the late flag, and
+ * recent transfers between you. There's no running tally (DECISIONS.md 100): each transfer is labeled in Review with
+ * what it was for, and lands in that category.
  */
 export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [o, setO] = useState<PartnerOverview | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [editing, setEditing] = useState<PartnerOverview['contributions'][number] | null | undefined>(undefined) // null = adding
-  const [buying, setBuying] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,7 +49,6 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
       await action()
       setNotice(message)
       setEditing(undefined)
-      setBuying(false)
       await load()
     } catch (e) {
       fail(e)
@@ -126,43 +124,6 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
             )}
           </section>
 
-          <SettleUpCard settle={o.settleUp} partnerName={o.partnerName ?? 'Partner'} onSettled={() => void load()} onError={fail} />
-          <button type="button" onClick={() => setBuying(true)} className="mt-3 w-full rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
-            + Something {who} paid for
-          </button>
-
-          <section aria-labelledby="splits-h" className="mt-6">
-            <h2 id="splits-h" className="text-sm font-semibold text-slate-700">
-              Split categories
-            </h2>
-            <p className="text-xs text-slate-500">Only your share counts in your budget; {who.toLowerCase() === 'your partner' ? 'theirs' : `${who}’s`} goes on the settle-up balance. Any single purchase can be split from Review too.</p>
-            <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
-              {o.splits.map((s) => (
-                <li key={s.categoryId} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                  <span className="text-sm">{s.name}</span>
-                  <select
-                    aria-label={`${s.name} split`}
-                    value={s.partnerSharePercent}
-                    onChange={(e) =>
-                      void act(
-                        () => partnerPlanApi.setSplit(s.categoryId, Number(e.target.value)),
-                        Number(e.target.value) === 0 ? `${s.name} isn’t split.` : `${s.name} is split: you pay ${100 - Number(e.target.value)}%.`,
-                      )
-                    }
-                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
-                  >
-                    <option value={0}>Not split</option>
-                    <option value={50}>Half each</option>
-                    <option value={40}>You 60%</option>
-                    <option value={60}>You 40%</option>
-                    <option value={30}>You 70%</option>
-                    <option value={70}>You 30%</option>
-                  </select>
-                </li>
-              ))}
-            </ul>
-          </section>
-
           {o.recent.length > 0 && (
             <section aria-labelledby="recent-h" className="mt-6">
               <h2 id="recent-h" className="text-sm font-semibold text-slate-700">
@@ -174,9 +135,9 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
                     <span className="min-w-0 truncate">
                       {formatDay(r.date)} · {purposeLabel[r.purpose]}
                       {r.categoryName && <span className="text-slate-500"> · {r.categoryName}</span>}
-                      {!r.confirmed && r.purpose !== 'paidByPartner' && (
+                      {r.purpose === 'waiting' && (
                         <a href="#/review" className="ml-1 text-xs text-amber-600 underline">
-                          confirm
+                          label it
                         </a>
                       )}
                     </span>
@@ -208,24 +169,8 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
           onRemove={editing ? () => act(() => partnerPlanApi.removeContribution(editing.id), 'Removed.') : undefined}
         />
       )}
-      {buying && (
-        <PurchaseSheet
-          categories={categories.filter((c) => c.type === 'Variable')}
-          who={who}
-          onClose={() => setBuying(false)}
-          onSave={(date, merchant, cents, categoryId, share) =>
-            act(() => partnerPlanApi.addPurchase(date, merchant, cents, categoryId, share), `Added. Your ${share}% counts in your budget, and you owe ${who} it.`)
-          }
-        />
-      )}
     </div>
   )
-}
-
-/** Today as YYYY-MM-DD in local time (a lazy initial value, so it isn't read during render). */
-function todayIso() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function ordinal(n: number) {
@@ -338,99 +283,3 @@ function ContributionSheet({
   )
 }
 
-function PurchaseSheet({
-  categories,
-  who,
-  onClose,
-  onSave,
-}: {
-  categories: Category[]
-  who: string
-  onClose: () => void
-  onSave: (date: string, merchant: string, cents: number, categoryId: string, share: number) => void
-}) {
-  const [date, setDate] = useState(todayIso)
-  const [merchant, setMerchant] = useState('')
-  const [amount, setAmount] = useState('')
-  const [categoryId, setCategoryId] = useState(categories.find((c) => c.name === 'Groceries')?.id ?? categories[0]?.id ?? '')
-  const cat = categories.find((c) => c.id === categoryId)
-  const [share, setShare] = useState(cat && cat.partnerSharePercent > 0 ? 100 - cat.partnerSharePercent : 50)
-  const [err, setErr] = useState<string | null>(null)
-  const cents = parseDollars(amount)
-
-  function submit(e: FormEvent) {
-    e.preventDefault()
-    if (!merchant.trim()) return setErr('Where was it?')
-    if (cents === null || cents <= 0) return setErr('Enter what it cost, like 120.')
-    if (!categoryId) return setErr('Pick a category.')
-    onSave(date, merchant, cents, categoryId, share)
-  }
-
-  return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/40" onClick={onClose}>
-      <form role="dialog" aria-modal="true" aria-labelledby="purchase-h" onSubmit={submit} onClick={(e) => e.stopPropagation()} className={sheetCls}>
-        <h2 id="purchase-h" className="text-lg font-semibold">
-          Something {who} paid for
-        </h2>
-        <p className="text-sm text-slate-500">Your share counts in your budget, and you owe {who} it.</p>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Date</span>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
-          </label>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Total</span>
-            <div className={`${inputCls} flex items-center`}>
-              <span className="text-sm text-slate-500">$</span>
-              <input aria-label="Total" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className="w-full bg-transparent px-1 text-right outline-none" />
-            </div>
-          </label>
-        </div>
-        <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Where</span>
-          <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. Corner Grocery" className={inputCls} />
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Category</span>
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={inputCls}>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Your share</span>
-            <select value={share} onChange={(e) => setShare(Number(e.target.value))} className={inputCls}>
-              {[50, 40, 60, 30, 70, 100].map((p) => (
-                <option key={p} value={p}>
-                  {p}%
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {cents !== null && cents > 0 && (
-          <p className="mt-2 text-xs text-slate-500">
-            {formatCents(Math.round((cents * share) / 100))} counts in your budget; you owe {who} {formatCents(Math.round((cents * share) / 100))}.
-          </p>
-        )}
-        {err && (
-          <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            {err}
-          </p>
-        )}
-        <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-slate-100 py-3 font-semibold text-slate-700">
-            Cancel
-          </button>
-          <button type="submit" className="flex-1 rounded-xl bg-slate-900 py-3 font-semibold text-white">
-            Add
-          </button>
-        </div>
-      </form>
-    </div>
-  )
-}

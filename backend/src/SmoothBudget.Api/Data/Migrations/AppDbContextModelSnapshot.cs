@@ -373,9 +373,6 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<int>("PartnerSharePercent")
-                        .HasColumnType("integer");
-
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
@@ -504,12 +501,12 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<DateOnly?>("PartnerLabelsStartAfter")
+                        .HasColumnType("date");
+
                     b.Property<string>("PartnerName")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
-
-                    b.Property<DateOnly?>("PartnerSettledThrough")
-                        .HasColumnType("date");
 
                     b.Property<int>("SweepSavingsPercent")
                         .HasColumnType("integer");
@@ -819,9 +816,6 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<bool>("NeedsReview")
                         .HasColumnType("boolean");
 
-                    b.Property<bool>("PaidByPartner")
-                        .HasColumnType("boolean");
-
                     b.Property<long>("PartnerOffsetCents")
                         .HasColumnType("bigint");
 
@@ -838,6 +832,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<decimal>("SplitFactor")
                         .HasPrecision(5, 4)
                         .HasColumnType("numeric(5,4)");
+
+                    b.Property<Guid?>("SuggestedCategoryId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("TransferGroupId")
                         .HasColumnType("uuid");

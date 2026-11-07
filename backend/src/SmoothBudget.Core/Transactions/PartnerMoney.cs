@@ -3,58 +3,22 @@ using System.Text.RegularExpressions;
 
 namespace SmoothBudget.Core.Transactions;
 
-/// <summary>
-/// A purchase split with the partner. OwnerShare is the split factor (0.5 = half each). <see cref="PaidByPartner"/>: she paid,
-/// so the owner owes her his share (SPEC section 3: "a $120 purchase by the partner creates $60 owed to the partner").
-/// </summary>
-public sealed record SplitPurchase(Guid Id, DateOnly Date, string Merchant, long AmountCents, decimal OwnerShare, bool PaidByPartner = false)
-{
-    /// <summary>The owner's share in cents.</summary>
-    public long OwnerShareCents => AmountCents - PartnerShareCents;
+/// <summary>A recent purchase of yours, to recognize "half of the groceries" when she pays you back.</summary>
+public sealed record RecentPurchase(DateOnly Date, string Merchant, long AmountCents, Guid CategoryId);
 
-    /// <summary>What this does to the balance: + she owes the owner her share; − the owner owes her his.</summary>
-    public long BalanceEffectCents => PaidByPartner ? -OwnerShareCents : PartnerShareCents;
-
-    /// <summary>What the partner owes for it, in cents (positive for a purchase, negative for a refund).</summary>
-    public long PartnerShareCents => AmountCents - (OwnerShare == 1m ? AmountCents : (long)Math.Round(AmountCents * OwnerShare, 0, MidpointRounding.AwayFromZero));
-}
-
-/// <summary>A transfer between the owner and the partner. Positive cents = the owner sent it; negative = she did.</summary>
-public sealed record PartnerTransfer(Guid Id, DateOnly Date, long AmountCents, TransactionKind Kind);
-
-/// <summary>Whom the partner money is for, as the app guesses it. The user always confirms (DECISIONS.md 86).</summary>
-public enum PartnerPurpose
-{
-    /// <summary>Her regular contribution toward bills (the $800 toward rent). Counts as partner money in the budget.</summary>
-    Contribution,
-    /// <summary>Paying back: her share of split purchases, or the owner paying back his share of hers.</summary>
-    SettleUp,
-    /// <summary>Money the owner sent her for his share of something she bought: spending in a category he picks.</summary>
-    MyShareOfHers,
-}
-
-public sealed record PartnerGuess(PartnerPurpose Purpose, bool Unsure, string Reason, Guid? MatchedPurchaseId = null);
-
-/// <param name="OwedToOwnerCents">Positive: the partner owes the owner. Negative: the owner owes her.</param>
-/// <param name="SplitSharesCents">Her share of what the owner paid for.</param>
-/// <param name="OwnerSharesOfHersCents">The owner's share of what she paid for.</param>
-public sealed record SettleUpBalance(long OwedToOwnerCents, long SplitSharesCents, long SettledByHerCents, long SettledByOwnerCents, long OwnerSharesOfHersCents = 0);
+/// <summary>What the app thinks a transfer between you was for. Nothing counts until you say (DECISIONS.md 100).</summary>
+public sealed record PartnerSuggestion(Guid? CategoryId, string Reason);
 
 /// <summary>
-/// Partner money beyond the fixed contribution (SPEC section 3, "Partner money", and Appendix D):
-/// <list type="bullet">
-/// <item>Split purchases count only the owner's share; her share is owed to him in the settle-up balance.</item>
-/// <item>Money in from her is either her contribution toward bills (large, usually monthly) or paying back.</item>
-/// <item>Money he sends her is either his share of something she bought (spending, in a category he picks)
-/// or paying back what he owes.</item>
-/// </list>
-/// The app only guesses which; every partner transfer waits in review until the owner confirms it.
+/// Money between the owner and the partner, beyond her fixed contribution (DECISIONS.md 100). There's no running
+/// tally: when you split something, the money that moves between you <i>is</i> the split. Money from her that pays
+/// you back lands in the category it was for (like a refund); money you send her for your share of something lands
+/// in its category as spending; anything else from her is her money in. Each one waits, counted nowhere, until you
+/// label it.
 /// </summary>
 public static partial class PartnerMoney
 {
-    /// <summary>Incoming partner money at least this large looks like her contribution toward bills, not paying back.</summary>
-    public const long ContributionMinCents = 300_00;
-    /// <summary>How far back a paying-back transfer is matched against split purchases.</summary>
+    /// <summary>How far back a pay-back is matched against your purchases.</summary>
     public const int MatchDays = 21;
     private static readonly CultureInfo Us = CultureInfo.GetCultureInfo("en-US");
 
@@ -71,43 +35,25 @@ public static partial class PartnerMoney
         return first.Length >= 2 && m.Groups["rest"].Value.Split(' ').Contains(first);
     }
 
-    /// <summary>The app's guess for one partner transfer (positive = the owner sent it).</summary>
-    public static PartnerGuess Guess(PartnerTransfer t, IReadOnlyList<SplitPurchase> splits, string partnerName)
+    /// <summary>
+    /// A suggestion for a transfer between you (positive cents = you sent it). Money from her that's exactly half of a
+    /// recent purchase of yours suggests that purchase's category; otherwise it just asks.
+    /// </summary>
+    public static PartnerSuggestion Suggest(DateOnly date, long amountCents, IReadOnlyList<RecentPurchase> recent, string partnerName)
     {
         var first = Title(partnerName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? partnerName);
-        if (t.AmountCents < 0)
+        if (amountCents < 0)
         {
-            var received = -t.AmountCents;
-            if (Match(received, t.Date, splits) is { } m)
-                return new PartnerGuess(PartnerPurpose.SettleUp, false,
-                    $"Matches {first}'s share of {m.Merchant} {Money(m.AmountCents)} on {m.Date.ToString("MMM d", Us)}.", m.Id);
-            return received >= ContributionMinCents
-                ? new PartnerGuess(PartnerPurpose.Contribution, false, $"Looks like {first}'s regular contribution toward bills.")
-                : new PartnerGuess(PartnerPurpose.SettleUp, true, $"A smaller amount from {first}: probably paying you back. Check what it was for.");
+            var received = -amountCents;
+            var half = recent
+                .Where(p => p.Date <= date && p.Date >= date.AddDays(-MatchDays) && Math.Abs(p.AmountCents - 2 * received) <= 1)
+                .OrderByDescending(p => p.Date).FirstOrDefault();
+            return half is not null
+                ? new PartnerSuggestion(half.CategoryId, $"Looks like half of {half.Merchant} {Money(half.AmountCents)} on {half.Date.ToString("MMM d", Us)}.")
+                : new PartnerSuggestion(null, $"From {first}: what was it for?");
         }
-        return new PartnerGuess(PartnerPurpose.MyShareOfHers, true, $"Sent to {first}: your share of something {first} bought, or paying back?");
+        return new PartnerSuggestion(null, $"Sent to {first}: what was it for?");
     }
-
-    /// <summary>
-    /// Who owes whom: her share of every split purchase, minus what she paid back, plus what the owner paid back.
-    /// Only activity after the last "settled" date counts.
-    /// </summary>
-    public static SettleUpBalance Balance(IReadOnlyList<SplitPurchase> splits, IReadOnlyList<PartnerTransfer> transfers, DateOnly? settledThrough = null)
-    {
-        bool After(DateOnly d) => settledThrough is not { } s || d > s;
-        var counted = splits.Where(s => After(s.Date)).ToList();
-        var shares = counted.Where(s => !s.PaidByPartner).Sum(s => s.PartnerShareCents);
-        var ownerSharesOfHers = counted.Where(s => s.PaidByPartner).Sum(s => s.OwnerShareCents);
-        var settleUps = transfers.Where(t => t.Kind == TransactionKind.PartnerSettleUp && After(t.Date)).ToList();
-        var byHer = settleUps.Where(t => t.AmountCents < 0).Sum(t => -t.AmountCents);
-        var byOwner = settleUps.Where(t => t.AmountCents > 0).Sum(t => t.AmountCents);
-        return new SettleUpBalance(shares - ownerSharesOfHers - byHer + byOwner, shares, byHer, byOwner, ownerSharesOfHers);
-    }
-
-    /// <summary>The latest split purchase in the last few weeks whose partner share is exactly this amount.</summary>
-    private static SplitPurchase? Match(long cents, DateOnly date, IReadOnlyList<SplitPurchase> splits) =>
-        splits.Where(s => !s.PaidByPartner && s.Date <= date && s.Date >= date.AddDays(-MatchDays) && s.PartnerShareCents == cents)
-            .OrderByDescending(s => s.Date).FirstOrDefault();
 
     private static string Normalize(string s) => Whitespace().Replace(s.ToUpperInvariant(), " ").Trim();
     private static string Title(string w) => w.Length == 0 ? w : char.ToUpperInvariant(w[0]) + w[1..].ToLowerInvariant();

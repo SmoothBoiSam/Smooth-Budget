@@ -6,11 +6,10 @@ using SmoothBudget.Core.Budgeting;
 
 namespace SmoothBudget.Api.Budget;
 
-/// <param name="PartnerSharePercent">Split with your partner by default: her share in percent (0 = not split). Null leaves it as it is.</param>
-public record CategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, int? PartnerSharePercent = null);
+public record CategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary);
 
 /// <param name="ApplyTo">"permanent" changes the usual limit from now on; "month" changes only the current budget month.</param>
-public record UpdateCategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, bool IsHidden, string ApplyTo, int? PartnerSharePercent = null);
+public record UpdateCategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, bool IsHidden, string ApplyTo);
 
 public record ReorderRequest(List<Guid> Ids);
 public record IncomeRequest(long IncomeCents, long? PartnerCents = null);
@@ -44,8 +43,6 @@ public static class BudgetEndpoints
         {
             var householdId = ctx.User.HouseholdId();
             if (Validate(req.Name, req.Type, req.LimitCents) is { } problem) return problem;
-            if (req.PartnerSharePercent is < 0 or >= 100)
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerSharePercent"] = ["Use 0 (not split) up to 99."] });
             var name = req.Name.Trim();
             if (await db.Categories.AnyAsync(c => c.HouseholdId == householdId && c.Name == name, ct))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["A category with that name already exists."] });
@@ -53,7 +50,7 @@ public static class BudgetEndpoints
             var c = new Category
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = req.Type, MonthlyLimitCents = req.LimitCents,
-                IsDiscretionary = req.IsDiscretionary, SortOrder = order + 1, PartnerSharePercent = req.PartnerSharePercent ?? 0,
+                IsDiscretionary = req.IsDiscretionary, SortOrder = order + 1,
             };
             db.Categories.Add(c);
             await db.SaveChangesAsync(ct);
@@ -67,8 +64,6 @@ public static class BudgetEndpoints
             var c = await db.Categories.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
             if (c is null) return Results.NotFound();
             if (Validate(req.Name, req.Type, req.LimitCents) is { } problem) return problem;
-            if (req.PartnerSharePercent is < 0 or >= 100)
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerSharePercent"] = ["Use 0 (not split) up to 99."] });
             var name = req.Name.Trim();
             if (await db.Categories.AnyAsync(x => x.HouseholdId == householdId && x.Name == name && x.Id != id, ct))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["A category with that name already exists."] });
@@ -77,8 +72,6 @@ public static class BudgetEndpoints
             c.Type = req.Type;
             c.IsDiscretionary = req.IsDiscretionary;
             c.IsHidden = req.IsHidden;
-            if (req.PartnerSharePercent is { } p)
-                c.PartnerSharePercent = p;
 
             var current = await months.EnsureCurrentAsync(householdId, ct);
             var mc = await db.BudgetMonthCategories.SingleOrDefaultAsync(x => x.BudgetMonthId == current.Id && x.CategoryId == id, ct);

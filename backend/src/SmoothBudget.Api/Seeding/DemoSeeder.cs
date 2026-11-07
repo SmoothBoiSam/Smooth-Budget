@@ -70,7 +70,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         household.SweepTarget = SweepTarget.Debt;
         household.SweepSavingsPercent = 50;
         household.PartnerName = "Partner"; // matches the fake "Zelle payment from Partner" rows
-        household.PartnerSettledThrough = null; // the demo tracks settle-up over all of its (short) history
+        household.PartnerLabelsStartAfter = null; // the demo's partner money is all her contribution
 
         Account NewAccount(string name, AccountType type, string mask, long balance) => new()
         {

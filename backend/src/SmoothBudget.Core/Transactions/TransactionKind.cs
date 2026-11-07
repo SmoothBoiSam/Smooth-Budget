@@ -19,10 +19,10 @@ public enum TransactionKind
     /// <summary>Money in from the partner (e.g. her Zelle toward rent). Not the owner's income, never spending.</summary>
     PartnerContribution = 7,
     /// <summary>
-    /// Paying back between the owner and the partner (her half of the groceries, or his of something she bought).
-    /// Never income, never spending: it moves the settle-up balance (DECISIONS.md 86).
+    /// Money between the owner and the partner that you haven't labeled yet (DECISIONS.md 100). Counted nowhere until
+    /// you say what it was for: then it becomes a refund in a category, her money in, or spending in a category.
     /// </summary>
-    PartnerSettleUp = 8,
+    PartnerTransfer = 8,
 }
 
 /// <summary>
@@ -54,7 +54,7 @@ public static class TransactionRules
         !hasKnownCategory
         && !isTransfer
         && !IsMoneyIn(kind)
-        && kind is not (TransactionKind.CardPayment or TransactionKind.Transfer or TransactionKind.PartnerSettleUp)
+        && kind is not (TransactionKind.CardPayment or TransactionKind.Transfer or TransactionKind.PartnerTransfer)
         && (amountCents > 0 || kind == TransactionKind.Refund);
 
     /// <summary>The owner's income or partner money: never spending, never categorized.</summary>

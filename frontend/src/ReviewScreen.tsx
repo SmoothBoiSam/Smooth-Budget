@@ -5,13 +5,11 @@ import {
   budgetEditApi,
   partnerApi,
   type Category,
-  type PartnerPurpose,
   type ReviewScope,
   type ReviewSummary,
-  type SettleUp,
   type Transaction,
 } from './api'
-import { formatCents, formatDay, formatSigned, titleCase } from './format'
+import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier'
 
@@ -21,7 +19,7 @@ const typeLabels: Record<Category['type'], string> = { Variable: 'Spending', Fix
 /** Partner money first, then purchases with no category, then the app's least certain guesses, then likely ones. */
 function rank(t: Transaction) {
   if (t.isPartnerTransfer) return 0
-  if (!t.categoryId && t.kind !== 'PartnerContribution' && t.kind !== 'PartnerSettleUp') return 1
+  if (!t.categoryId && t.kind !== 'PartnerContribution' && t.kind !== 'PartnerTransfer') return 1
   return t.unsure ? 2 : 3
 }
 
@@ -38,7 +36,6 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [todoCount, setTodoCount] = useState<number | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [partnerName, setPartnerName] = useState<string | null>(null)
-  const [settle, setSettle] = useState<SettleUp | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -55,7 +52,6 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
     setSummary(s)
     setTodoCount(c.count + c.review)
     setPartnerName(p.partnerName)
-    setSettle(p.partnerName ? await partnerApi.settleUp() : null)
   }, [])
 
   const loadQueue = useCallback(
@@ -150,7 +146,6 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
         })}
       </div>
 
-      {settle && partnerName && <SettleUpCard settle={settle} partnerName={partnerName} onSettled={(s) => setSettle(s)} onError={fail} />}
 
       {notice && (
         <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -239,7 +234,11 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
   )
 }
 
-/** One transaction to confirm or change, with the app's guess up front. */
+/**
+ * One transaction to confirm or change, with the app's guess up front. Money between you and your partner has no
+ * category until you give it one (DECISIONS.md 100): from her it's paying you back for something (that category,
+ * like a refund) or her money; to her it's your share of something (that category, as spending).
+ */
 function ReviewCard({
   t,
   categories,
@@ -260,34 +259,27 @@ function ReviewCard({
   const first = partnerName ? titleCase(partnerName.split(' ')[0]) : 'your partner'
   const partnerIn = t.isPartnerTransfer && t.amountCents < 0
   const partnerOut = t.isPartnerTransfer && t.amountCents > 0
-  const initialPurpose: PartnerPurpose | null = partnerIn
-    ? t.kind === 'PartnerContribution'
-      ? 'contribution'
-      : 'settleUp'
-    : partnerOut
-      ? t.kind === 'PartnerSettleUp'
-        ? 'settleUp'
-        : 'myShare'
-      : null
-  const [purpose, setPurpose] = useState<PartnerPurpose | null>(initialPurpose)
-  const [categoryId, setCategoryId] = useState<string | null>(t.categoryId)
-  const [split, setSplit] = useState(t.ownerShare < 1)
+  const pick = t.categoryId ?? t.suggestedCategoryId
+  const [mode, setMode] = useState<'payback' | 'contribution' | null>(
+    !partnerIn ? null : t.kind === 'PartnerContribution' ? 'contribution' : t.suggestedCategoryId ? 'payback' : null,
+  )
+  const [categoryId, setCategoryId] = useState<string | null>(pick)
   const [rule, setRule] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const selected = categories.find((c) => c.id === categoryId) ?? null
-  const needsCategory = !partnerIn && purpose !== 'settleUp'
+  const needsCategory = partnerIn ? mode === 'payback' : true
   const sorted = useMemo(
     () => [...categories].sort((a, b) => typeOrder.indexOf(a.type) - typeOrder.indexOf(b.type) || a.sortOrder - b.sortOrder),
     [categories],
   )
   // The app's pick first, then spending categories; the order stays put while you tap around.
-  const suggested = categories.find((c) => c.id === t.categoryId) ?? null
+  const suggested = categories.find((c) => c.id === pick) ?? null
   const quick = showAll
     ? sorted
-    : [...(suggested ? [suggested] : []), ...sorted.filter((c) => c.id !== t.categoryId && c.type === 'Variable')].slice(0, 8)
+    : [...(suggested ? [suggested] : []), ...sorted.filter((c) => c.id !== pick && c.type === 'Variable')].slice(0, 8)
   if (selected && !quick.some((c) => c.id === selected.id)) quick.push(selected)
 
   async function save(override?: { transfer?: boolean }) {
@@ -297,18 +289,18 @@ function ReviewCard({
         await budgetApi.updateTransaction(t.id, null, true, null)
         return onDone(`${titleCase(t.merchant)} is a transfer: never counted as spending.`)
       }
-      if (purpose === 'contribution' || purpose === 'settleUp') {
-        await budgetApi.updateTransaction(t.id, null, false, null, { partnerPurpose: purpose })
-        return onDone(purpose === 'contribution' ? `Counted as ${first}’s contribution.` : 'Counted as paying back. The settle-up balance is updated.')
+      if (partnerIn && mode === 'contribution') {
+        await budgetApi.updateTransaction(t.id, null, false, null, { partnerPurpose: 'contribution' })
+        return onDone(`Counted as money from ${first}.`)
       }
       if (!categoryId) return
-      const share = split ? (t.ownerShare < 1 ? t.ownerShare : 1 - (selected?.partnerSharePercent || 50) / 100) : 1
-      await budgetApi.updateTransaction(t.id, categoryId, false, rule ? t.merchant : null, {
-        ownerShare: t.amountCents > 0 || t.kind === 'Refund' ? share : undefined,
-        partnerPurpose: purpose === 'myShare' ? 'myShare' : undefined,
-      })
+      await budgetApi.updateTransaction(t.id, categoryId, false, rule && !t.isPartnerTransfer ? t.merchant : null)
       onDone(
-        `${selected?.name ?? 'Saved'}${split ? ', split with ' + first : ''}${rule ? `. Future ${titleCase(t.merchant)} purchases go there too, for you to confirm` : ''}.`,
+        partnerIn
+          ? `Counted as paying you back for ${selected?.name}: it comes off that category.`
+          : partnerOut
+            ? `Counted as your share of ${selected?.name}.`
+            : `${selected?.name ?? 'Saved'}${rule ? `. Future ${titleCase(t.merchant)} purchases go there too, for you to confirm` : ''}.`,
       )
     } catch (e) {
       onError(e)
@@ -330,33 +322,32 @@ function ReviewCard({
       {t.description !== t.merchant && <p className="mt-1 break-words text-xs text-slate-400">{t.description}</p>}
       {t.categoryReason && (
         <p className={`mt-3 rounded-lg px-3 py-2 text-xs ${t.unsure || !t.categoryId ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>
-          {t.unsure && <span className="font-semibold">Not sure. </span>}
+          {t.unsure && !t.isPartnerTransfer && <span className="font-semibold">Not sure. </span>}
           {t.categoryReason}
         </p>
       )}
+      {t.isPartnerTransfer && t.kind === 'PartnerTransfer' && (
+        <p className="mt-2 text-xs text-slate-500">Not counted anywhere until you say what it was for.</p>
+      )}
 
-      {(partnerIn || partnerOut) && (
+      {partnerIn && (
         <fieldset className="mt-4">
-          <legend className="text-sm font-medium text-slate-700">{partnerIn ? `What was this from ${first}?` : `What did you send ${first}?`}</legend>
+          <legend className="text-sm font-medium text-slate-700">What was this from {first}?</legend>
           <div className="mt-2 grid gap-2">
-            {(partnerIn
-              ? [
-                  ['contribution', 'Toward bills', `Like the monthly rent money. Counts as ${first}’s contribution in your budget.`],
-                  ['settleUp', 'Paying you back', `${first}’s share of something you bought, like groceries. Lowers what ${first} owes.`],
-                ]
-              : [
-                  ['myShare', `Your share of something ${first} bought`, 'Counts as your spending in the category you pick below.'],
-                  ['settleUp', `Paying ${first} back`, 'Settles what you owed. Not spending.'],
-                ]
+            {(
+              [
+                ['payback', 'Paying you back for something', 'Pick what it was for below. It comes off that category, like a refund.'],
+                ['contribution', `${first}’s contribution or just money`, `Counts as money from ${first}, not your income.`],
+              ] as const
             ).map(([value, label, hint]) => (
               <label
                 key={value}
-                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ring-1 ${purpose === value ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white ring-slate-200'}`}
+                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ring-1 ${mode === value ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white ring-slate-200'}`}
               >
-                <input type="radio" name={`purpose-${t.id}`} checked={purpose === value} onChange={() => setPurpose(value as PartnerPurpose)} className="sr-only" />
+                <input type="radio" name={`purpose-${t.id}`} checked={mode === value} onChange={() => setMode(value)} className="sr-only" />
                 <span>
                   <span className="block text-sm font-semibold">{label}</span>
-                  <span className={`block text-xs ${purpose === value ? 'text-slate-300' : 'text-slate-500'}`}>{hint}</span>
+                  <span className={`block text-xs ${mode === value ? 'text-slate-300' : 'text-slate-500'}`}>{hint}</span>
                 </span>
               </label>
             ))}
@@ -366,7 +357,9 @@ function ReviewCard({
 
       {needsCategory && (
         <fieldset className="mt-4">
-          <legend className="text-sm font-medium text-slate-700">{selected ? 'Category' : 'Pick a category'}</legend>
+          <legend className="text-sm font-medium text-slate-700">
+            {partnerIn ? 'It paid you back for' : partnerOut ? `Your share of what ${first} paid for` : selected ? 'Category' : 'Pick a category'}
+          </legend>
           <div className="mt-2 flex flex-wrap gap-2">
             {quick.map((c) => (
               <button
@@ -404,50 +397,37 @@ function ReviewCard({
         </fieldset>
       )}
 
-      {needsCategory && selected && !partnerOut && (
-        <div className="mt-4 grid gap-2">
-          {partnerName && (t.amountCents > 0 || t.kind === 'Refund') && (
-            <label className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-              <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} className="size-5" />
-              <span className="text-sm">
-                Split with {first}
-                <span className="block text-xs text-slate-500">
-                  {split
-                    ? `Only your ${formatCents(Math.round(t.amountCents * (t.ownerShare < 1 ? t.ownerShare : 1 - (selected.partnerSharePercent || 50) / 100)))} counts; ${first} owes you the rest.`
-                    : 'Like a grocery run or a dinner you shared.'}
-                </span>
-              </span>
-            </label>
-          )}
-          <label className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-            <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="size-5" />
-            <span className="text-sm">
-              Always {selected.name} for {titleCase(t.merchant)}
-              <span className="block text-xs text-slate-500">Leave this off for stores where it varies, like a supercenter.</span>
-            </span>
-          </label>
-        </div>
+      {needsCategory && selected && !t.isPartnerTransfer && (
+        <label className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
+          <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="size-5" />
+          <span className="text-sm">
+            Always {selected.name} for {titleCase(t.merchant)}
+            <span className="block text-xs text-slate-500">Leave this off for stores where it varies, like a supercenter.</span>
+          </span>
+        </label>
       )}
 
       <button
         type="button"
-        disabled={busy || (needsCategory && !categoryId)}
+        disabled={busy || (partnerIn && !mode) || (needsCategory && !categoryId)}
         onClick={() => void save()}
         className="mt-5 w-full rounded-xl bg-slate-900 py-3.5 text-base font-semibold text-white disabled:opacity-40"
       >
         {busy
           ? 'Saving…'
-          : !needsCategory
-            ? '✓ Confirm'
-            : selected
-              ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
-              : 'Pick a category'}
+          : partnerIn && !mode
+            ? 'Say what it was for'
+            : !needsCategory
+              ? '✓ Confirm'
+              : selected
+                ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
+                : 'Pick a category'}
       </button>
       <div className="mt-2 flex justify-between text-sm">
         <button type="button" onClick={onSkip} className="py-2 font-medium text-slate-500">
           Skip for now
         </button>
-        {!t.isPartnerTransfer && (
+        {!partnerIn && (
           <button type="button" onClick={() => void save({ transfer: true })} disabled={busy} className="py-2 font-medium text-slate-500">
             It’s a transfer
           </button>
@@ -456,6 +436,7 @@ function ReviewCard({
     </article>
   )
 }
+
 
 function NewCategory({
   suggestion,
@@ -513,7 +494,7 @@ function NewCategory({
 }
 
 function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void; onConfirm: () => void }) {
-  const partnerKind = t.kind === 'PartnerContribution' ? 'Contribution' : t.kind === 'PartnerSettleUp' ? 'Paying back' : null
+  const partnerKind = t.kind === 'PartnerContribution' ? 'Contribution' : t.kind === 'PartnerTransfer' ? null : t.isPartnerTransfer && t.amountCents < 0 ? 'Paid you back' : null
   const label = t.categoryName ?? partnerKind
   return (
     <li className="flex items-center gap-2 pr-2">
@@ -529,9 +510,8 @@ function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void;
               {t.unsure ? `Not sure: ${label}?` : label}
             </span>
           ) : (
-            <span className="font-medium text-amber-600">Needs a category</span>
+            <span className="font-medium text-amber-600">{t.kind === 'PartnerTransfer' ? 'What was it for?' : 'Needs a category'}</span>
           )}
-          {t.ownerShare < 1 && <span className="text-slate-400"> · split</span>}
         </p>
       </button>
       {label && !t.isPartnerTransfer ? (
@@ -549,73 +529,5 @@ function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void;
         </button>
       )}
     </li>
-  )
-}
-
-/** Who owes whom from split purchases and paying back (SPEC 4.8), with "mark settled". */
-export function SettleUpCard({
-  settle: s,
-  partnerName,
-  onSettled,
-  onError,
-}: {
-  settle: SettleUp
-  partnerName: string
-  onSettled: (s: SettleUp) => void
-  onError: (e: unknown) => void
-}) {
-  const first = titleCase(partnerName.split(' ')[0])
-  const [open, setOpen] = useState(false)
-  const owed = s.owedToYouCents
-  if (owed === 0 && s.items.length === 0) return null
-  return (
-    <section aria-label="Settle up" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Settle up with {first}</p>
-          <p className="text-lg font-semibold tabular-nums">
-            {owed > 0 ? `${first} owes you ${formatCents(owed)}` : owed < 0 ? `You owe ${first} ${formatCents(-owed)}` : `You’re square with ${first}`}
-          </p>
-        </div>
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="shrink-0 text-xs font-medium text-slate-600 underline">
-          {open ? 'Hide' : 'Details'}
-        </button>
-      </div>
-      {open && (
-        <>
-          <p className="mt-2 text-xs text-slate-500">
-            {first}’s share of split purchases {formatCents(s.splitSharesCents)} − paid you back {formatCents(s.paidBackByPartnerCents)} + you paid back{' '}
-            {formatCents(s.paidBackByYouCents)}
-            {s.settledThrough && ` · counting what happened after ${formatDay(s.settledThrough)}`}. Only paying back you’ve confirmed counts; the app’s guesses never do.
-          </p>
-          <ul className="mt-2 divide-y divide-slate-100 text-sm">
-            {s.items.slice(0, 8).map((i) => (
-              <li key={i.transactionId} className="flex justify-between gap-3 py-1.5">
-                <span className="min-w-0 truncate">
-                  {formatDay(i.date)} · {i.kind === 'split' ? `${first}’s share of ${titleCase(i.merchant)}` : i.kind === 'paidByPartner' ? `${first} paid you back` : `You paid ${first} back`}
-                </span>
-                <span className="shrink-0 tabular-nums text-slate-600">{formatCents(Math.abs(i.effectCents))}</span>
-              </li>
-            ))}
-          </ul>
-          {owed !== 0 && (
-            <button
-              type="button"
-              onClick={async () => {
-                if (!window.confirm(`Mark everything with ${first} as settled? The balance starts over from today.`)) return
-                try {
-                  onSettled(await partnerApi.markSettled())
-                } catch (e) {
-                  onError(e)
-                }
-              }}
-              className="mt-3 w-full rounded-xl bg-slate-100 py-2.5 text-sm font-semibold text-slate-700"
-            >
-              Mark settled
-            </button>
-          )}
-        </>
-      )}
-    </section>
   )
 }

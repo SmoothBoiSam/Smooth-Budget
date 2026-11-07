@@ -24,8 +24,6 @@ export default function TransactionSheet({
   const [categoryId, setCategoryId] = useState(t.categoryId ?? '')
   const [isTransfer, setIsTransfer] = useState(t.isTransfer)
   const [makeRule, setMakeRule] = useState(false)
-  const [split, setSplit] = useState(t.ownerShare < 1)
-  const canSplit = !t.isTransfer && !t.isPartnerTransfer && (t.amountCents > 0 || t.kind === 'Refund')
   const [pattern, setPattern] = useState(t.merchant)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -36,8 +34,7 @@ export default function TransactionSheet({
     setError(null)
     try {
       const rule = makeRule && !isTransfer && categoryId ? pattern : null
-      const ownerShare = canSplit && !isTransfer ? (split ? (t.ownerShare < 1 ? t.ownerShare : 0.5) : 1) : undefined
-      const r = await budgetApi.updateTransaction(t.id, categoryId || null, isTransfer, rule, { ownerShare })
+      const r = await budgetApi.updateTransaction(t.id, categoryId || null, isTransfer, rule)
       onSaved(
         rule
           ? `Saved. Rule created for "${rule.toUpperCase()}"${r.ruleAppliedTo > 0 ? ` and applied to ${r.ruleAppliedTo} more` : ''}.`
@@ -115,16 +112,6 @@ export default function TransactionSheet({
               ))}
           </select>
         </label>
-
-        {canSplit && !isTransfer && categoryId && (
-          <label className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-            <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} className="size-5" />
-            <span className="text-sm">
-              Split with my partner
-              <span className="block text-xs text-slate-500">Only your share counts; the rest goes on the settle-up balance.</span>
-            </span>
-          </label>
-        )}
 
         {!isTransfer && categoryId && (
           <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">

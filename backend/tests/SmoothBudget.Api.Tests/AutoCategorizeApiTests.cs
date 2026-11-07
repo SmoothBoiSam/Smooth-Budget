@@ -279,12 +279,14 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         var names = (await c.GetFromJsonAsync<List<PartnerNameSuggestion>>("/api/settings/partner/suggestions", Json))!;
         Assert.Contains(names, n => n.Name == "JANE PARTNER" && n.TotalCents == 800_00);
 
-        var res = await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto("Jane Partner"), Json);
-        Assert.Equal(1, (await res.Content.ReadFromJsonAsync<AutoCategorizeResult>(Json))!.PartnerContributions);
+        await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto("Jane Partner"), Json); // today, Nov 20
 
+        // Today's $800 from her waits for a label (no fixed contribution is set up here); you say it's her money.
         var txns = await All(c);
-        Assert.Equal("PartnerContribution", txns.Single(t => t.Description.Contains("JANE PARTNER")).Kind);
-        Assert.Equal("Income", txns.Single(t => t.Description.Contains("OLD FRIEND")).Kind);
+        var jane = txns.Single(t => t.Description.Contains("JANE PARTNER"));
+        Assert.Equal(("PartnerTransfer", "Income"), (jane.Kind, txns.Single(t => t.Description.Contains("OLD FRIEND")).Kind));
+        await c.PatchAsJsonAsync($"/api/transactions/{jane.Id}", new UpdateTransactionRequest(null, false, null, PartnerPurpose: "contribution"), Json);
+        Assert.Equal("PartnerContribution", (await All(c)).Single(t => t.Id == jane.Id).Kind);
 
         await c.PutAsJsonAsync("/api/budget/months/current/income", new IncomeRequest(2_532_86, 800_00), Json);
         var b = (await c.GetFromJsonAsync<BudgetSummaryDto>("/api/budget/summary", Json))!;
@@ -297,68 +299,65 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task Split_groceries_her_paying_back_and_your_share_of_hers_all_add_up()
+    public async Task Money_between_you_waits_for_a_label_and_then_lands_where_you_say()
     {
+        // DECISIONS.md 100: no tally. You bought $120 of groceries and she sent $60; she paid for something and you
+        // sent her $35; she sent $25 for no reason in particular. Nothing counts until you label it.
         var c = await NewUserAsync();
-        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 7, 19, 0, 0, TimeSpan.Zero)); // you name her on Nov 7: settle-up starts after that
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 7, 19, 0, 0, TimeSpan.Zero)); // you name her on Nov 7
         await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto("Jane Partner"), Json);
         app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
         var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
-        var groceries = cats.Single(x => x.Name == "Groceries");
+        var groceries = cats.Single(x => x.Name == "Groceries").Id;
         var eatingOut = cats.Single(x => x.Name == "Eating out").Id;
-        await c.PutAsJsonAsync($"/api/budget/categories/{groceries.Id}",
-            new UpdateCategoryRequest("Groceries", CategoryType.Variable, groceries.MonthlyLimitCents, false, false, "permanent", PartnerSharePercent: 50), Json);
 
         var card = await AccountAsync(c, "CreditCard", "4321");
         var checking = await AccountAsync(c, "Checking", "1111");
-        await ImportAsync(c, card, ChaseCard,
-            "11/10/2026,11/11/2026,FRESH MARKET,Groceries,Sale,-120.00,",  // split by default: $60 each
-            "11/12/2026,11/13/2026,CORNER BISTRO,Food & Drink,Sale,-80.00,"); // not split unless you say so
+        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,FRESH MARKET,Groceries,Sale,-120.00,");
         await ImportAsync(c, checking, ChaseChecking,
             "CREDIT,11/13/2026,\"Zelle payment from JANE PARTNER 111\",60.00,PARTNERFI_TO_CHASE,1060.00,,",
             "DEBIT,11/16/2026,\"Zelle payment to Jane 222\",-35.00,CHASE_TO_PARTNERFI,1025.00,,",
-            "CREDIT,11/21/2026,\"Zelle payment from JANE PARTNER 333\",800.00,PARTNERFI_TO_CHASE,1825.00,,");
+            "CREDIT,11/18/2026,\"Zelle payment from JANE PARTNER 444\",25.00,PARTNERFI_TO_CHASE,1050.00,,");
 
         var txns = await All(c);
-        var fresh = txns.Single(t => t.Merchant == "FRESH MARKET");
-        Assert.Equal(0.5m, fresh.OwnerShare);
-        var payback = txns.Single(t => t.Description.Contains("JANE PARTNER 111"));
-        Assert.Equal(("PartnerSettleUp", true, true, false), (payback.Kind, payback.IsPartnerTransfer, payback.NeedsReview, payback.Unsure));
-        Assert.Equal("Matches Jane's share of FRESH MARKET $120.00 on Nov 10.", payback.CategoryReason);
-        Assert.Equal("PartnerContribution", txns.Single(t => t.Description.Contains("333")).Kind);
+        var payback = txns.Single(t => t.Description.Contains("111"));
         var sent = txns.Single(t => t.Description.Contains("to Jane"));
-        Assert.True(sent.IsPartnerTransfer);
-        Assert.Contains((await c.GetFromJsonAsync<List<TransactionDto>>("/api/transactions/inbox", Json))!, t => t.Id == sent.Id);
+        var gift = txns.Single(t => t.Description.Contains("444"));
+        Assert.All([payback, sent, gift], t => Assert.Equal(("PartnerTransfer", true, true, (Guid?)null), (t.Kind, t.IsPartnerTransfer, t.NeedsReview, t.CategoryId)));
+        Assert.Equal((groceries, "Looks like half of FRESH MARKET $120.00 on Nov 10."), (payback.SuggestedCategoryId!.Value, payback.CategoryReason));
+        Assert.Equal("Sent to Jane: what was it for?", sent.CategoryReason);
+        Assert.Contains(await Review(c), t => t.Id == sent.Id); // all three wait in Review…
+        Assert.DoesNotContain((await c.GetFromJsonAsync<List<TransactionDto>>("/api/transactions/inbox", Json))!, t => t.Id == sent.Id);
 
-        // The app's guess doesn't move money until you confirm it.
-        Assert.Equal(0, (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!.PaidBackByPartnerCents);
-        await c.PostAsJsonAsync("/api/transactions/review/confirm", new ConfirmRequest([payback.Id]), Json);
+        var before = (await c.GetFromJsonAsync<BudgetSummaryDto>("/api/budget/summary", Json))!;
+        long Spent(BudgetSummaryDto b, string name) => b.Groups.SelectMany(g => g.Categories).Single(x => x.Name == name).SpentCents;
+        Assert.Equal((120_00L, 0L, 0L), (Spent(before, "Groceries"), before.PartnerReceivedCents, before.IncomeReceivedCents)); // …counted nowhere
 
-        // You split dinner too, and say the $35 you sent was your share of groceries she bought.
-        var bistro = txns.Single(t => t.Merchant == "CORNER BISTRO");
-        await c.PatchAsJsonAsync($"/api/transactions/{bistro.Id}", new UpdateTransactionRequest(eatingOut, false, null, OwnerShare: 0.5m), Json);
-        Assert.True((await c.PatchAsJsonAsync($"/api/transactions/{sent.Id}",
-            new UpdateTransactionRequest(groceries.Id, false, null, PartnerPurpose: "myShare"), Json)).IsSuccessStatusCode);
+        // A ✓ can't settle them: they need a label.
+        await c.PostAsJsonAsync("/api/transactions/review/confirm", new ConfirmRequest([payback.Id, sent.Id, gift.Id]), Json);
+        Assert.Equal(3, (await Review(c)).Count(t => t.Kind == "PartnerTransfer"));
 
-        var s = (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!;
-        Assert.Equal((60_00L + 40_00L, 60_00L, 0L), (s.SplitSharesCents, s.PaidBackByPartnerCents, s.PaidBackByYouCents));
-        Assert.Equal(40_00, s.OwedToYouCents); // her half of dinner
+        await c.PatchAsJsonAsync($"/api/transactions/{payback.Id}", new UpdateTransactionRequest(groceries, false, null), Json); // paid me back for groceries
+        await c.PatchAsJsonAsync($"/api/transactions/{sent.Id}", new UpdateTransactionRequest(eatingOut, false, null), Json);   // my share of her dinner
+        await c.PatchAsJsonAsync($"/api/transactions/{gift.Id}", new UpdateTransactionRequest(null, false, null, PartnerPurpose: "contribution"), Json);
 
-        var b = (await c.GetFromJsonAsync<BudgetSummaryDto>("/api/budget/summary", Json))!;
-        long Spent(string name) => b.Groups.SelectMany(g => g.Categories).Single(x => x.Name == name).SpentCents;
-        Assert.Equal(60_00 + 35_00, Spent("Groceries")); // your half, plus your share of hers
-        Assert.Equal(40_00, Spent("Eating out"));
-        Assert.Equal((800_00L, 0L), (b.PartnerReceivedCents, b.IncomeReceivedCents)); // paying back is neither
+        var after = (await c.GetFromJsonAsync<BudgetSummaryDto>("/api/budget/summary", Json))!;
+        Assert.Equal((60_00L, 35_00L), (Spent(after, "Groceries"), Spent(after, "Eating out"))); // groceries net of her half
+        Assert.Equal((25_00L, 0L), (after.PartnerReceivedCents, after.IncomeReceivedCents));
+        txns = await All(c);
+        Assert.Equal(("Refund", "Purchase", "PartnerContribution"),
+            (txns.Single(t => t.Id == payback.Id).Kind, txns.Single(t => t.Id == sent.Id).Kind, txns.Single(t => t.Id == gift.Id).Kind));
 
-        await c.PostAsync("/api/partner/settle-up/settled", null);
-        Assert.Equal(0, (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!.OwedToYouCents);
+        // Labels stick through a re-run.
+        await c.PostAsync("/api/transactions/auto-categorize", null);
+        Assert.Equal("Groceries", (await All(c)).Single(t => t.Id == payback.Id).CategoryName);
     }
 
     [Fact]
-    public async Task Years_of_small_transfers_from_her_dont_turn_into_money_you_owe()
+    public async Task Years_of_small_transfers_from_her_stay_her_contribution_and_only_new_ones_wait()
     {
-        // What happened with real data: two years of small Zelles from her, no split purchases, and the
-        // settle-up balance said you owed her thousands.
+        // What happened with real data: two years of small Zelles from her. Those stay her money; only ones after you
+        // name her wait for a label.
         var c = await NewUserAsync();
         var checking = await AccountAsync(c, "Checking", "1111");
         await ImportAsync(c, checking, ChaseChecking,
@@ -367,17 +366,11 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
             "CREDIT,10/21/2026,\"Zelle payment from JANE PARTNER 3\",800.00,PARTNERFI_TO_CHASE,1860.75,,");
         await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto("Jane Partner"), Json); // today, Nov 20
 
-        var txns = await All(c);
-        Assert.All(txns, t => Assert.Equal(("PartnerContribution", false), (t.Kind, t.NeedsReview))); // her money, as before
-        var s = (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!;
-        Assert.Equal((0L, new DateOnly(2026, 11, 19)), (s.OwedToYouCents, s.SettledThrough!.Value)); // counts from Nov 20 on
+        Assert.All(await All(c), t => Assert.Equal(("PartnerContribution", false), (t.Kind, t.NeedsReview))); // her money, as before
 
-        // A new small one after today is a guess to confirm, and moves nothing until you do.
-        await ImportAsync(c, checking, ChaseChecking, "CREDIT,11/23/2026,\"Zelle payment from JANE PARTNER 4\",25.00,PARTNERFI_TO_CHASE,1885.75,,");
-        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 24, 19, 0, 0, TimeSpan.Zero));
-        var guess = (await All(c)).Single(t => t.Description.EndsWith(" 4"));
-        Assert.Equal(("PartnerSettleUp", true), (guess.Kind, guess.NeedsReview));
-        Assert.Equal(0, (await c.GetFromJsonAsync<SettleUpDto>("/api/partner/settle-up", Json))!.OwedToYouCents);
+        await ImportAsync(c, checking, ChaseChecking, "CREDIT,11/20/2026,\"Zelle payment from JANE PARTNER 4\",25.00,PARTNERFI_TO_CHASE,1885.75,,");
+        var waiting = (await All(c)).Single(t => t.Description.EndsWith(" 4"));
+        Assert.Equal(("PartnerTransfer", true), (waiting.Kind, waiting.NeedsReview)); // today counts as "after"
     }
 
     [Fact]
