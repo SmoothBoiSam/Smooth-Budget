@@ -29,8 +29,6 @@ const tabs: { label: string; route: Route; icon: ReactNode }[] = [
       <>
         <Outlined>
           <path d="M15 6.5a11 11 0 1 0 11 11H15z" fill={C.body} />
-          {/* The space the slice was cut from is filled white, like its outline. */}
-          <path d="M15 17.5V6.5a11 11 0 0 1 11 11z" fill="#fff" />
           <path d="M18 3.5a11 11 0 0 1 10.5 10.5H18z" fill={C.coin} />
         </Outlined>
         <path d="M18 3.5a11 11 0 0 1 10.5 10.5" fill="none" stroke={C.coinRim} strokeWidth={1} />
