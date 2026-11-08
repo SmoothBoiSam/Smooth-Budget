@@ -1,8 +1,11 @@
 // Smooth Budget's service worker (milestone 10): makes the app installable and lets it open without a connection.
 // It caches only the app itself (HTML, scripts, styles, icons). API responses are never cached here; the last
 // Home summary is kept by the app (src/offline.ts) so it can say how old it is.
-const CACHE = 'smoothbudget-shell-v1'
-const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png']
+const CACHE = 'smoothbudget-shell-v2'
+const SHELL = [
+  '/', '/manifest.webmanifest', '/favicon.png', '/icon-192.png', '/icon-512.png',
+  '/brand/logo.png', '/brand/cat-plenty.png', '/brand/cat-low.png', '/brand/cat-over.png', '/brand/cat-tabby.png',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()))

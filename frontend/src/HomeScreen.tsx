@@ -4,6 +4,13 @@ import { formatCents, formatDay, formatTime } from './format'
 import { saved } from './offline'
 import { Loading } from './ui'
 
+/** Your status cats (DECISIONS.md 139): plenty left, running low, over budget. */
+const statusCats: Record<Status, { src: string; alt: string }> = {
+  healthy: { src: '/brand/cat-plenty.png', alt: 'A happy cat holding a stack of coins' },
+  low: { src: '/brand/cat-low.png', alt: 'A worried cat holding a few coins' },
+  overspent: { src: '/brand/cat-over.png', alt: 'A crying cat' },
+}
+
 const statusStyles: Record<Status, { number: string; badge: string; label: string }> = {
   healthy: { number: 'text-emerald-600', badge: 'bg-emerald-100 text-emerald-800', label: 'On track' },
   low: { number: 'text-amber-500', badge: 'bg-amber-100 text-amber-800', label: 'Running low' },
@@ -170,6 +177,7 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
   return (
     <>
       <section aria-labelledby="lts-label" className="mt-6 rounded-3xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
+        <img src={statusCats[s.status].src} alt={statusCats[s.status].alt} className="mx-auto -mt-2 mb-1 size-28 object-contain" />
         <h1 id="lts-label" className="text-sm font-medium text-slate-500">
           Left to Spend
         </h1>

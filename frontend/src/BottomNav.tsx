@@ -11,7 +11,7 @@ const icon = (children: ReactNode) => (
 )
 
 const tabs: { label: string; route: Route; icon: ReactNode }[] = [
-  { label: 'Home', route: 'home', icon: icon(<><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10v10h13V10" /><path d="M10 20v-5.5h4V20" /></>) },
+  { label: 'Home', route: 'home', icon: <img src="/brand/logo.png" alt="" aria-hidden className="mx-auto size-7" /> },
   { label: 'Budget', route: 'budget', icon: icon(<><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z" /><path d="M15 3.9A8.5 8.5 0 0 1 20.1 9H15z" /></>) },
   { label: 'Review', route: 'review', icon: icon(<><path d="M4 6.5h10M4 12h10M4 17.5h6" /><path d="m14.5 17 2.2 2.2L21 15" /></>) },
   { label: 'Debt', route: 'debt', icon: icon(<><rect x="2.5" y="5.5" width="19" height="13" rx="2" /><path d="M2.5 10h19M6.5 15h4" /></>) },
