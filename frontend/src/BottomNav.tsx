@@ -29,6 +29,8 @@ const tabs: { label: string; route: Route; icon: ReactNode }[] = [
       <>
         <Outlined>
           <path d="M15 6.5a11 11 0 1 0 11 11H15z" fill={C.body} />
+          {/* The space the slice was cut from is filled white, like its outline. */}
+          <path d="M15 17.5V6.5a11 11 0 0 1 11 11z" fill="#fff" />
           <path d="M18 3.5a11 11 0 0 1 10.5 10.5H18z" fill={C.coin} />
         </Outlined>
         <path d="M18 3.5a11 11 0 0 1 10.5 10.5" fill="none" stroke={C.coinRim} strokeWidth={1} />
@@ -148,14 +150,16 @@ export default function BottomNav({ route, inboxCount }: { route: Route; inboxCo
                 aria-current={active ? 'page' : undefined}
                 aria-label={tab.route === 'review' && inboxCount > 0 ? `${tab.label}, ${inboxCount} to review` : tab.label}
                 title={tab.label}
-                className={`relative flex flex-col items-center gap-1 pt-2.5 pb-2 ${active ? "text-slate-900" : "text-slate-400 opacity-55"}`}
+                className={`relative flex flex-col items-center gap-1 pt-2.5 pb-2 ${active ? "text-slate-900" : "text-slate-400"}`}
               >
-                {tab.icon}
+                <span className={active ? "" : "opacity-55"}>{tab.icon}</span>
                 <span aria-hidden className={`size-1 rounded-full ${active ? 'bg-slate-900' : 'bg-transparent'}`} />
                 {tab.route === 'review' && inboxCount > 0 && (
                   <span
                     aria-hidden
-                    className="absolute top-1 left-1/2 ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold leading-4 text-white"
+                    className="absolute top-1 left-1/2 ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4"
+                    // The logo's blush pink with white text, fixed colors so the dark theme doesn't swap them.
+                    style={{ backgroundColor: C.blush, color: '#fff' }}
                   >
                     {inboxCount > 99 ? '99+' : inboxCount}
                   </span>
