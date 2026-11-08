@@ -153,7 +153,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           </a>
           <div className="mt-1 flex items-center justify-between gap-3">
             <h1 className="truncate text-2xl font-bold tracking-tight">
-              {view.kind === 'all' ? 'Transactions' : view.kind === 'plan' ? 'Build your budget' : (line?.name ?? 'Category')}
+              {view.kind === 'all' ? 'Transactions' : view.kind === 'plan' ? 'Budget settings' : (line?.name ?? 'Category')}
             </h1>
             {view.kind === 'category' && line && (
               <button type="button" onClick={() => setEditing(line)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-slate-200">
@@ -183,20 +183,21 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         />
       )}
 
-      {/* How the budget is built: the automatic budget's last change and the money coming in, then the planner (DECISIONS.md 149). */}
-      {view.kind === 'plan' && summary && (
-        <>
-          <AutoBudgetCard s={summary} inPlan />
-          <IncomeCard
-            summary={summary}
-            onIncome={(income, partner, automatic) =>
-              act(() => budgetEditApi.setIncome(income, partner, automatic), automatic ? 'Income follows your paycheck forecast again.' : 'Expected income updated.')
-            }
-          />
-        </>
-      )}
+      {/* Budget settings (DECISIONS.md 168): one card for this month, then the planner. With the automatic budget off,
+          the planner's own income fields do that job. */}
       {view.kind === 'plan' && (
         <BudgetPlanner
+          top={(p) =>
+            summary && (
+              <IncomeCard
+                summary={summary}
+                explanation={p.incomeExplanation}
+                onIncome={(income, partner, automatic) =>
+                  act(() => budgetEditApi.setIncome(income, partner, automatic), automatic ? 'Income follows your paycheck forecast again.' : 'Expected income updated.')
+                }
+              />
+            )
+          }
           onApplied={(message) => {
             window.location.hash = '#/budget'
             saved(message)
@@ -272,7 +273,7 @@ function Overview({
       {s.lastMonth && <LastMonthCard last={s.lastMonth} />}
       {s.auto?.on && s.auto.shortCents > 0 && (
         <a href="#/budget/plan" role="alert" className="mt-3 block rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          This month is {formatCents(s.auto.shortCents)} short even with spending squeezed as far as it sensibly goes. How it’s built ›
+          This month is {formatCents(s.auto.shortCents)} short even with spending squeezed as far as it sensibly goes. Budget settings ›
         </a>
       )}
 
@@ -300,7 +301,7 @@ function Overview({
         </a>
       )}
 
-      {s.auto && !s.auto.on && <AutoBudgetCard s={s} />}
+      {s.auto && !s.auto.on && <AutoBudgetOff />}
 
       {s.groups.map((g) => (
         <Group key={g.type} group={g} bills={g.type === 'FixedBill' ? bills : []} month={s.budgetMonth} today={s.today} />
@@ -314,7 +315,7 @@ function Overview({
           Combine categories
         </button>
         <a href="#/budget/plan" className="col-span-2 rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
-          How it's built
+          Budget settings
         </a>
       </div>
 
@@ -838,46 +839,28 @@ function LastMonthCard({ last }: { last: LastMonth }) {
   )
 }
 
-/**
- * SPEC section 3: money in (your income plus partner contributions) = all limits + an explicit remainder.
- * Your own income and the partner's contributions are shown separately, each expected vs received so far.
- */
-/** The automatic budget at a glance: what it last changed, and any shortfall it couldn't squeeze away. */
-function AutoBudgetCard({ s, inPlan }: { s: BudgetSummary; inPlan?: boolean }) {
-  const a = s.auto
-  if (!a) return null
-  if (!a.on)
-    return (
-      <a href="#/budget/plan" className="mt-6 block rounded-2xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
-        <span className="font-semibold">Automatic budget is off.</span> <span className="text-slate-500">Limits stay as they are. Turn it on ›</span>
-      </a>
-    )
+/** On the Budget tab when the automatic budget is off. Its last change and any shortfall are in Budget settings. */
+function AutoBudgetOff() {
   return (
-    <section aria-label="Automatic budget" className="mt-6 rounded-2xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="font-semibold">Automatic budget</p>
-        {!inPlan && (
-          <a href="#/budget/plan" className="text-xs font-medium text-sky-700">
-            How it’s built ›
-          </a>
-        )}
-      </div>
-      <p className="text-xs text-slate-500">Updates itself when your pay, bills, debt plan, savings or transactions change. Limits you set stay yours.</p>
-      {a.note && (
-        <p className="mt-2 text-xs text-slate-700">
-          <span className="font-medium">Last change{a.noteUtc ? `, ${formatTime(a.noteUtc)}` : ''}:</span> {a.note}
-        </p>
-      )}
-      {a.shortCents > 0 && (
-        <p role="alert" className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
-          This month is {formatCents(a.shortCents)} short even with spending squeezed as far as it sensibly goes.
-        </p>
-      )}
-    </section>
+    <a href="#/budget/plan" className="mt-6 block rounded-2xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
+      <span className="font-semibold">Automatic budget is off.</span> <span className="text-slate-500">Limits stay as they are. Turn it on ›</span>
+    </a>
   )
 }
 
-function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome: (income: number, partner: number, automatic?: boolean) => void }) {
+/**
+ * Budget settings' one card (DECISIONS.md 168): the automatic budget's last change, this month's income and partner
+ * money with where the numbers come from, money in vs planned, and any shortfall, once.
+ */
+function IncomeCard({
+  summary: s,
+  explanation,
+  onIncome,
+}: {
+  summary: BudgetSummary
+  explanation?: string
+  onIncome: (income: number, partner: number, automatic?: boolean) => void
+}) {
   const [editing, setEditing] = useState(false)
   const [income, setIncome] = useState(centsToInput(s.incomeExpectedCents))
   const [partner, setPartner] = useState(centsToInput(s.partnerExpectedCents))
@@ -887,19 +870,33 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
   const first = s.partnerName ? titleCase(s.partnerName.split(' ')[0]) : null
   const partnerLabel = first ? `From ${first}` : 'Partner contributions'
   const fixed = s.contributions ?? []
+  const a = s.auto
+  const moneyIn = s.incomeExpectedCents + s.partnerExpectedCents
+  const short = a?.on ? a.shortCents : Math.max(0, -s.unallocatedCents)
 
   return (
-    <section aria-labelledby="income-h" className="mt-6 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <section aria-labelledby="income-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="income-h" className="text-sm font-semibold">
-          This month's plan
+          This month
         </h2>
         {!editing && (
           <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-slate-600 underline">
-            Edit
+            Edit income
           </button>
         )}
       </div>
+      {a?.on && (
+        <p className="mt-1 text-xs text-slate-500">
+          The automatic budget updates itself when your pay, bills, debt plan, savings or transactions change. A limit you change from its category on
+          the Budget tab stays yours.
+          {a.note && (
+            <span className="mt-1 block text-slate-700">
+              <span className="font-medium">Last change{a.noteUtc ? `, ${formatTime(a.noteUtc)}` : ''}:</span> {a.note}
+            </span>
+          )}
+        </p>
+      )}
 
       {editing ? (
         <form
@@ -934,7 +931,7 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
         </form>
       ) : (
         <>
-          <dl className="mt-2 space-y-1 text-sm">
+          <dl className="mt-3 space-y-1 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-slate-600">Your income</dt>
               <dd className="tabular-nums">
@@ -951,7 +948,7 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
                     </button>
                   </>
                 ) : (
-                  'From your paychecks this month (the Plan tab), or your usual income until there is pay data.'
+                  (explanation ?? 'From your paychecks this month (the Plan tab), or your usual income until there is pay data.')
                 )}
               </p>
             )}
@@ -966,16 +963,27 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
               fixed.map((f) => <ContributionRow key={f.arrangementId} f={f} who={first ?? 'Partner'} />)
             )}
           </dl>
-          <dl className="mt-3 grid grid-cols-2 gap-2 text-center">
+          <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl bg-slate-50 p-2">
+              <dt className="text-xs text-slate-500">Money in</dt>
+              <dd className="text-sm font-semibold tabular-nums">{formatCents(moneyIn)}</dd>
+            </div>
             <div className="rounded-xl bg-slate-50 p-2">
               <dt className="text-xs text-slate-500">Planned</dt>
               <dd className="text-sm font-semibold tabular-nums">{formatCents(s.plannedCents)}</dd>
             </div>
             <div className={`rounded-xl p-2 ${over ? 'bg-red-50' : 'bg-slate-50'}`}>
-              <dt className="text-xs text-slate-500">{over ? 'Over what comes in' : 'Unallocated'}</dt>
+              <dt className="text-xs text-slate-500">{over ? 'Short' : 'Unallocated'}</dt>
               <dd className={`text-sm font-semibold tabular-nums ${over ? 'text-red-600' : ''}`}>{formatCents(Math.abs(s.unallocatedCents))}</dd>
             </div>
           </dl>
+          {short > 0 && (
+            <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+              {a?.on
+                ? `Even with spending squeezed as far as it sensibly goes, this month is ${formatCents(short)} short. Bills and minimums come first; the rest has to come from savings or extra pay.`
+                : `This month plans ${formatCents(short)} more than comes in.`}
+            </p>
+          )}
           {!s.partnerName && (
             <p className="mt-2 text-xs text-slate-500">
               <a href="#/more" className="underline">
@@ -1039,6 +1047,12 @@ function ContributionRow({ f, who }: { f: ContributionStatus; who: string }) {
       </dt>
       <dd className="text-right tabular-nums">
         {formatCents(f.expectedCents)} <span className={`block text-xs ${note.cls}`}>{note.text}</span>
+        {f.state !== 'received' && (
+          // Sent before the budget month started? The Partner screen can count it here (DECISIONS.md 166).
+          <a href="#/partner" className="block text-xs font-medium text-sky-700">
+            Sent early? ›
+          </a>
+        )}
       </dd>
     </div>
   )

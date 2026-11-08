@@ -78,6 +78,10 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         var stream = s.Items.Single(i => i.Name == "Streamco");
         Assert.Equal(("Subscription", "Monthly", "priceUp", 17_99L, 15_49L), (stream.Kind, stream.Frequency, stream.Status, stream.AmountCents, stream.PreviousAmountCents!.Value));
         Assert.Equal((new DateOnly(2026, 11, 3), "Entertainment", false), (stream.NextExpected, stream.CategoryName, stream.InBillCategory));
+        // Each charge, newest first, so you can see when the price changed (DECISIONS.md 167).
+        Assert.Equal(6, stream.Charges.Count);
+        Assert.Equal((new DateOnly(2026, 10, 3), 17_99L), (stream.Charges[0].Date, stream.Charges[0].AmountCents));
+        Assert.Equal((new DateOnly(2026, 5, 3), 15_49L), (stream.Charges[^1].Date, stream.Charges[^1].AmountCents));
         var electric = s.Items.Single(i => i.Name == "City Electric");
         Assert.Equal(("Bill", "active", 88_60L), (electric.Kind, electric.Status, electric.AmountCents));
 

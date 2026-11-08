@@ -47,6 +47,37 @@ public class PartnerContributionsTests
         Assert.Equal((ContributionState.DifferentAmount, 0L), (more.State, more.ShortfallCents));
     }
 
+    // ---- Sent early (DECISIONS.md 166) ------------------------------------------------------------------
+
+    [Fact]
+    public void Rent_sent_early_counts_in_the_month_you_moved_it_to_and_not_where_it_landed()
+    {
+        var early = D(11, 5, 800_00) with { CountsForMonthStart = Nov.Start }; // she's paid before you, so it came Nov 5
+        var s = Status(new DateOnly(2026, 11, 25), early);
+        Assert.Equal((ContributionState.Received, early.Id, 0L), (s.State, s.MatchedDepositId!.Value, s.ShortfallCents));
+
+        var oct = new BudgetMonthCalendar().MonthOf(2026, 10);
+        Assert.True(oct.Contains(early.Date));
+        var octRent = D(10, 20, 800_00);
+        var inOct = Assert.Single(PartnerContributions.Match([RentFromPartner], oct, [octRent, early], new DateOnly(2026, 11, 5)));
+        Assert.Equal(octRent.Id, inOct.MatchedDepositId); // October keeps its own rent
+        var onlyEarly = Assert.Single(PartnerContributions.Match([RentFromPartner], oct, [early], new DateOnly(2026, 11, 5)));
+        Assert.Null(onlyEarly.MatchedDepositId); // and never claims the moved one
+    }
+
+    [Fact]
+    public void Early_candidates_are_her_recent_transfers_before_the_month_that_were_not_their_own_months_rent()
+    {
+        var octRent = D(10, 30, 800_00);
+        var early = D(11, 5, 800_00);
+        var labeledOther = D(11, 4, 50_00, other: true);
+        var tooOld = D(10, 20, 800_00);
+        var moved = D(11, 3, 800_00) with { CountsForMonthStart = Nov.Start };
+        var inMonth = D(11, 8, 800_00);
+        var list = PartnerContributions.EarlyCandidates(Nov, [octRent, early, labeledOther, tooOld, moved, inMonth], new HashSet<Guid> { octRent.Id });
+        Assert.Equal([early.Id], list.Select(d => d.Id));
+    }
+
     [Fact]
     public void Nothing_by_the_end_of_the_window_is_late_and_left_to_spend_is_recomputed_without_it()
     {

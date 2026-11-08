@@ -160,6 +160,30 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Rent_she_sent_before_the_month_started_can_count_for_this_month_and_be_undone()
+    {
+        var (c, checking, rent, _) = await SetupAsync();
+        await c.PostAsJsonAsync("/api/partner/contributions", new ArrangementRequest(rent, 800_00), Json);
+        await ImportAsync(c, checking, ChaseChecking, Zelle(5, 800m, "EARLY")); // the budget month started Nov 6
+        At(11, 25);
+        var before = (await c.GetFromJsonAsync<PartnerOverviewDto>("/api/partner", Json))!;
+        Assert.Equal("late", before.Contributions[0].ThisMonth!.State);
+        var early = Assert.Single(before.EarlyCandidates);
+        Assert.Equal((new DateOnly(2026, 11, 5), 800_00L), (early.Date, early.AmountCents));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/partner/early/{early.Id}", null)).StatusCode);
+        var b = await Budget(c);
+        Assert.Equal(("received", 0L), (Assert.Single(b.Contributions!).State, b.PartnerShortfallCents));
+        var after = (await c.GetFromJsonAsync<PartnerOverviewDto>("/api/partner", Json))!;
+        Assert.Empty(after.EarlyCandidates);
+        Assert.Equal(early.Id, Assert.Single(after.CountedEarly).Id);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync($"/api/partner/early/{Guid.NewGuid()}", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/partner/early/{early.Id}")).StatusCode);
+        Assert.Equal("late", Assert.Single((await Budget(c)).Contributions!).State);
+    }
+
+    [Fact]
     public async Task Bad_arrangements_are_rejected()
     {
         var (c, _, rent, _) = await SetupAsync();

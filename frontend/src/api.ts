@@ -672,6 +672,8 @@ export interface RecurringItem {
   possibleDuplicate: boolean
   /** One merchant bills only this, so a rule can send its future charges to a category. */
   merchantWide: boolean
+  /** Every charge found for it, newest first. */
+  charges: { date: string; amountCents: number }[]
 }
 
 export interface RecurringSummary {
@@ -733,6 +735,10 @@ export interface PartnerOverview {
     purpose: 'waiting' | 'contribution' | 'payback' | 'yourShare'
     categoryName: string | null
   }[]
+  /** Her transfers from just before this month that may be this month's contribution, sent early. */
+  earlyCandidates: EarlyDeposit[]
+  /** Transfers you counted toward this month though they came before it started. */
+  countedEarly: EarlyDeposit[]
 }
 
 export const partnerPlanApi = {
@@ -742,6 +748,15 @@ export const partnerPlanApi = {
   updateContribution: (id: string, categoryId: string, amountCents: number, windowFromDay?: number, windowToDay?: number) =>
     request<void>('PUT', `/partner/contributions/${id}`, { categoryId, amountCents, windowFromDay, windowToDay }),
   removeContribution: (id: string) => request<void>('DELETE', `/partner/contributions/${id}`),
+  /** Her transfer from just before this budget month counts toward this month's contribution (DECISIONS.md 166). */
+  countEarly: (transactionId: string) => request<void>('POST', `/partner/early/${transactionId}`),
+  undoEarly: (transactionId: string) => request<void>('DELETE', `/partner/early/${transactionId}`),
+}
+
+export interface EarlyDeposit {
+  id: string
+  date: string
+  amountCents: number
 }
 
 export type PriorityStep = 'StarterFund' | 'Debt' | 'Savings'

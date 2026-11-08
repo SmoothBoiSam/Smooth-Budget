@@ -13,7 +13,11 @@ public record RecurringItemDto(
     string Key, string Name, string DetectedName, string Kind, string Frequency, string Status,
     long AmountCents, long? PreviousAmountCents, DateOnly? PriceChangedOn, long MonthlyCents,
     DateOnly LastDate, DateOnly NextExpected, int? DueDay, int Occurrences, string AccountName,
-    Guid? CategoryId, string? CategoryName, bool InBillCategory, bool Confirmed, bool PossibleDuplicate, bool MerchantWide);
+    Guid? CategoryId, string? CategoryName, bool InBillCategory, bool Confirmed, bool PossibleDuplicate, bool MerchantWide,
+    IReadOnlyList<BillChargeDto> Charges);
+
+/// <summary>One charge of a bill, newest first in <see cref="RecurringItemDto.Charges"/> (DECISIONS.md 167).</summary>
+public record BillChargeDto(DateOnly Date, long AmountCents);
 
 public record RecurringSummaryDto(
     long MonthlyCents, long AnnualCents, int AlertCount,
@@ -217,7 +221,9 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
 
     private async Task<List<Item>> ItemsAsync(Guid householdId, CancellationToken ct)
     {
-        var series = await DetectAsync(householdId, ct);
+        var txns = await RecentAsync(householdId, ct);
+        var series = RecurringDetector.Detect(txns, await TodayAsync(householdId, ct));
+        var byId = txns.ToDictionary(t => t.Id);
         var rows = await db.RecurringItems.AsNoTracking().Where(r => r.HouseholdId == householdId).ToDictionaryAsync(r => r.Key, ct);
         var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId).ToDictionaryAsync(a => a.Id, ct);
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId).ToDictionaryAsync(c => c.Id, ct);
@@ -242,22 +248,25 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
                 s.Key, r?.Name ?? s.Name, s.Name, (r?.Kind ?? s.Kind).ToString(), s.Frequency.ToString(), status,
                 s.AmountCents, s.PreviousAmountCents, s.PriceChangedOn, s.MonthlyCents, s.LastDate, next, r?.DueDay, s.Occurrences,
                 account is null ? "" : account.Mask is null ? account.Name : $"{account.Name} ••{account.Mask}",
-                cat?.Id, cat?.Name, cat?.Type == CategoryType.FixedBill, r?.Confirmed ?? false, s.PossibleDuplicate, !multi.Contains(s.MerchantKey));
+                cat?.Id, cat?.Name, cat?.Type == CategoryType.FixedBill, r?.Confirmed ?? false, s.PossibleDuplicate, !multi.Contains(s.MerchantKey),
+                s.TransactionIds.Select(byId.GetValueOrDefault).OfType<RecurringTxn>().OrderByDescending(t => t.Date)
+                    .Select(t => new BillChargeDto(t.Date, t.AmountCents)).ToList());
             return new Item(s, dto, r?.Dismissed ?? false);
         }).ToList();
     }
 
-    private async Task<IReadOnlyList<RecurringSeries>> DetectAsync(Guid householdId, CancellationToken ct)
+    private async Task<IReadOnlyList<RecurringSeries>> DetectAsync(Guid householdId, CancellationToken ct) =>
+        RecurringDetector.Detect(await RecentAsync(householdId, ct), await TodayAsync(householdId, ct));
+
+    private async Task<List<RecurringTxn>> RecentAsync(Guid householdId, CancellationToken ct)
     {
-        var today = await TodayAsync(householdId, ct);
-        var since = today.AddMonths(-HistoryMonths);
-        var txns = await db.Transactions.AsNoTracking()
+        var since = (await TodayAsync(householdId, ct)).AddMonths(-HistoryMonths);
+        return await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.Date >= since && t.Account.IncludedInBudget && !t.IsTransfer
                         && t.AmountCents > 0 && (t.Kind == TransactionKind.Purchase || t.Kind == TransactionKind.Other))
             .Select(t => new RecurringTxn(t.Id, t.Date, t.AmountCents, t.Merchant, t.AccountId, t.CategoryId,
                 t.Category != null ? t.Category.Type : null))
             .ToListAsync(ct);
-        return RecurringDetector.Detect(txns, today);
     }
 
     /// <summary>The first due day after the last charge (a due day past the end of a short month falls on its last day).</summary>

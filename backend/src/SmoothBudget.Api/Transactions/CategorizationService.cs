@@ -161,12 +161,13 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
         var today = Home.HomeSummaryService.TodayIn(h.TimeZoneId, clock);
         var from = arrangements.Min(a => a.StartsOn);
         var rows = await db.Transactions
-            .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer && t.Date >= from)
+            .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer && (t.Date >= from || t.CountsForMonthStart >= from))
             .ToListAsync(ct);
         var first = h.PartnerName is { } n ? n.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] : "Your partner";
         first = first.Length > 1 ? char.ToUpperInvariant(first[0]) + first[1..].ToLowerInvariant() : first;
 
-        foreach (var month in rows.GroupBy(t => calendar.MonthContaining(t.Date)))
+        // A transfer sent early counts in the month you moved it to (DECISIONS.md 166).
+        foreach (var month in rows.GroupBy(t => t.CountsForMonthStart is { } m ? calendar.MonthContaining(m) : calendar.MonthContaining(t.Date)))
         {
             var active = arrangements.Where(a => a.StartsOn <= month.Key.End).ToList();
             var statuses = PartnerContributions.Match(
@@ -174,7 +175,7 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
                 month.Key,
                 month.Select(t => new PartnerDeposit(t.Id, t.Date, -t.AmountCents,
                     t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
-                    t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution)).ToList(),
+                    t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution, t.CountsForMonthStart)).ToList(),
                 today);
             foreach (var s in statuses.Where(s => s.MatchedDepositId is not null))
             {

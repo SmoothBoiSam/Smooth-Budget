@@ -202,6 +202,8 @@ public class Transaction
     public bool IsPartnerTransfer { get; set; }
     /// <summary>For a transfer waiting for a label: the category the app thinks it was for (shown pre-selected, counted nowhere).</summary>
     public Guid? SuggestedCategoryId { get; set; }
+    /// <summary>Her contribution sent early: it counts for the budget month starting on this date, not the one it landed in (DECISIONS.md 166).</summary>
+    public DateOnly? CountsForMonthStart { get; set; }
 
     public long PartnerOffsetCents { get; set; }
     public DataSource Source { get; set; }

@@ -75,11 +75,50 @@ public static class PartnerEndpoints
                     : t.AmountCents < 0 ? "payback" : "yourShare",
                     t.CategoryId != null ? t.Category!.Name : null))
                 .ToListAsync(ct);
+            var counted = await db.Transactions.AsNoTracking()
+                .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.CountsForMonthStart == month.Range.Start)
+                .OrderBy(t => t.Date).Select(t => new EarlyDepositDto(t.Id, t.Date, -t.AmountCents)).ToListAsync(ct);
+            var waiting = statuses.Any(s => s.State is "expected" or "late" or "differentAmount");
             return new PartnerOverviewDto(
                 await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct),
                 arrangements.Select(a => new ArrangementDto(a.Id, a.CategoryId, a.Category.Name, a.AmountCents, a.WindowFromDay, a.WindowToDay,
                     statuses.FirstOrDefault(s => s.ArrangementId == a.Id))).ToList(),
-                recent);
+                recent,
+                waiting ? (await EarlyCandidatesAsync(householdId, month.Range, db, months, ct)).Select(d => new EarlyDepositDto(d.Id, d.Date, d.AmountCents)).ToList() : [],
+                counted);
+        });
+
+        // Her contribution sent early (DECISIONS.md 166): a transfer from just before this budget month counts toward it.
+        p.MapPost("/early/{id:guid}", async (Guid id, HttpContext ctx, AppDbContext db, Budget.BudgetMonthService months,
+            CategorizationService categorization, Budget.AutoBudgetService auto, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var row = await months.EnsureCurrentAsync(householdId, ct);
+            var range = (await months.LoadAsync(householdId, row, ct)).Range;
+            if (!(await EarlyCandidatesAsync(householdId, range, db, months, ct)).Any(d => d.Id == id))
+                return Results.NotFound();
+            var t = await db.Transactions.SingleAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
+            (t.CountsForMonthStart, t.Kind, t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) =
+                (range.Start, TransactionKind.PartnerContribution, null, null, CategorySource.User, false, false,
+                    $"Sent early: counts toward the budget month starting {range.Start:MMM d}.");
+            await db.SaveChangesAsync(ct);
+            await categorization.MatchContributionsAsync(householdId, ct);
+            await auto.RefreshAsync(householdId, ct);
+            return Results.NoContent();
+        });
+
+        // Undo: it goes back to the month it landed in, and waits for your label again.
+        p.MapDelete("/early/{id:guid}", async (Guid id, HttpContext ctx, AppDbContext db, CategorizationService categorization,
+            Budget.AutoBudgetService auto, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var t = await db.Transactions.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId && x.CountsForMonthStart != null, ct);
+            if (t is null) return Results.NotFound();
+            (t.CountsForMonthStart, t.CategorySource, t.CategoryReason) = (null, CategorySource.None, null);
+            await db.SaveChangesAsync(ct);
+            await categorization.RunAsync(householdId, ct);
+            await auto.RefreshAsync(householdId, ct);
+            return Results.NoContent();
         });
 
         p.MapPost("/contributions", async (ArrangementRequest req, HttpContext ctx, AppDbContext db, Budget.BudgetMonthService months,
@@ -124,6 +163,24 @@ public static class PartnerEndpoints
         });
     }
 
+    /// <summary>Her transfers from the days before <paramref name="range"/> that weren't the contribution of the month they landed in.</summary>
+    private static async Task<IReadOnlyList<Core.Budgeting.PartnerDeposit>> EarlyCandidatesAsync(
+        Guid householdId, Core.Budgeting.BudgetMonthRange range, AppDbContext db, Budget.BudgetMonthService months, CancellationToken ct)
+    {
+        var from = range.Start.AddDays(-Core.Budgeting.PartnerContributions.EarlyDays);
+        var deposits = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer && t.Date >= from && t.Date < range.Start)
+            .Select(t => new Core.Budgeting.PartnerDeposit(t.Id, t.Date, -t.AmountCents,
+                t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
+                t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution, t.CountsForMonthStart))
+            .ToListAsync(ct);
+        if (deposits.Count == 0) return [];
+        var previous = new Core.Budgeting.BudgetMonthCalendar(await db.Households.Where(h => h.Id == householdId).Select(h => h.BudgetMonthStartDay).SingleAsync(ct))
+            .MonthContaining(range.Start.AddDays(-1));
+        var matched = (await months.ContributionsAsync(householdId, previous, ct)).Where(s => s.MatchedDepositId is not null).Select(s => s.MatchedDepositId!.Value).ToHashSet();
+        return Core.Budgeting.PartnerContributions.EarlyCandidates(range, deposits, matched);
+    }
+
     private static async Task<IResult?> ValidateAsync(ArrangementRequest r, Guid householdId, AppDbContext db, CancellationToken ct)
     {
         var errors = new Dictionary<string, string[]>();
@@ -140,4 +197,8 @@ public record ArrangementRequest(Guid CategoryId, long AmountCents, int? WindowF
 public record ArrangementDto(Guid Id, Guid CategoryId, string CategoryName, long AmountCents, int WindowFromDay, int WindowToDay, Budget.ContributionStatusDto? ThisMonth);
 /// <param name="Purpose">"waiting" (not labeled yet), "contribution" (her money in), "payback" (from her, in a category), "yourShare" (to her, in a category).</param>
 public record PartnerActivityDto(Guid Id, DateOnly Date, long AmountCents, string Purpose, string? CategoryName);
-public record PartnerOverviewDto(string? PartnerName, IReadOnlyList<ArrangementDto> Contributions, IReadOnlyList<PartnerActivityDto> Recent);
+/// <param name="EarlyCandidates">Her transfers from just before this month that may be this month's contribution sent early.</param>
+/// <param name="CountedEarly">Transfers you moved into this month.</param>
+public record PartnerOverviewDto(string? PartnerName, IReadOnlyList<ArrangementDto> Contributions, IReadOnlyList<PartnerActivityDto> Recent,
+    IReadOnlyList<EarlyDepositDto> EarlyCandidates, IReadOnlyList<EarlyDepositDto> CountedEarly);
+public record EarlyDepositDto(Guid Id, DateOnly Date, long AmountCents);

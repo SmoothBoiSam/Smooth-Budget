@@ -16,8 +16,18 @@ const every: Record<RecurringItem['frequency'], string> = {
  * charges filed as spending, price changes, charges that stopped, possible duplicates), then monthly and annual totals
  * and every bill with its next expected date. Nothing here is entered by hand; you confirm, rename, move, or dismiss.
  */
-export default function BillsSection({ onSignedOut, onCount }: { onSignedOut: () => void; onCount: (needsLook: number) => void }) {
+export default function BillsSection({
+  onSignedOut,
+  onCount,
+  mode,
+}: {
+  onSignedOut: () => void
+  onCount: (needsLook: number) => void
+  /** "cards": what needs a look, one at a time with its charges (DECISIONS.md 167); "list": everything at once. */
+  mode: 'cards' | 'list'
+}) {
   const [s, setS] = useState<RecurringSummary | null>(null)
+  const [skipped, setSkipped] = useState<string[]>([])
   const [open, setOpen] = useState<RecurringItem | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [notice, setNotice] = useState<string | null>(null)
@@ -80,20 +90,60 @@ export default function BillsSection({ onSignedOut, onCount }: { onSignedOut: ()
   const counted = (i: RecurringItem) => i.status !== 'possiblyCanceled' && i.status !== 'canceled'
   // Bills and subscriptions are one list (DECISIONS.md 143).
   const bills = s?.items ?? []
+  const waiting = alerts.filter((i) => !skipped.includes(i.key))
+  const current = mode === 'cards' ? waiting[0] : undefined
 
   return (
     <div>
-      <p className="mt-1 text-sm text-slate-500">Found from your transactions: the same store, a similar amount, on a regular schedule.</p>
+      {mode === 'list' && <p className="mt-1 text-sm text-slate-500">Found from your transactions: the same store, a similar amount, on a regular schedule.</p>}
 
       {notice && (
-        <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <p role="status" className="mt-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           {notice}
         </p>
       )}
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
       {!s && !error && <Loading label="Looking through your transactions" />}
 
-      {s && (
+      {s && current && (
+        <>
+          <p className="mt-3 text-xs text-slate-500">
+            <span className="font-semibold text-slate-700">{waiting.length} to look at</span>
+            {skipped.length > 0 && (
+              <>
+                {' · '}
+                <button type="button" onClick={() => setSkipped([])} className="underline">
+                  show {skipped.length} skipped
+                </button>
+              </>
+            )}
+          </p>
+          <BillCard
+            key={current.key}
+            item={current}
+            onUpdate={update}
+            onOpen={() => setOpen(current)}
+            onTrackAsBill={trackAsBill}
+            onSkip={() => {
+              setNotice(null)
+              setSkipped((k) => [...k, current.key])
+            }}
+          />
+        </>
+      )}
+      {s && mode === 'cards' && !current && (
+        <p className="mt-3 rounded-xl bg-white px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
+          {alerts.length === 0 ? 'Nothing needs a look. ' : `You skipped the rest (${skipped.length}). `}
+          {skipped.length > 0 && (
+            <button type="button" onClick={() => setSkipped([])} className="font-medium underline">
+              Go through them again
+            </button>
+          )}
+          {alerts.length === 0 && 'Every bill is below; tap one to see its charges.'}
+        </p>
+      )}
+
+      {s && !current && (
         <>
           <dl className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
             <dt className="text-xs text-slate-500">Your bills cost</dt>
@@ -101,7 +151,7 @@ export default function BillsSection({ onSignedOut, onCount }: { onSignedOut: ()
             <dd className="text-xs text-slate-500">{formatCents(s.annualCents)} a year</dd>
           </dl>
 
-          {alerts.length > 0 && (
+          {mode === 'list' && alerts.length > 0 && (
             <section aria-labelledby="alerts-h" className="mt-6">
               <h2 id="alerts-h" className="text-sm font-semibold text-slate-700">
                 Needs a look
@@ -228,6 +278,102 @@ function Alert({
   )
 }
 
+/** A date with its year, since a bill's charges go back 18 months. */
+function dayYear(iso: string) {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** When it stopped (or when it's next due), then every charge with its amount, newest first (DECISIONS.md 167). */
+function ChargeHistory({ item: i }: { item: RecurringItem }) {
+  const [all, setAll] = useState(false)
+  const charges = i.charges ?? []
+  const shown = all ? charges : charges.slice(0, 6)
+  const status =
+    i.status === 'canceled'
+      ? { text: `Canceled. Last charged ${dayYear(i.lastDate)}.`, cls: 'text-slate-700' }
+      : i.status === 'possiblyCanceled'
+        ? { text: `Looks stopped: last charged ${dayYear(i.lastDate)}, and the next was expected ${formatDay(i.nextExpected)}.`, cls: 'font-medium text-amber-700' }
+        : { text: `Still going: next expected ${formatDay(i.nextExpected)}.`, cls: 'text-slate-700' }
+  return (
+    <section aria-label="Charges" className="mt-3">
+      <p className={`text-xs ${status.cls}`}>{status.text}</p>
+      {charges.length > 0 && (
+        <>
+          <p className="mt-2 text-xs text-slate-500">
+            {charges.length} {charges.length === 1 ? 'charge' : 'charges'} since {dayYear(charges[charges.length - 1].date)}
+          </p>
+          <ul className="mt-1 divide-y divide-slate-100 rounded-xl bg-slate-50 px-3 text-sm">
+            {shown.map((c, n) => {
+              const older = charges[n + 1]
+              const change = older && older.amountCents !== c.amountCents ? c.amountCents - older.amountCents : 0
+              return (
+                <li key={`${c.date}-${n}`} className="flex justify-between gap-3 py-1.5">
+                  <span className="text-slate-600">{dayYear(c.date)}</span>
+                  <span className="tabular-nums">
+                    {formatCents(c.amountCents)}
+                    {change !== 0 && (
+                      <span className={`ml-1 text-xs ${change > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                        {change > 0 ? '↑' : '↓'} {formatCents(Math.abs(change))}
+                      </span>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          {charges.length > 6 && (
+            <button type="button" onClick={() => setAll(!all)} className="mt-1 text-xs font-medium text-slate-600 underline">
+              {all ? 'Show fewer' : `Show all ${charges.length}`}
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+/** One bill that needs a look, with its charges, in Review's one-by-one view (DECISIONS.md 167). */
+function BillCard({
+  item: i,
+  onUpdate,
+  onOpen,
+  onTrackAsBill,
+  onSkip,
+}: {
+  item: RecurringItem
+  onUpdate: (u: RecurringUpdate, m: string) => void
+  onOpen: () => void
+  onTrackAsBill: (i: RecurringItem) => void
+  onSkip: () => void
+}) {
+  return (
+    <article className="mt-2 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="min-w-0 truncate text-lg font-semibold">{i.name}</h2>
+        <span className="shrink-0 font-semibold tabular-nums">
+          {formatCents(i.amountCents)} <span className="text-xs font-normal text-slate-500">{every[i.frequency]}</span>
+        </span>
+      </div>
+      <p className="truncate text-xs text-slate-500">
+        {[i.accountName, i.categoryName ?? 'No category'].filter(Boolean).join(' · ')}
+      </p>
+      <div className="mt-3">
+        <Alert item={i} onUpdate={onUpdate} onOpen={onOpen} onTrackAsBill={onTrackAsBill} />
+      </div>
+      <ChargeHistory item={i} />
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium">
+        <button type="button" onClick={onOpen} className="rounded-xl bg-slate-100 py-2.5 text-slate-700">
+          Edit
+        </button>
+        <button type="button" onClick={onSkip} className="rounded-xl bg-slate-100 py-2.5 text-slate-700">
+          Skip for now
+        </button>
+      </div>
+    </article>
+  )
+}
+
 function List({ title, items, counted, onOpen }: { title: string; items: RecurringItem[]; counted: (i: RecurringItem) => boolean; onOpen: (i: RecurringItem) => void }) {
   if (items.length === 0) return null
   return (
@@ -316,6 +462,7 @@ function ItemSheet({
           {i.accountName && ` on ${i.accountName}`}
         </p>
         {i.name !== i.detectedName && <p className="text-xs text-slate-400">Shows on your statement as {i.detectedName}.</p>}
+        <ChargeHistory item={i} />
 
         <label className="mt-4 block">
           <span className="text-sm font-medium text-slate-700">Name</span>

@@ -135,7 +135,24 @@ export default function ReviewScreen({
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <h1 className="text-2xl font-bold tracking-tight">Review</h1>
+      {/* The view switch sits beside the title so the scope chips get a row of their own and always fit (DECISIONS.md 167). It applies to both parts. */}
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Review</h1>
+        <div role="tablist" aria-label="View" className="flex shrink-0 rounded-full bg-slate-200/70 p-0.5 text-xs font-medium">
+          {(['cards', 'list'] as const).map((m) => (
+            <button
+              key={m}
+              role="tab"
+              aria-selected={mode === m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`rounded-full px-3 py-1 ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+            >
+              {m === 'cards' ? 'One by one' : 'List'}
+            </button>
+          ))}
+        </div>
+      </div>
       {/* Two parts (DECISIONS.md 152): transactions to confirm, and bills the app found or that changed. */}
       <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-slate-200/70 p-1 text-sm font-semibold">
         {(['transactions', 'bills'] as const).map((p) => {
@@ -161,13 +178,12 @@ export default function ReviewScreen({
       </div>
 
       {part === 'bills' ? (
-        <BillsSection onSignedOut={onSignedOut} onCount={onBillsCount} />
+        <BillsSection onSignedOut={onSignedOut} onCount={onBillsCount} mode={mode} />
       ) : (
       <>
       {/* Compact so a whole review card fits on a phone screen without scrolling (DECISIONS.md 161). */}
-      <header className="mt-3 flex items-center justify-between gap-2">
-        {scopes.length > 1 ? (
-          <div className="flex min-w-0 gap-1.5 overflow-x-auto" role="tablist" aria-label="Which transactions">
+      {scopes.length > 1 && (
+          <div className="mt-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Which transactions">
             {scopes.map((s) => {
               const n = s === 'todo' ? todoCount : s === 'earlier' ? summary?.earlier.total : summary?.older.total
               return (
@@ -189,24 +205,7 @@ export default function ReviewScreen({
               )
             })}
           </div>
-        ) : (
-          <span />
-        )}
-        <div role="tablist" aria-label="View" className="flex shrink-0 rounded-full bg-slate-200/70 p-0.5 text-xs font-medium">
-          {(['cards', 'list'] as const).map((m) => (
-            <button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`rounded-full px-3 py-1 ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
-            >
-              {m === 'cards' ? 'One by one' : 'List'}
-            </button>
-          ))}
-        </div>
-      </header>
+      )}
 
       {notice && (
         <p role="status" className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">

@@ -124,6 +124,40 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
                 Add another
               </button>
             )}
+            {/* Sent early (DECISIONS.md 166): when she's paid before you, this month's money can land before the month starts. */}
+            {o.earlyCandidates.length > 0 && (
+              <div className="mt-3 rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-900 ring-1 ring-sky-200">
+                <p className="font-medium">Did {who} send this month’s early?</p>
+                <p className="mt-0.5 text-xs">
+                  Money from {who} that came just before this budget month started can count toward this month instead.
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {o.earlyCandidates.map((d) => (
+                    <li key={d.id}>
+                      <button
+                        type="button"
+                        onClick={() => void act(() => partnerPlanApi.countEarly(d.id), `The ${formatCents(d.amountCents)} from ${formatDay(d.date)} counts toward this month now.`)}
+                        className="w-full rounded-lg bg-white px-3 py-2 text-left text-sm font-medium ring-1 ring-sky-200"
+                      >
+                        Count the {formatCents(d.amountCents)} from {formatDay(d.date)} for this month
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {o.countedEarly.map((d) => (
+              <p key={d.id} className="mt-3 text-xs text-slate-500">
+                The {formatCents(d.amountCents)} from {formatDay(d.date)} was sent early and counts toward this month.{' '}
+                <button
+                  type="button"
+                  onClick={() => void act(() => partnerPlanApi.undoEarly(d.id), `The ${formatCents(d.amountCents)} from ${formatDay(d.date)} counts in the month it came again.`)}
+                  className="font-medium text-slate-700 underline"
+                >
+                  Undo
+                </button>
+              </p>
+            ))}
           </section>
 
           {o.recent.length > 0 && (

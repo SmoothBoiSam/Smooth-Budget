@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { budgetEditApi, type Category, type GeneratorProposal } from './api'
 import CategorySetup from './CategorySetup'
 import { centsToInput, formatCents, formatDay, parseDollars } from './format'
@@ -15,7 +15,7 @@ const groups: { type: Category['type']; label: string }[] = [
  * vs planned with an explicit remainder, lets the user edit everything, then applies it.
  * The proposal comes from the server; totals here just add up the numbers on screen.
  */
-export default function BudgetPlanner({ onApplied }: { onApplied: (message: string) => void }) {
+export default function BudgetPlanner({ onApplied, top }: { onApplied: (message: string) => void; top?: (p: GeneratorProposal) => ReactNode }) {
   const [p, setP] = useState<GeneratorProposal | null>(null)
   const [income, setIncome] = useState('')
   const [partner, setPartner] = useState('')
@@ -69,7 +69,7 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
     }
   }
 
-  if (p.automatic) return <AutomaticView p={p} busy={busy} error={error} onTurnOff={() => void setAutomatic(false)} />
+  if (p.automatic) return <AutomaticView p={p} top={top?.(p)} busy={busy} error={error} onTurnOff={() => void setAutomatic(false)} />
 
   const incomeCents = parseDollars(income)
   const partnerCents = parseDollars(partner)
@@ -221,39 +221,14 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
   )
 }
 
-/** With the automatic budget on: how this month's budget is built, read-only (there's nothing to confirm). */
-function AutomaticView({ p, busy, error, onTurnOff }: { p: GeneratorProposal; busy: boolean; error: string | null; onTurnOff: () => void }) {
-  const moneyIn = p.incomeCents + p.partnerCents
+/**
+ * With the automatic budget on: how this month's budget is built, read-only (there's nothing to confirm). The month's
+ * money in, planned and any shortfall are in the one card above it (<paramref name="top"/>, DECISIONS.md 168).
+ */
+function AutomaticView({ p, top, busy, error, onTurnOff }: { p: GeneratorProposal; top: ReactNode; busy: boolean; error: string | null; onTurnOff: () => void }) {
   return (
     <div className="pb-6">
-      <p className="mt-2 text-sm text-slate-500">
-        Your budget builds itself and updates whenever your pay, bills, debt plan, savings or transactions change. To set a limit yourself, change it
-        from its category on the Budget tab: it stays yours until you hand it back.
-      </p>
-      <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-        <p className="text-sm font-medium">Money coming in this month</p>
-        <p className="mt-1 text-xs text-slate-500">{p.incomeExplanation}</p>
-        <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-xl bg-slate-50 p-2">
-            <dt className="text-xs text-slate-500">Money in</dt>
-            <dd className="text-sm font-semibold tabular-nums">{formatCents(moneyIn)}</dd>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-2">
-            <dt className="text-xs text-slate-500">Planned</dt>
-            <dd className="text-sm font-semibold tabular-nums">{formatCents(p.allocatedCents)}</dd>
-          </div>
-          <div className={`rounded-xl p-2 ${p.shortCents > 0 ? 'bg-red-50' : 'bg-slate-50'}`}>
-            <dt className="text-xs text-slate-500">{p.shortCents > 0 ? 'Short' : 'Unallocated'}</dt>
-            <dd className={`text-sm font-semibold tabular-nums ${p.shortCents > 0 ? 'text-red-600' : ''}`}>{formatCents(p.shortCents > 0 ? p.shortCents : Math.max(0, p.unallocatedCents))}</dd>
-          </div>
-        </dl>
-        {p.shortCents > 0 && (
-          <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
-            Even with spending squeezed as far as it sensibly goes, this month is {formatCents(p.shortCents)} short. Bills and minimums come first; the rest
-            has to come from savings or extra pay.
-          </p>
-        )}
-      </section>
+      {top}
       {groups.map((g) => {
         const rows = p.categories.filter((c) => c.type === g.type)
         if (rows.length === 0) return null

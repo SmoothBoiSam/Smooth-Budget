@@ -152,10 +152,10 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             return [];
         var deposits = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer
-                        && t.Date >= range.Start && t.Date <= range.End)
+                        && ((t.Date >= range.Start && t.Date <= range.End) || t.CountsForMonthStart == range.Start))
             .Select(t => new PartnerDeposit(t.Id, t.Date, -t.AmountCents,
                 t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
-                t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution))
+                t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution, t.CountsForMonthStart))
             .ToListAsync(ct);
         var (_, today, _) = await ContextAsync(householdId, ct);
         return PartnerContributions.Match(arrangements, range, deposits, today).ToList();

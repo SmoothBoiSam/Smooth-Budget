@@ -7,7 +7,16 @@ namespace SmoothBudget.Core.Budgeting;
 public sealed record ContributionArrangement(Guid Id, Guid CategoryId, long ExpectedCents, int WindowFromDay = 18, int WindowToDay = 24);
 
 /// <summary>Money in from the partner. <see cref="LabeledContribution"/>: you said it's her contribution; <see cref="LabeledOther"/>: you said it isn't.</summary>
-public sealed record PartnerDeposit(Guid Id, DateOnly Date, long AmountCents, bool LabeledContribution = false, bool LabeledOther = false);
+/// <param name="CountsForMonthStart">
+/// Sent early (DECISIONS.md 166): you said it's for the budget month starting on this date, so it counts there, as her
+/// contribution, and not in the month it landed in.
+/// </param>
+public sealed record PartnerDeposit(Guid Id, DateOnly Date, long AmountCents, bool LabeledContribution = false, bool LabeledOther = false,
+    DateOnly? CountsForMonthStart = null)
+{
+    /// <summary>Counts toward <paramref name="month"/>: it landed there (and wasn't moved), or you moved it there.</summary>
+    public bool CountsIn(BudgetMonthRange month) => CountsForMonthStart is { } m ? m == month.Start : month.Contains(Date);
+}
 
 public enum ContributionState
 {
@@ -29,7 +38,8 @@ public sealed record ContributionStatus(
 /// <summary>
 /// Matches the partner's fixed contributions for one budget month (SPEC section 3 and Appendix D):
 /// <list type="bullet">
-/// <item>A deposit you labeled as her contribution wins, anywhere in the budget month; otherwise the
+/// <item>A deposit you labeled as her contribution wins, anywhere in the budget month, as does one you said she sent
+/// early for this month (DECISIONS.md 166); otherwise the
 /// <b>largest</b> deposit from her inside the window (not one you labeled as something else) is the contribution.</item>
 /// <item>Until the window ends, an unmatched contribution is <b>expected</b> and still counts toward Left to Spend.</item>
 /// <item>After it ends with nothing matched, it's <b>late</b>: Left to Spend is recomputed without it (the whole amount).</item>
@@ -48,8 +58,9 @@ public static class PartnerContributions
         foreach (var a in arrangements)
         {
             var (start, end) = Window(month, a.WindowFromDay, a.WindowToDay);
-            var inMonth = deposits.Where(d => month.Contains(d.Date) && !used.Contains(d.Id) && d.AmountCents > 0).ToList();
-            var match = inMonth.Where(d => d.LabeledContribution).OrderByDescending(d => d.AmountCents).ThenBy(d => d.Date).FirstOrDefault()
+            var inMonth = deposits.Where(d => d.CountsIn(month) && !used.Contains(d.Id) && d.AmountCents > 0).ToList();
+            var match = inMonth.Where(d => d.LabeledContribution || d.CountsForMonthStart is not null)
+                            .OrderByDescending(d => d.AmountCents).ThenBy(d => d.Date).FirstOrDefault()
                         ?? inMonth.Where(d => !d.LabeledOther && d.Date >= start && d.Date <= end)
                             .OrderByDescending(d => d.AmountCents).ThenBy(d => d.Date).FirstOrDefault();
             var passed = today > end;
@@ -66,6 +77,18 @@ public static class PartnerContributions
         }
         return result;
     }
+
+    public const int EarlyDays = 14;
+
+    /// <summary>
+    /// Her transfers that may be this month's contribution sent early (DECISIONS.md 166): from the last
+    /// <see cref="EarlyDays"/> days before <paramref name="month"/> starts, not already the contribution of the month
+    /// they landed in, not labeled as something else, and not moved anywhere yet. Newest first.
+    /// </summary>
+    public static IReadOnlyList<PartnerDeposit> EarlyCandidates(BudgetMonthRange month, IReadOnlyList<PartnerDeposit> deposits, IReadOnlySet<Guid> matchedWhereTheyLanded) =>
+        deposits.Where(d => d.AmountCents > 0 && d.CountsForMonthStart is null && !d.LabeledOther && !matchedWhereTheyLanded.Contains(d.Id)
+                            && d.Date < month.Start && d.Date >= month.Start.AddDays(-EarlyDays))
+            .OrderByDescending(d => d.Date).ToList();
 
     /// <summary>
     /// The window inside a budget month: the first date in the month whose day is <paramref name="fromDay"/>, through

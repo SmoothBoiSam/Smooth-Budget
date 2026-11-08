@@ -1146,6 +1146,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<bool>("CategoryUnsure")
                         .HasColumnType("boolean");
 
+                    b.Property<DateOnly?>("CountsForMonthStart")
+                        .HasColumnType("date");
+
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
