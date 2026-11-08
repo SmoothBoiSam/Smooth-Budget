@@ -11,12 +11,10 @@ import {
   type TransactionContext,
 } from './api'
 import { ErrorNotice, Loading } from './ui'
-import { formatCents, formatDay, formatSigned, titleCase } from './format'
+import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
 
-const typeOrder: Category['type'][] = ['Variable', 'FixedBill', 'DebtPayment', 'SavingsTransfer']
-const typeLabels: Record<Category['type'], string> = { Variable: 'Spending', FixedBill: 'Bills', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
 
 /** Partner money first, then purchases with no category, then the app's least certain guesses, then likely ones. */
 function rank(t: Transaction) {
@@ -293,13 +291,13 @@ function ReviewCard({
     !partnerIn ? null : t.kind === 'PartnerContribution' ? 'contribution' : t.suggestedCategoryId ? 'payback' : null,
   )
   const [categoryId, setCategoryId] = useState<string | null>(pick)
+  const [group, setGroup] = useState<Category['type']>(categories.find((c) => c.id === pick)?.type ?? 'Variable')
   const [rule, setRule] = useState(false)
-  const [showAll, setShowAll] = useState(false)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [context, setContext] = useState<TransactionContext | null>(null)
 
-  // Memory aids: how you filed this merchant before, and what else you bought that day (DECISIONS.md 102).
+  // A memory aid: how you filed this merchant before (DECISIONS.md 102).
   useEffect(() => {
     let live = true
     budgetApi.context(t.id).then((c) => live && setContext(c)).catch(() => undefined)
@@ -328,16 +326,16 @@ function ReviewCard({
 
   const selected = categories.find((c) => c.id === categoryId) ?? null
   const needsCategory = partnerIn ? mode === 'payback' : true
-  const sorted = useMemo(
-    () => [...categories].sort((a, b) => typeOrder.indexOf(a.type) - typeOrder.indexOf(b.type) || a.sortOrder - b.sortOrder),
-    [categories],
-  )
-  // The app's pick first, then spending categories; the order stays put while you tap around.
-  const suggested = categories.find((c) => c.id === pick) ?? null
-  const quick = showAll
-    ? sorted
-    : [...(suggested ? [suggested] : []), ...sorted.filter((c) => c.id !== pick && c.type === 'Variable')].slice(0, 8)
-  if (selected && !quick.some((c) => c.id === selected.id)) quick.push(selected)
+  // Every category in the chosen group at once, in your budget's order (DECISIONS.md 145).
+  const inGroup = useMemo(() => categories.filter((c) => c.type === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
+
+  function chooseGroup(g: Category['type']) {
+    setGroup(g)
+    setAdding(false)
+    const list = categories.filter((c) => c.type === g)
+    // Most people have one card payment or one savings line: pick it for them.
+    setCategoryId(list.some((c) => c.id === categoryId) ? categoryId : list.length === 1 ? list[0].id : null)
+  }
 
   async function save(override?: { transfer?: boolean }) {
     setBusy(true)
@@ -376,44 +374,26 @@ function ReviewCard({
         </div>
         <p className={`text-xl font-semibold tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</p>
       </div>
-      {t.description !== t.merchant && <p className="mt-1 break-words text-xs text-slate-400">{t.description}</p>}
-      {t.categoryReason && (
-        <p className={`mt-3 rounded-lg px-3 py-2 text-xs ${t.unsure || !t.categoryId ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>
-          {t.unsure && !t.isPartnerTransfer && <span className="font-semibold">Not sure. </span>}
-          {t.categoryReason}
-        </p>
-      )}
+      <div className="mt-2">
+        <StatusTag t={t} />
+      </div>
+      {t.description !== t.merchant && <p className="mt-2 break-words text-xs text-slate-400">{t.description}</p>}
+      {t.categoryReason && <p className="mt-2 text-xs text-slate-500">{t.categoryReason}</p>}
       {t.isPartnerTransfer && t.kind === 'PartnerTransfer' && (
         <p className="mt-2 text-xs text-slate-500">Not counted anywhere until you say what it was for.</p>
       )}
       {older && <p className="mt-2 text-xs text-slate-500">This is older than the months your budget is built from, so it doesn’t affect your budget.</p>}
-      {context && (context.history.length > 0 || context.sameDay.length > 0) && (
-        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          {context.history.length > 0 && (
-            <p>
-              You’ve filed {titleCase(t.merchant)} as{' '}
-              {context.history.map((h, i) => (
-                <span key={h.categoryName}>
-                  {i > 0 && (i === context.history.length - 1 ? ' and ' : ', ')}
-                  <span className="font-medium text-slate-700">{h.categoryName}</span> {h.count === 1 ? 'once' : `${h.count} times`}
-                </span>
-              ))}
-              .
-            </p>
-          )}
-          {context.sameDay.length > 0 && (
-            <p className={context.history.length > 0 ? 'mt-1' : ''}>
-              Same day:{' '}
-              {context.sameDay.map((d, i) => (
-                <span key={i}>
-                  {i > 0 && ', '}
-                  {titleCase(d.merchant)} {formatCents(d.amountCents)}
-                  {d.categoryName && <span className="text-slate-400"> ({d.categoryName})</span>}
-                </span>
-              ))}
-            </p>
-          )}
-        </div>
+      {context && context.history.length > 0 && (
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          You’ve filed {titleCase(t.merchant)} as{' '}
+          {context.history.map((h, i) => (
+            <span key={h.categoryName}>
+              {i > 0 && (i === context.history.length - 1 ? ' and ' : ', ')}
+              <span className="font-medium text-slate-700">{h.categoryName}</span> {h.count === 1 ? 'once' : `${h.count} times`}
+            </span>
+          ))}
+          .
+        </p>
       )}
 
       {partnerIn && (
@@ -442,45 +422,65 @@ function ReviewCard({
       )}
 
       {needsCategory && (
-        <fieldset className="mt-4">
-          <legend className="text-sm font-medium text-slate-700">
-            {partnerIn ? 'It paid you back for' : partnerOut ? `Your share of what ${first} paid for` : selected ? 'Category' : 'Pick a category'}
-          </legend>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {quick.map((c) => (
+        <>
+          <fieldset className="mt-4">
+            <legend className="text-sm font-medium text-slate-700">
+              {partnerIn ? 'It paid you back for' : partnerOut ? `Your share of what ${first} paid for` : 'What was it?'}
+            </legend>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {groups.map((g) => (
+                <button
+                  key={g.type}
+                  type="button"
+                  aria-pressed={group === g.type}
+                  onClick={() => chooseGroup(g.type)}
+                  className={`rounded-xl px-3 py-2.5 text-sm font-semibold ring-1 ${group === g.type ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset className="mt-4">
+            <legend className="text-sm font-medium text-slate-700">{groups.find((g) => g.type === group)!.pick}</legend>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {inGroup.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  aria-pressed={c.id === categoryId}
+                  onClick={() => setCategoryId(c.id)}
+                  className={`rounded-full px-3 py-1.5 text-sm ring-1 ${c.id === categoryId ? 'bg-slate-900 font-semibold text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                >
+                  {c.name}
+                </button>
+              ))}
               <button
-                key={c.id}
                 type="button"
-                aria-pressed={c.id === categoryId}
-                onClick={() => setCategoryId(c.id)}
-                className={`rounded-full px-3 py-1.5 text-sm ring-1 ${c.id === categoryId ? 'bg-slate-900 font-semibold text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                onClick={() => setAdding(true)}
+                className="rounded-full px-3 py-1.5 text-sm font-semibold"
+                // Green so it stands out from the categories; fixed colors so the dark theme doesn't swap them.
+                style={{ backgroundColor: '#16a34a', color: '#fff' }}
               >
-                {c.name}
-                {showAll && c.type !== 'Variable' && <span className="ml-1 text-[11px] opacity-60">{typeLabels[c.type]}</span>}
+                + New category
               </button>
-            ))}
-            {!showAll && sorted.length > quick.length && (
-              <button type="button" onClick={() => setShowAll(true)} className="rounded-full px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-dashed ring-slate-300">
-                All categories…
-              </button>
+            </div>
+            {adding && (
+              <NewCategory
+                type={group}
+                suggestion={titleCase(t.merchant)}
+                onCancel={() => setAdding(false)}
+                onCreated={async (id) => {
+                  await onCategoryCreated()
+                  setCategoryId(id)
+                  setAdding(false)
+                }}
+                onError={onError}
+              />
             )}
-            <button type="button" onClick={() => setAdding(true)} className="rounded-full px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-dashed ring-slate-300">
-              + New
-            </button>
-          </div>
-          {adding && (
-            <NewCategory
-              suggestion={titleCase(t.merchant)}
-              onCancel={() => setAdding(false)}
-              onCreated={async (id) => {
-                await onCategoryCreated()
-                setCategoryId(id)
-                setAdding(false)
-              }}
-              onError={onError}
-            />
-          )}
-        </fieldset>
+          </fieldset>
+        </>
       )}
 
       {needsCategory && selected && !t.isPartnerTransfer && (
@@ -509,52 +509,70 @@ function ReviewCard({
                 ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
                 : 'Pick a category'}
       </button>
-      <div className="mt-2 flex flex-wrap justify-between gap-x-4 text-sm">
-        <button type="button" onClick={onSkip} className="py-2 font-medium text-slate-500">
-          Skip for now
-        </button>
-        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="py-2 font-medium text-slate-500">
+      <div className="mt-2 grid gap-2">
+        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
           I don’t remember
         </button>
         {!partnerIn && (
-          <button type="button" onClick={() => void save({ transfer: true })} disabled={busy} className="py-2 font-medium text-slate-500">
+          <button type="button" onClick={() => void save({ transfer: true })} disabled={busy} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
             It’s a transfer
           </button>
         )}
+        <button type="button" onClick={onSkip} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
+          Skip for now
+        </button>
       </div>
     </article>
   )
 }
 
+/** The four kinds of transaction (DECISIONS.md 145); each one's categories show when you pick it. */
+const groups: { type: Category['type']; label: string; pick: string }[] = [
+  { type: 'Variable', label: 'Spending', pick: 'Spending category' },
+  { type: 'FixedBill', label: 'Bill', pick: 'Which bill' },
+  { type: 'DebtPayment', label: 'Debt payment', pick: 'Which debt' },
+  { type: 'SavingsTransfer', label: 'Savings transfer', pick: 'Which savings' },
+]
+
+/** "No category" in red, or the app's guess as a question in orange: "Groceries?" */
+function StatusTag({ t }: { t: Transaction }) {
+  const name = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Money from your partner' : null)
+  return name ? (
+    <span className="inline-block rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700 ring-1 ring-orange-200">{name}?</span>
+  ) : (
+    <span className="inline-block rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-semibold text-red-700 ring-1 ring-red-100">No category</span>
+  )
+}
 
 function NewCategory({
+  type,
   suggestion,
   onCancel,
   onCreated,
   onError,
 }: {
+  type: Category['type']
   suggestion: string
   onCancel: () => void
   onCreated: (id: string) => Promise<void>
   onError: (e: unknown) => void
 }) {
   const [name, setName] = useState('')
-  const [bill, setBill] = useState(false)
   const [busy, setBusy] = useState(false)
+  // A bill gets its own line named after the merchant unless you type something else.
+  const fallback = type === 'FixedBill' ? suggestion : ''
+  const kind = groups.find((g) => g.type === type)!.label.toLowerCase()
   return (
     <div className="mt-3 rounded-xl bg-slate-50 p-3">
       <label className="block">
-        <span className="text-xs text-slate-500">New category name</span>
+        <span className="text-xs text-slate-500">New {kind} category</span>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={bill ? suggestion : 'e.g. Household'}
+          placeholder={fallback || 'e.g. Household'}
+          maxLength={100}
           className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base"
         />
-      </label>
-      <label className="mt-2 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={bill} onChange={(e) => setBill(e.target.checked)} className="size-4" />
-        It’s a bill or subscription (its own line in the budget)
       </label>
       <div className="mt-3 flex gap-2">
         <button type="button" onClick={onCancel} className="flex-1 rounded-lg bg-white py-2 text-sm font-medium ring-1 ring-slate-200">
@@ -562,11 +580,11 @@ function NewCategory({
         </button>
         <button
           type="button"
-          disabled={busy || !(name.trim() || (bill && suggestion))}
+          disabled={busy || !(name.trim() || fallback)}
           onClick={async () => {
             setBusy(true)
             try {
-              const r = await budgetEditApi.createCategory(name.trim() || suggestion, bill ? 'FixedBill' : 'Variable', 0, false)
+              const r = await budgetEditApi.createCategory(name.trim() || fallback, type, 0, false)
               await onCreated(r.id)
             } catch (e) {
               onError(e)
@@ -583,8 +601,7 @@ function NewCategory({
 }
 
 function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void; onConfirm: () => void }) {
-  const partnerKind = t.kind === 'PartnerContribution' ? 'Contribution' : t.kind === 'PartnerTransfer' ? null : t.isPartnerTransfer && t.amountCents < 0 ? 'Paid you back' : null
-  const label = t.categoryName ?? partnerKind
+  const label = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Contribution' : null)
   return (
     <li className="flex items-center gap-2 pr-2">
       <button type="button" onClick={onOpen} className="min-w-0 flex-1 px-4 py-3 text-left hover:bg-slate-50">
@@ -592,15 +609,8 @@ function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void;
           <span className="truncate text-sm font-medium">{titleCase(t.merchant)}</span>
           <span className={`shrink-0 text-sm tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</span>
         </div>
-        <p className="truncate text-xs text-slate-500">
-          {formatDay(t.date)} ·{' '}
-          {label ? (
-            <span className={`font-medium ${t.unsure ? 'text-amber-600' : 'text-slate-700'}`}>
-              {t.unsure ? `Not sure: ${label}?` : label}
-            </span>
-          ) : (
-            <span className="font-medium text-amber-600">{t.kind === 'PartnerTransfer' ? 'What was it for?' : 'Needs a category'}</span>
-          )}
+        <p className="mt-0.5 flex items-center gap-2 truncate text-xs text-slate-500">
+          {formatDay(t.date)} <StatusTag t={t} />
         </p>
       </button>
       {label && !t.isPartnerTransfer ? (

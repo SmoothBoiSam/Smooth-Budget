@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
-import { ErrorNotice, Loading } from './ui'
+import { useRemembered } from './offline'
+import { Caret, ErrorNotice, Loading } from './ui'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -83,7 +84,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
     setBusy(true)
     try {
       await debtApi.saveSettings(currentStrategy, extraCents)
-      setNotice(extraCents === null ? 'Extra now follows your budget’s card payments.' : 'Saved as your plan.')
+      setNotice(extraCents === null ? 'Extra is now whatever your budget has left over each month.' : 'Saved. Your budget’s card payment now follows this plan.')
       await load()
     } catch (e) {
       fail(e)
@@ -145,7 +146,10 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
         />
       )}
 
-      {plan && !plan.neverPaysOff && plan.chart.length > 1 && <PayoffChart points={plan.chart} />}
+      {plan && !plan.neverPaysOff && plan.chart.length > 1 && (
+        <PayoffChart past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))} points={plan.chart} />
+      )}
+      {s.history && s.history.length > 0 && <PastPayments history={s.history} />}
 
       {plan && (
         <section aria-labelledby="plan-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
@@ -190,7 +194,8 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
           <p className="mt-1 text-xs text-slate-500">
             Minimums {formatCents(plan.minimumsCents)} + extra {formatCents(currentExtra)} = <span className="font-medium">{formatCents(plan.monthlyPaymentCents)} a month</span>.
             {plan.firstTarget && ` Extra goes to ${plan.firstTarget} first.`}
-            {!changed && savedPlan?.extraSource === 'budget' && ' The extra comes from your budget’s card payments minus the minimums.'}
+            {!changed && savedPlan?.extraSource === 'budget' && ' Right now the extra is whatever your budget has left over after bills, spending and your savings priorities. Set an amount and the budget follows it.'}
+            {!changed && savedPlan?.extraSource === 'you' && ' Your budget plans this extra each month, as far as the month’s money goes.'}
           </p>
           {changed ? (
             <div className="mt-3 flex gap-2">
@@ -204,7 +209,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
           ) : (
             savedPlan?.extraSource === 'you' && (
               <button type="button" disabled={busy} onClick={() => void savePlan(null)} className="mt-2 text-xs font-medium text-slate-600 underline">
-                Follow my budget’s card payments instead
+                Use whatever’s left over each month instead
               </button>
             )
           )}
@@ -366,8 +371,50 @@ function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
  * Total balance over time under the plan: one series (the title names it), a 2px line over a light fill,
  * recessive gridlines, and a crosshair tooltip on hover or touch.
  */
-function PayoffChart({ points }: { points: { month: string; balanceCents: number }[] }) {
+/** The last year of payments, newest first (DECISIONS.md 141). */
+function PastPayments({ history }: { history: { month: string; owedCents: number; paidCents: number }[] }) {
+  const [open, setOpen] = useRemembered('debt.past', false)
+  const paid = history.reduce((sum, h) => sum + h.paidCents, 0)
+  return (
+    <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      <h2>
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
+          <span className="flex items-center gap-1 text-sm font-semibold">
+            <Caret open={open} />
+            Past payments
+          </span>
+          <span className="text-xs tabular-nums text-slate-500">{formatCents(paid)} paid in {history.length} months</span>
+        </button>
+      </h2>
+      {open && (
+        <table className="mt-2 w-full text-sm tabular-nums">
+          <thead>
+            <tr className="text-xs text-slate-500">
+              <th className="py-1 text-left font-normal">Month</th>
+              <th className="py-1 text-right font-normal">Paid</th>
+              <th className="py-1 text-right font-normal">Owed at the end</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {[...history].reverse().map((h) => (
+              <tr key={h.month}>
+                <td className="py-1.5">{formatMonth(h.month)}</td>
+                <td className="py-1.5 text-right">{formatCents(h.paidCents)}</td>
+                <td className="py-1.5 text-right">{formatCents(h.owedCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}
+
+/** What you owed over the last year (solid) running into your plan from here (dashed). */
+function PayoffChart({ past, points: plan }: { past: { month: string; balanceCents: number }[]; points: { month: string; balanceCents: number }[] }) {
   const [hover, setHover] = useState<number | null>(null)
+  const points = [...past, ...plan]
+  const now = past.length
   const W = 340
   const H = 150
   const pad = { l: 44, r: 8, t: 10, b: 22 }
@@ -375,8 +422,11 @@ function PayoffChart({ points }: { points: { month: string; balanceCents: number
   const top = niceCeil(max)
   const x = (i: number) => pad.l + (i / (points.length - 1)) * (W - pad.l - pad.r)
   const y = (c: number) => pad.t + (1 - c / top) * (H - pad.t - pad.b)
-  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.balanceCents).toFixed(1)}`).join('')
-  const area = `${line}L${x(points.length - 1).toFixed(1)},${y(0)}L${x(0)},${y(0)}Z`
+  const path = (from: number, to: number) =>
+    points.slice(from, to + 1).map((p, k) => `${k === 0 ? 'M' : 'L'}${x(from + k).toFixed(1)},${y(p.balanceCents).toFixed(1)}`).join('')
+  const line = path(now, points.length - 1)
+  const pastLine = now > 0 ? path(0, now) : ''
+  const area = `${line}L${x(points.length - 1).toFixed(1)},${y(0)}L${x(now)},${y(0)}Z`
   const yearTicks = points.map((p, i) => ({ p, i })).filter(({ p, i }) => i > 0 && p.month.endsWith('-01-01'))
   const ticks = yearTicks.length > 6 ? yearTicks.filter((_, k) => k % Math.ceil(yearTicks.length / 6) === 0) : yearTicks
   const h = hover === null ? null : points[hover]
@@ -391,7 +441,7 @@ function PayoffChart({ points }: { points: { month: string; balanceCents: number
   return (
     <figure className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <figcaption className="flex items-baseline justify-between gap-3">
-        <span className="text-sm font-semibold">Total owed under your plan</span>
+        <span className="text-sm font-semibold">{past.length > 0 ? 'Owed: the last year, then your plan' : 'Total owed under your plan'}</span>
         <span className="text-xs tabular-nums text-slate-500" aria-live="polite">
           {h ? `${formatMonth(h.month)}: ${formatCents(h.balanceCents)}` : 'Hover or touch for a month'}
         </span>
@@ -414,7 +464,14 @@ function PayoffChart({ points }: { points: { month: string; balanceCents: number
           </g>
         ))}
         <path d={area} className="fill-sky-700" fillOpacity={0.12} />
-        <path d={line} className="stroke-sky-700" strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round" />
+        {pastLine && <path d={pastLine} className="stroke-slate-500" strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round" />}
+        <path d={line} className="stroke-sky-700" strokeWidth={2} strokeDasharray={past.length > 0 ? '5 4' : undefined} fill="none" strokeLinejoin="round" strokeLinecap="round" />
+        {past.length > 0 && (
+          <g>
+            <line x1={x(now)} x2={x(now)} y1={pad.t} y2={y(0)} className="stroke-slate-300" strokeWidth={1} />
+            <text x={x(now) + 3} y={pad.t + 8} className="fill-slate-500 text-[10px]">Now</text>
+          </g>
+        )}
         {ticks.map(({ p, i }) => (
           <text key={p.month} x={x(i)} y={H - 6} textAnchor="middle" className="fill-slate-500 text-[10px]">
             {p.month.slice(0, 4)}

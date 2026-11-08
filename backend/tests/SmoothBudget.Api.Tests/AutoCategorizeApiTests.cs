@@ -512,4 +512,62 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.False(after.Single(t => t.Merchant == "CORNER BISTRO").Unsure);
         Assert.Equal("FOOD_AND_DRINK_RESTAURANT", after.Single(t => t.Merchant == "CORNER BISTRO").BankCategory);
     }
+
+    // ---- Merging categories (DECISIONS.md 144) ----------------------------------------------------------
+
+    [Fact]
+    public async Task Categories_merge_into_a_new_one_that_keeps_catching_their_transactions()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard,
+            "11/08/2026,11/09/2026,FRESH MARKET,Groceries,Sale,-80.00,",
+            "11/09/2026,11/10/2026,TAQUERIA UNO,Food & Drink,Sale,-25.00,",
+            "11/10/2026,11/11/2026,WAL-MART #1234,Shopping,Sale,-60.00,");
+        var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        Guid Id(string name) => cats.Single(x => x.Name == name).Id;
+        var walmart = (await All(c)).Single(t => t.Merchant.StartsWith("WAL-MART"));
+        await c.PatchAsJsonAsync($"/api/transactions/{walmart.Id}", new UpdateTransactionRequest(Id("Groceries"), false, "WAL-MART"), Json);
+        // A "this month only" limit on Groceries: the merged category gets it plus Eating out's usual limit this month.
+        await c.PutAsJsonAsync($"/api/budget/categories/{Id("Groceries")}",
+            new UpdateCategoryRequest("Groceries", CategoryType.Variable, 500_00, false, false, "month"), Json);
+
+        // A name you already use (and isn't being merged) is turned away; so is a merge with nothing to merge.
+        var taken = await c.PostAsJsonAsync("/api/budget/categories/merge", new MergeCategoriesRequest([Id("Groceries")], NewName: "gas"), Json);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, taken.StatusCode);
+        var alone = await c.PostAsJsonAsync("/api/budget/categories/merge", new MergeCategoriesRequest([Id("Gas")], IntoId: Id("Gas")), Json);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, alone.StatusCode);
+
+        var res = await c.PostAsJsonAsync("/api/budget/categories/merge", new MergeCategoriesRequest([Id("Groceries"), Id("Eating out")], NewName: "Food"), Json);
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        var merged = (await res.Content.ReadFromJsonAsync<MergeCategoriesResult>(Json))!;
+        Assert.Equal(("Food", 3), (merged.Name, merged.MovedTransactions));
+
+        cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        Assert.DoesNotContain(cats, x => x.Name is "Groceries" or "Eating out");
+        var food = cats.Single(x => x.Name == "Food");
+        Assert.Equal(("Variable", 600_00L, false), (food.Type, food.MonthlyLimitCents, food.IsDiscretionary)); // groceries were essential
+        Assert.All(await All(c), t => Assert.Equal("Food", t.CategoryName)); // the rule-filed Walmart charge too
+        Assert.Equal("Food", (await c.GetFromJsonAsync<List<RuleDto>>("/api/rules", Json))!.Single(r => r.Pattern == "WAL-MART").CategoryName);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(500_00 + 150_00, db.BudgetMonthCategories.Single(m => m.CategoryId == food.Id).LimitOverrideCents);
+        }
+
+        // New groceries and new eating out still land in Food (it remembers the old names).
+        await ImportAsync(c, card, ChaseCard,
+            "11/12/2026,11/13/2026,CORNER GROCERY,Groceries,Sale,-30.00,",
+            "11/13/2026,11/14/2026,PIZZA PALACE,Food & Drink,Sale,-18.00,");
+        var fresh = (await All(c)).Where(t => t.Merchant is "CORNER GROCERY" or "PIZZA PALACE").ToList();
+        Assert.Equal(2, fresh.Count);
+        Assert.All(fresh, t => Assert.Equal("Food", t.CategoryName));
+
+        // Merging into a category you have: Food takes Household too, and keeps its own name.
+        res = await c.PostAsJsonAsync("/api/budget/categories/merge", new MergeCategoriesRequest([Id("Household")], IntoId: food.Id), Json);
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        Assert.Equal(650_00, cats.Single(x => x.Name == "Food").MonthlyLimitCents);
+        Assert.DoesNotContain(cats, x => x.Name == "Household");
+    }
 }

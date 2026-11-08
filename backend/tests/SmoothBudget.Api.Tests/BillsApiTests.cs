@@ -80,7 +80,7 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         var electric = s.Items.Single(i => i.Name == "City Electric");
         Assert.Equal(("Bill", "active", 88_60L), (electric.Kind, electric.Status, electric.AmountCents));
 
-        Assert.Equal((17_99L, 17_99L * 12, 88_60L), (s.SubscriptionsMonthlyCents, s.SubscriptionsAnnualCents, s.BillsMonthlyCents));
+        Assert.Equal((17_99L + 88_60L, (17_99L + 88_60L) * 12), (s.MonthlyCents, s.AnnualCents));
         Assert.Equal(1, s.AlertCount);
 
         // "Got it" clears the flag until the price changes again.
@@ -129,13 +129,13 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(stream.Key, Canceled: true), Json);
         var s = (await Bills(c))!;
         Assert.Equal("canceled", s.Items.Single(i => i.Key == stream.Key).Status);
-        Assert.Equal(0, s.SubscriptionsMonthlyCents); // canceled doesn't count
+        Assert.Equal(e.MonthlyCents, s.MonthlyCents); // canceled doesn't count
 
         await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(electric.Key, Dismissed: true), Json);
         s = (await Bills(c))!;
         Assert.DoesNotContain(s.Items, i => i.Key == electric.Key);
         Assert.Equal("Electricity", Assert.Single(s.Dismissed).Name);
-        Assert.Equal(0, s.BillsMonthlyCents);
+        Assert.Equal(0, s.MonthlyCents);
 
         Assert.Equal(HttpStatusCode.NotFound, (await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest("NOPE"), Json)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(electric.Key, DueDay: 40), Json)).StatusCode);

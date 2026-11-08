@@ -16,7 +16,7 @@ public record RecurringItemDto(
     Guid? CategoryId, string? CategoryName, bool InBillCategory, bool Confirmed, bool PossibleDuplicate, bool MerchantWide);
 
 public record RecurringSummaryDto(
-    long SubscriptionsMonthlyCents, long SubscriptionsAnnualCents, long BillsMonthlyCents, int AlertCount,
+    long MonthlyCents, long AnnualCents, int AlertCount,
     IReadOnlyList<RecurringItemDto> Items, IReadOnlyList<RecurringItemDto> Dismissed);
 
 public record UpcomingBillDto(string Name, long AmountCents, DateOnly Date);
@@ -41,9 +41,10 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         var all = await ItemsAsync(householdId, ct);
         var live = all.Where(i => !i.Dismissed).Select(i => i.Dto).ToList();
         var counting = live.Where(i => i.Status is not ("possiblyCanceled" or "canceled")).ToList();
-        var subs = counting.Where(i => i.Kind == "Subscription").Sum(i => i.MonthlyCents);
+        // Bills and subscriptions are one list now (DECISIONS.md 143): one monthly total, and what that is over a year.
+        var monthly = counting.Sum(i => i.MonthlyCents);
         return new RecurringSummaryDto(
-            subs, subs * 12, counting.Where(i => i.Kind == "Bill").Sum(i => i.MonthlyCents),
+            monthly, monthly * 12,
             live.Count(i => i.Status is "priceUp" or "priceDown" or "possiblyCanceled" || i.PossibleDuplicate),
             live, all.Where(i => i.Dismissed).Select(i => i.Dto).ToList());
     }

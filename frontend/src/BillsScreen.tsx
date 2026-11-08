@@ -67,15 +67,15 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
 
   const alerts = s?.items.filter((i) => i.status === 'priceUp' || i.status === 'priceDown' || i.status === 'possiblyCanceled' || i.possibleDuplicate) ?? []
   const counted = (i: RecurringItem) => i.status !== 'possiblyCanceled' && i.status !== 'canceled'
-  const subs = s?.items.filter((i) => i.kind === 'Subscription') ?? []
-  const bills = s?.items.filter((i) => i.kind === 'Bill') ?? []
+  // Bills and subscriptions are one list (DECISIONS.md 143).
+  const bills = s?.items ?? []
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
       <a href="#/more" className="text-sm font-medium text-slate-500">
         ‹ More
       </a>
-      <h1 className="mt-1 text-2xl font-bold tracking-tight">Bills &amp; subscriptions</h1>
+      <h1 className="mt-1 text-2xl font-bold tracking-tight">Bills</h1>
       <p className="mt-1 text-sm text-slate-500">Found from your transactions: the same merchant, a similar amount, on a regular schedule.</p>
 
       {notice && (
@@ -88,17 +88,10 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
 
       {s && (
         <>
-          <dl className="mt-4 grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-              <dt className="text-xs text-slate-500">Subscriptions</dt>
-              <dd className="text-xl font-semibold tabular-nums">{formatCents(s.subscriptionsMonthlyCents)}</dd>
-              <dd className="text-xs text-slate-500">a month · {formatCents(s.subscriptionsAnnualCents)} a year</dd>
-            </div>
-            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-              <dt className="text-xs text-slate-500">Bills</dt>
-              <dd className="text-xl font-semibold tabular-nums">{formatCents(s.billsMonthlyCents)}</dd>
-              <dd className="text-xs text-slate-500">a month</dd>
-            </div>
+          <dl className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+            <dt className="text-xs text-slate-500">Your bills cost</dt>
+            <dd className="text-xl font-semibold tabular-nums">{formatCents(s.monthlyCents)} <span className="text-sm font-normal text-slate-500">a month</span></dd>
+            <dd className="text-xs text-slate-500">{formatCents(s.annualCents)} a year</dd>
           </dl>
 
           {alerts.length > 0 && (
@@ -116,8 +109,7 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
             </section>
           )}
 
-          <List title="Subscriptions" items={subs} counted={counted} onOpen={setOpen} />
-          <List title="Bills" items={bills} counted={counted} onOpen={setOpen} />
+          <List title="All bills" items={bills} counted={counted} onOpen={setOpen} />
 
           {s.items.length === 0 && (
             <p className="mt-6 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
@@ -240,7 +232,6 @@ function ItemSheet({
   onTrackAsBill: (i: RecurringItem) => void
 }) {
   const [name, setName] = useState(i.name)
-  const [kind, setKind] = useState(i.kind)
   const [due, setDue] = useState(i.dueDay ? String(i.dueDay) : '')
   const [err, setErr] = useState<string | null>(null)
 
@@ -248,7 +239,7 @@ function ItemSheet({
     e.preventDefault()
     const day = due.trim() === '' ? null : Number(due)
     if (day !== null && (!Number.isInteger(day) || day < 1 || day > 31)) return setErr('The due day is a day of the month, 1 to 31.')
-    onUpdate({ key: i.key, name, kind, confirmed: true, ...(day === null ? { clearDueDay: true } : { dueDay: day }) }, `Saved ${name.trim() || i.detectedName}.`)
+    onUpdate({ key: i.key, name, confirmed: true, ...(day === null ? { clearDueDay: true } : { dueDay: day }) }, `Saved ${name.trim() || i.detectedName}.`)
   }
 
   return (
@@ -274,18 +265,6 @@ function ItemSheet({
           <span className="text-sm font-medium text-slate-700">Name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base" />
         </label>
-
-        <fieldset className="mt-4">
-          <legend className="text-sm font-medium text-slate-700">It’s a</legend>
-          <div className="mt-1 grid grid-cols-2 gap-2">
-            {(['Subscription', 'Bill'] as const).map((k) => (
-              <label key={k} className={`cursor-pointer rounded-xl px-3 py-2 text-center text-sm font-semibold ring-1 ${kind === k ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white ring-slate-200'}`}>
-                <input type="radio" name="kind" className="sr-only" checked={kind === k} onChange={() => setKind(k)} />
-                {k}
-              </label>
-            ))}
-          </div>
-        </fieldset>
 
         {i.frequency === 'Monthly' && (
           <label className="mt-4 block">

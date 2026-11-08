@@ -197,6 +197,22 @@ public class BudgetGeneratorTests
     }
 
     [Fact]
+    public void An_extra_set_on_the_debt_tab_drives_the_card_payment()
+    {
+        var visa = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);
+        var mc = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Mastercard", 800_00, 1999, 35_00);
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [mc, visa], overrides: new BudgetOverrides(DebtExtraCents: 200_00));
+        var card = p.Categories.Single(c => c.CategoryId == Card);
+        Assert.Equal(95_00 + 200_00, card.ProposedCents); // minimums + your extra, not all 941.86 left over
+        Assert.Contains("the extra you set on the Debt tab", card.Explanation);
+        Assert.Equal(741_86, p.UnallocatedCents);
+
+        // More than the month has left: only what's left.
+        var big = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [mc, visa], overrides: new BudgetOverrides(DebtExtraCents: 5_000_00));
+        Assert.Equal(95_00 + 941_86, big.Categories.Single(c => c.CategoryId == Card).ProposedCents);
+    }
+
+    [Fact]
     public void A_bill_whose_price_rose_is_proposed_at_the_new_price()
     {
         // Rent was $1,650 for three months; the detected bill says it's $1,700 now.

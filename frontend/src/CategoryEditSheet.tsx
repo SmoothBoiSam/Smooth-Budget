@@ -4,7 +4,7 @@ import { centsToInput, parseDollars } from './format'
 
 const typeLabels: Record<Category['type'], string> = {
   Variable: 'Spending (counts toward Left to Spend)',
-  FixedBill: 'Bill or subscription',
+  FixedBill: 'Bill',
   DebtPayment: 'Debt payment',
   SavingsTransfer: 'Savings',
 }

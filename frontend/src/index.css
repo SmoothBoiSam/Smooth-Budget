@@ -56,6 +56,11 @@ body {
   --color-red-700: #fca5a5;
   --color-red-800: #fecaca;
 
+  /* Review's "Groceries?" label (DECISIONS.md 145). */
+  --color-orange-50: #2b1a0c;
+  --color-orange-200: #5c3512;
+  --color-orange-700: #fdba74;
+
   --color-sky-700: #7dd3fc;
 }
 

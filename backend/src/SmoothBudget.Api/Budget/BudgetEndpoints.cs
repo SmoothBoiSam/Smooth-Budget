@@ -127,7 +127,17 @@ public static class BudgetEndpoints
         });
 
         // Categories built from your own transactions (no premade list): what to add, and what you never use.
-        g.MapGet("/categories/discover", async (HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>
+        // Combine categories into one you have or a new one (DECISIONS.md 144).
+        g.MapPost("/categories/merge", async (MergeCategoriesRequest req, HttpContext ctx, AppDbContext db, CategorizationService categorization, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var (result, errors) = await CategoryMerge.RunAsync(db, householdId, req, ct);
+            if (errors is not null) return Results.ValidationProblem(errors);
+            await categorization.RunAsync(householdId, ct); // file anything waiting that fits the merged category
+            return Results.Ok(result);
+        });
+
+        g.MapGet("/categories/discover",async (HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>
             await discovery.DiscoverAsync(ctx.User.HouseholdId(), ct));
 
         g.MapPost("/categories/discover/apply", async (ApplyDiscoveryRequest req, HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>
@@ -292,6 +302,9 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
         var amounts = await db.PartnerArrangements.Where(a => a.HouseholdId == householdId).Select(a => a.AmountCents).ToListAsync(ct);
         long? contributions = amounts.Count > 0 ? amounts.Sum() : null; // none set up: the median of what she sent
         var plan = await savings.PlanAsync(householdId, ct); // milestone 8: leftover in your priority order
+        // The Debt tab's extra each month drives the card payment (the budget follows your debt plan, not the other way round).
+        var debtExtra = await db.Households.Where(h => h.Id == householdId).Select(h => h.ExtraDebtPaymentCents).SingleAsync(ct);
+        overrides = (overrides ?? new BudgetOverrides()) with { DebtExtraCents = debtExtra };
         var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills, contributions, plan, overrides);
         var partnerName = await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct);
         return (p, new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),

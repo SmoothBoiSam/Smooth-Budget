@@ -20,7 +20,7 @@ export interface HomeSummary {
   sync: SyncStatus
   pendingSweeps: PendingSweep[]
   reviewCount: number
-  /** The next 3 bills and subscriptions due. */
+  /** The next 3 bills due. */
   upcomingBills: { name: string; amountCents: number; date: string }[] | null
   /** The partner's fixed contributions this month (late / different amount flags). */
   contributions: ContributionStatus[] | null
@@ -446,6 +446,9 @@ export const budgetEditApi = {
     },
   ) => request<void>('PUT', `/budget/categories/${id}`, body),
   reorder: (ids: string[]) => request<void>('POST', '/budget/categories/order', { ids }),
+  /** Combine categories into one you have (intoId) or a new one (newName). It can't be undone. */
+  mergeCategories: (fromIds: string[], into: { intoId: string } | { newName: string }) =>
+    request<{ id: string; name: string; movedTransactions: number }>('POST', '/budget/categories/merge', { fromIds, ...into }),
   hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
   setIncome: (incomeCents: number, partnerCents?: number, automatic = false) =>
     request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null, automatic }),
@@ -584,6 +587,8 @@ export interface DebtSummary {
   minimumsCents: number
   needsDetailsCount: number
   debts: Debt[]
+  /** The last 12 months, oldest first: owed at the end of each, and card payments made. */
+  history: { month: string; owedCents: number; paidCents: number }[] | null
   plan: DebtPlan | null
   comparison: {
     strategy: DebtStrategy
@@ -649,9 +654,8 @@ export interface RecurringItem {
 }
 
 export interface RecurringSummary {
-  subscriptionsMonthlyCents: number
-  subscriptionsAnnualCents: number
-  billsMonthlyCents: number
+  monthlyCents: number
+  annualCents: number
   alertCount: number
   items: RecurringItem[]
   dismissed: RecurringItem[]
@@ -745,6 +749,10 @@ export interface SavingsSummary {
   goals: SavingsGoal[]
   priority: PriorityStep[]
   history: { date: string; balanceCents: number }[]
+  /** Money moved into savings, newest first, tracked from your accounts. */
+  transfers: { date: string; cents: number; account: string; description: string }[] | null
+  thisMonthCents: number
+  plannedCents: number
 }
 
 export interface GoalFields {

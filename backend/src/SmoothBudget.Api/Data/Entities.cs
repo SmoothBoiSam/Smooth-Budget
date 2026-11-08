@@ -131,6 +131,12 @@ public class Category
     public decimal SplitPercent { get; set; } = 50m;
     public int SortOrder { get; set; }
     public bool IsHidden { get; set; }
+
+    /// <summary>
+    /// Names of categories merged into this one (DECISIONS.md 144). Transactions the app would have filed under one of
+    /// them land here instead, so merging "Groceries" into "Food" keeps catching groceries.
+    /// </summary>
+    public List<string> MergedNames { get; set; } = [];
 }
 
 public class Transaction

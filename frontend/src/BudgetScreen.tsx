@@ -20,6 +20,7 @@ import { useRemembered } from './offline'
 import { Caret, ErrorNotice, Loading } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import CategoryEditSheet from './CategoryEditSheet'
+import MergeCategoriesSheet from './MergeCategoriesSheet'
 import { centsToInput, formatCents, formatDay, formatSigned, formatTime, parseDollars, titleCase } from './format'
 import TransactionSheet from './TransactionSheet'
 
@@ -56,6 +57,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [categories, setCategories] = useState<Category[]>([])
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
+  const [merging, setMerging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -99,6 +101,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   function saved(message: string) {
     setSelected(null)
     setEditing(undefined)
+    setMerging(false)
     setNotice(message)
     onChanged()
     void load()
@@ -174,6 +177,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           inboxCount={inbox.length}
           guessCount={reviewSummary?.month.total ?? 0}
           onAdd={() => setEditing(null)}
+          onMerge={() => setMerging(true)}
           onCloseMonth={(start) => act(() => budgetEditApi.closeMonth(start), 'Month closed.')}
           onSweep={(id, done) => act(() => (done ? budgetEditApi.sweepDone(id) : budgetEditApi.sweepUndo(id)), done ? 'Marked as sent.' : 'Marked as not sent.')}
           onIncome={(income, partner, automatic) =>
@@ -213,6 +217,8 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         <TransactionSheet transaction={selected} categories={categories} onClose={() => setSelected(null)} onSaved={saved} />
       )}
 
+      {merging && <MergeCategoriesSheet categories={categories} onClose={() => setMerging(false)} onMerged={saved} />}
+
       {editing !== undefined && (
         <CategoryEditSheet
           line={editing}
@@ -236,6 +242,7 @@ function Overview({
   inboxCount,
   guessCount,
   onAdd,
+  onMerge,
   onCloseMonth,
   onSweep,
   onIncome,
@@ -245,6 +252,7 @@ function Overview({
   inboxCount: number
   guessCount: number
   onAdd: () => void
+  onMerge: () => void
   onCloseMonth: (start: string) => void
   onSweep: (id: string, done: boolean) => void
   onIncome: (income: number, partner: number, automatic?: boolean) => void
@@ -312,7 +320,10 @@ function Overview({
         <button type="button" onClick={onAdd} className="rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
           + Add category
         </button>
-        <a href="#/budget/plan" className="rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
+        <button type="button" onClick={onMerge} className="rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
+          Combine categories
+        </button>
+        <a href="#/budget/plan" className="col-span-2 rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
           How it's built
         </a>
       </div>
@@ -400,7 +411,7 @@ function Group({
   )
 }
 
-/** The bills and subscriptions under one bill line; a long list folds behind a caret. */
+/** The bills under one bill line; a long list folds behind a caret. */
 function BillItems({ lineId, items, month, today }: { lineId: string; items: RecurringItem[]; month: { start: string; end: string }; today: string }) {
   const [open, setOpen] = useRemembered(`budget.items.${lineId}`, items.length <= 3)
   return (
@@ -408,7 +419,7 @@ function BillItems({ lineId, items, month, today }: { lineId: string; items: Rec
       {items.length > 3 && (
         <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-center gap-1 py-1 text-xs font-medium text-slate-500">
           <Caret open={open} />
-          {items.length} bills and subscriptions
+          {items.length} bills
         </button>
       )}
       {open && (

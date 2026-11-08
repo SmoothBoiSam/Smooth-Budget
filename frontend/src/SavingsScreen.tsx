@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
-import { ErrorNotice, Loading } from './ui'
-import { centsToInput, formatCents, parseDollars } from './format'
+import { useRemembered } from './offline'
+import { Caret, ErrorNotice, Loading } from './ui'
+import { centsToInput, formatCents, formatDay, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 const formatMonth = (iso: string) => monthFmt.format(new Date(iso + 'T00:00:00Z'))
@@ -82,6 +83,8 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
               <p className="mt-2 text-xs text-slate-500">Connect or import a savings account so your goals follow its balance. Until then, goals are tracked by hand.</p>
             )}
           </section>
+
+          <TransfersCard s={s} />
 
           <section aria-labelledby="goals-h" className="mt-6">
             <h2 id="goals-h" className="text-sm font-semibold text-slate-700">
@@ -412,5 +415,52 @@ function Money({ value, onChange, label }: { value: string; onChange: (v: string
       <span className="text-sm text-slate-500">$</span>
       <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" className="w-full bg-transparent px-1 text-right tabular-nums outline-none" />
     </div>
+  )
+}
+
+/** Money moved into savings, tracked from your accounts (DECISIONS.md 142): this month against the budget, and the latest moves. */
+function TransfersCard({ s }: { s: SavingsSummary }) {
+  const [open, setOpen] = useRemembered('savings.transfers', false)
+  const list = s.transfers ?? []
+  const pct = s.plannedCents > 0 ? Math.min(100, Math.round((s.thisMonthCents * 100) / s.plannedCents)) : 0
+  return (
+    <section aria-labelledby="moved-h" className="mt-6 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      <h2 id="moved-h">
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
+          <span className="flex items-center gap-1 text-sm font-semibold">
+            <Caret open={open} />
+            Moved to savings this month
+          </span>
+          <span className="text-sm font-semibold tabular-nums">
+            {formatCents(s.thisMonthCents)}
+            {s.plannedCents > 0 && <span className="font-normal text-slate-500"> of {formatCents(s.plannedCents)}</span>}
+          </span>
+        </button>
+      </h2>
+      {s.plannedCents > 0 && (
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden>
+          <div className="h-full rounded-full bg-emerald-600" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      <p className="mt-1.5 text-xs text-slate-500">Tracked from your accounts automatically. {s.plannedCents > 0 ? 'The goal is what this month’s budget plans for savings.' : ''}</p>
+      {open &&
+        (list.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">No transfers into savings seen yet.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-slate-100 text-sm">
+            {list.map((t, i) => (
+              <li key={t.date + t.cents + i} className="flex items-center justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate">{t.description}</span>
+                  <span className="block text-xs text-slate-500">
+                    {formatDay(t.date)} · {t.account}
+                  </span>
+                </span>
+                <span className="shrink-0 font-semibold tabular-nums text-emerald-700">+{formatCents(t.cents)}</span>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </section>
   )
 }

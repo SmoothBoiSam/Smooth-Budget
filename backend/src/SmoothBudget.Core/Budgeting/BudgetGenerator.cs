@@ -18,7 +18,8 @@ public sealed record CurrentBill(Guid CategoryId, string Name, long MonthlyCents
 /// What the automatic budget feeds the generator (DECISIONS.md 135): this month's income from the Payday forecast instead of
 /// a median, and limits you set yourself, which it never changes.
 /// </summary>
-public sealed record BudgetOverrides(long? IncomeCents = null, string? IncomeExplanation = null, IReadOnlyDictionary<Guid, long>? LockedLimits = null);
+/// <param name="DebtExtraCents">The extra each month you set on the Debt tab: the card payment is the minimums plus this (as far as the month's leftover goes), instead of all the leftover.</param>
+public sealed record BudgetOverrides(long? IncomeCents = null, string? IncomeExplanation = null, IReadOnlyDictionary<Guid, long>? LockedLimits = null, long? DebtExtraCents = null);
 
 public sealed record BudgetProposal(
     int MonthsUsed,
@@ -160,8 +161,9 @@ public static class BudgetGenerator
                         left -= toStarter;
                         break;
                     case PriorityStep.Debt when debtStep:
-                        toDebt = left; // Avalanche: all of it to the highest APR
-                        left = 0;
+                        // Your extra from the Debt tab (as far as the leftover goes), or else all of it, to the highest APR.
+                        toDebt = overrides?.DebtExtraCents is { } extra ? Math.Min(left, Math.Max(0, extra)) : left;
+                        left -= toDebt;
                         break;
                     case PriorityStep.Savings when savings is not null && savingsCategory is not null:
                         toLarger = savings.LargerMonthlyCents is { } cap ? Math.Min(left, cap) : left;
@@ -174,7 +176,8 @@ public static class BudgetGenerator
             {
                 var target = Debt.DebtPayoff.Order(owed, owed.ToDictionary(d => d.Id, d => d.BalanceCents), Debt.DebtStrategy.Avalanche).First();
                 var why = $"Your card minimums add up to {Money(minimums)}"
-                          + (toDebt > 0 ? $", plus {Money(toDebt)} left over {(toStarter > 0 ? $"after your {savings!.StarterName.ToLowerInvariant()}" : "after everything else")}, as extra to {target.Name} ({target.AprBps / 100m:0.##}% APR, the highest)."
+                          + (toDebt > 0 && overrides?.DebtExtraCents is { } setExtra ? $", plus {Money(toDebt)} extra to {target.Name}" + (toDebt < setExtra ? $" (you set {Money(setExtra)} on the Debt tab; that's what's left this month)." : " (the extra you set on the Debt tab).")
+                             : toDebt > 0 ? $", plus {Money(toDebt)} left over {(toStarter > 0 ? $"after your {savings!.StarterName.ToLowerInvariant()}" : "after everything else")}, as extra to {target.Name} ({target.AprBps / 100m:0.##}% APR, the highest)."
                              : toStarter > 0 ? $". What's left goes to your {savings!.StarterName.ToLowerInvariant()} first." : ". Nothing is left over for extra this month.");
                 proposals[proposals.IndexOf(cardCategory!)] = cardCategory! with { ProposedCents = minimums + toDebt, Explanation = why };
             }

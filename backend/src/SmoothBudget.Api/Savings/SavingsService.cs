@@ -13,9 +13,15 @@ public record SavingsGoalDto(
     Guid Id, string Name, long TargetCents, Guid? AccountId, string? AccountName, long? ManualSavedCents, long? MonthlyCentsSet, bool IsStarter,
     long SavedCents, long RemainingCents, int Percent, bool Reached, long MonthlyCents, string MonthlySource, int? MonthsToGo, DateOnly? ProjectedDate);
 
+/// <param name="Transfers">Money moved into savings, newest first (DECISIONS.md 142): tracked from your accounts, nothing to enter.</param>
+/// <param name="ThisMonthCents">Moved into savings this budget month.</param>
+/// <param name="PlannedCents">What this month's budget plans for savings.</param>
 public record SavingsSummaryDto(
     long TotalSavedCents, IReadOnlyList<SavingsAccountDto> Accounts, IReadOnlyList<SavingsGoalDto> Goals,
-    IReadOnlyList<string> Priority, IReadOnlyList<BalancePoint> History);
+    IReadOnlyList<string> Priority, IReadOnlyList<BalancePoint> History,
+    IReadOnlyList<SavingsTransferDto>? Transfers = null, long ThisMonthCents = 0, long PlannedCents = 0);
+
+public record SavingsTransferDto(DateOnly Date, long Cents, string Account, string Description);
 
 public record GoalRequest(string Name, long TargetCents, Guid? AccountId, long? ManualSavedCents, long? MonthlyCents);
 public record PriorityRequest(List<PriorityStep> Order);
@@ -64,6 +70,19 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var history = ends.Select(d => new BalancePoint(d, accounts.Sum(a =>
             SavingsGoals.History(a.CurrentBalanceCents, txns.Where(t => t.AccountId == a.Id).Select(t => (t.Date, t.AmountCents)).ToList(), [d])[0].BalanceCents))).ToList();
 
+        // Transfers into savings, tracked automatically: money into a savings account (or, with none linked, transfers out
+        // of checking filed as savings).
+        var savingsCats = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer).Select(c => c.Id).ToListAsync(ct);
+        var moves = ids.Count > 0
+            ? await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId) && t.AmountCents < 0)
+                .OrderByDescending(t => t.Date).Take(60)
+                .Select(t => new SavingsTransferDto(t.Date, -t.AmountCents, t.Account.Name, t.IsTransfer ? "Moved to savings" : t.Description)).ToListAsync(ct)
+            : await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && t.AmountCents > 0 && t.CategoryId != null && savingsCats.Contains(t.CategoryId.Value))
+                .OrderByDescending(t => t.Date).Take(60)
+                .Select(t => new SavingsTransferDto(t.Date, t.AmountCents, t.Account.Name, "Moved to savings")).ToListAsync(ct);
+        var thisMonth = moves.Where(m => current.Contains(m.Date)).Sum(m => m.Cents);
+        var planned = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer && !c.IsHidden).SumAsync(c => c.MonthlyLimitCents, ct);
+
         return new SavingsSummaryDto(
             accounts.Sum(a => Math.Max(0, a.CurrentBalanceCents)) + goals.Where(g => g.AccountId is null).Sum(g => g.ManualSavedCents ?? 0),
             accounts.Select(a => new SavingsAccountDto(a.Id, a.Name, a.Mask, a.CurrentBalanceCents, a.PlaidAccountId is not null, pace[a.Id])).ToList(),
@@ -74,7 +93,7 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
                     s.SavedCents, s.RemainingCents, s.Percent, s.Reached, s.MonthlyCents, s.MonthlySource, s.MonthsToGo, s.ProjectedDate);
             }).ToList(),
             Order(household.SavingsPriority).Select(x => x.ToString()).ToList(),
-            history);
+            history, moves.Take(12).ToList(), thisMonth, planned);
     }
 
     /// <summary>The input for the budget generator: the priority order and what the starter fund still needs (milestone 8).</summary>

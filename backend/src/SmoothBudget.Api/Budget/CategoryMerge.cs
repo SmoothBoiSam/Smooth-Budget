@@ -1,0 +1,126 @@
+using Microsoft.EntityFrameworkCore;
+using SmoothBudget.Api.Data;
+using SmoothBudget.Core.Budgeting;
+
+namespace SmoothBudget.Api.Budget;
+
+/// <summary>
+/// Combine categories: <paramref name="FromIds"/> go into an existing category (<paramref name="IntoId"/>) or a new
+/// one (<paramref name="NewName"/>). Give exactly one of the two.
+/// </summary>
+public record MergeCategoriesRequest(List<Guid> FromIds, Guid? IntoId = null, string? NewName = null);
+
+public record MergeCategoriesResult(Guid Id, string Name, int MovedTransactions);
+
+/// <summary>
+/// Merges categories into one (DECISIONS.md 144). Everything filed under the old ones moves over: transactions, merchant
+/// rules, the partner's contributions and each month's record, with limits added together. The merged category
+/// remembers the old names so the app keeps filing those transactions there. The old categories are then deleted; a
+/// merge can't be undone, so the screen asks first.
+/// </summary>
+public static class CategoryMerge
+{
+    /// <returns>The merged category, or the problems with the request.</returns>
+    public static async Task<(MergeCategoriesResult? Result, Dictionary<string, string[]>? Errors)> RunAsync(
+        AppDbContext db, Guid householdId, MergeCategoriesRequest req, CancellationToken ct)
+    {
+        static Dictionary<string, string[]> Error(string field, string message) => new() { [field] = [message] };
+
+        var fromIds = (req.FromIds ?? []).Distinct().ToList();
+        var newName = req.NewName?.Trim();
+        if ((req.IntoId is null) == string.IsNullOrEmpty(newName))
+            return (null, Error("into", "Pick a category to merge into, or name a new one."));
+        if (newName is { Length: > 100 })
+            return (null, Error("newName", "Use up to 100 characters."));
+
+        var all = await db.Categories.Where(c => c.HouseholdId == householdId).ToListAsync(ct);
+        if (fromIds.Any(id => all.All(c => c.Id != id)))
+            return (null, Error("fromIds", "One of those categories doesn't exist."));
+
+        Category? into;
+        var isNew = false;
+        if (req.IntoId is { } intoId)
+        {
+            into = all.SingleOrDefault(c => c.Id == intoId);
+            if (into is null)
+                return (null, Error("into", "That category doesn't exist."));
+        }
+        else
+        {
+            into = all.FirstOrDefault(c => string.Equals(c.Name, newName, StringComparison.OrdinalIgnoreCase));
+            if (into is not null && !fromIds.Contains(into.Id))
+                return (null, Error("newName", $"You already have {into.Name}. Merge into it instead."));
+            if (into is not null)
+                into.Name = newName!; // a "new" name that's one of the merged ones: that one stays and takes the others
+            else
+            {
+                var picked = all.Where(c => fromIds.Contains(c.Id)).ToList();
+                if (picked.Count == 0)
+                    return (null, Error("fromIds", "Pick at least one category to merge."));
+                // The kind most of the money was budgeted as; discretionary only if every one was (essentials are squeezed last).
+                var type = picked.GroupBy(c => c.Type)
+                    .OrderByDescending(g => g.Sum(c => c.MonthlyLimitCents)).ThenByDescending(g => g.Count()).First().Key;
+                into = new Category
+                {
+                    Id = Guid.NewGuid(), HouseholdId = householdId, Name = newName!, Type = type,
+                    IsDiscretionary = type == CategoryType.Variable && picked.All(c => c.IsDiscretionary),
+                    IsSplit = picked.Any(c => c.IsSplit), SplitPercent = picked.FirstOrDefault(c => c.IsSplit)?.SplitPercent ?? 50m,
+                    SortOrder = picked.Min(c => c.SortOrder),
+                };
+                isNew = true;
+            }
+        }
+        fromIds.Remove(into.Id);
+        var sources = all.Where(c => fromIds.Contains(c.Id)).ToList();
+        if (sources.Count == 0)
+            return (null, Error("fromIds", "Pick at least one other category to merge."));
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        if (isNew)
+        {
+            db.Categories.Add(into);
+            await db.SaveChangesAsync(ct);
+        }
+        var intoKey = into.Id;
+
+        // Move everything over before the old categories go (deleting one clears its transactions' category).
+        var moved = await db.Transactions.Where(t => t.HouseholdId == householdId && t.CategoryId != null && fromIds.Contains(t.CategoryId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.CategoryId, intoKey), ct);
+        await db.Transactions.Where(t => t.HouseholdId == householdId && t.SuggestedCategoryId != null && fromIds.Contains(t.SuggestedCategoryId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.SuggestedCategoryId, intoKey), ct);
+        await db.CategoryRules.Where(r => r.HouseholdId == householdId && fromIds.Contains(r.CategoryId))
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.CategoryId, intoKey), ct);
+        await db.PartnerArrangements.Where(a => a.HouseholdId == householdId && fromIds.Contains(a.CategoryId))
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.CategoryId, intoKey), ct);
+
+        // Each month's record becomes one row for the merged category, with the limits and spending added together.
+        var usual = sources.Append(into).ToDictionary(c => c.Id, c => c.MonthlyLimitCents);
+        var everyId = fromIds.Append(intoKey).ToList();
+        var rows = await db.BudgetMonthCategories.Where(m => everyId.Contains(m.CategoryId)).ToListAsync(ct);
+        foreach (var g in rows.GroupBy(r => r.BudgetMonthId).Select(g => g.ToList()))
+        {
+            long? Sum(Func<BudgetMonthCategory, long?> pick) => g.Any(r => pick(r) is not null) ? g.Sum(r => pick(r) ?? 0) : null;
+            // A "this month only" limit on any of them: that month the merged one gets each one's limit for it, added up.
+            var monthLimit = g.Any(r => r.LimitOverrideCents is not null)
+                ? everyId.Sum(id => g.FirstOrDefault(r => r.CategoryId == id)?.LimitOverrideCents ?? usual[id])
+                : (long?)null;
+            var keep = g.FirstOrDefault(r => r.CategoryId == intoKey);
+            if (keep is null)
+                db.BudgetMonthCategories.Add(keep = new BudgetMonthCategory { Id = Guid.NewGuid(), BudgetMonthId = g[0].BudgetMonthId, CategoryId = intoKey });
+            (keep.LimitOverrideCents, keep.ClosingLimitCents, keep.ClosingSpentCents) = (monthLimit, Sum(r => r.ClosingLimitCents), Sum(r => r.ClosingSpentCents));
+            db.BudgetMonthCategories.RemoveRange(g.Where(r => r.CategoryId != intoKey));
+        }
+
+        into.MonthlyLimitCents += sources.Sum(c => c.MonthlyLimitCents);
+        into.LimitSetByUser |= sources.Any(c => c.LimitSetByUser);
+        into.IsHidden = false;
+        into.MergedNames = into.MergedNames
+            .Concat(sources.SelectMany(c => c.MergedNames.Prepend(c.Name)))
+            .Where(n => !string.Equals(n, into.Name, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        db.Categories.RemoveRange(sources);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return (new MergeCategoriesResult(intoKey, into.Name, moved), null);
+    }
+}

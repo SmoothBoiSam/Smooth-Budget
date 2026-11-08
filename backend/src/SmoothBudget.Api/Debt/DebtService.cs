@@ -27,9 +27,15 @@ public record DebtPlanDto(
 /// <param name="InterestDifferenceCents">The other strategy's interest minus this plan's (positive = this plan saves that much).</param>
 public record DebtComparisonDto(string Strategy, int Months, DateOnly? DebtFreeBy, bool NeverPaysOff, long TotalInterestCents, long InterestDifferenceCents, int MonthsDifference);
 
+/// <param name="History">The last 12 months, oldest first: what you owed at the end of each and what you paid that month.</param>
 public record DebtSummaryDto(
     long OwedCents, long StartingCents, long PaidDownCents, long MinimumsCents, int NeedsDetailsCount,
-    IReadOnlyList<DebtDto> Debts, DebtPlanDto? Plan, DebtComparisonDto? Comparison);
+    IReadOnlyList<DebtDto> Debts, DebtPlanDto? Plan, DebtComparisonDto? Comparison, IReadOnlyList<DebtHistoryPoint>? History = null);
+
+/// <param name="Month">The first day of the month.</param>
+/// <param name="OwedCents">Owed at the end of the month: cards worked back from their transactions, loans at today's balance.</param>
+/// <param name="PaidCents">Card payments received that month.</param>
+public record DebtHistoryPoint(DateOnly Month, long OwedCents, long PaidCents);
 
 public record DebtRequest(string Name, long? BalanceCents, int? AprBps, long? MinimumCents, int? DueDay, long? CreditLimitCents, long? StartingBalanceCents, bool IsHidden = false);
 public record DebtSettingsRequest(DebtStrategy Strategy, long? ExtraCents);
@@ -118,10 +124,30 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
             other.ToString(), alt.Months, alt.NeverPaysOff ? null : MonthOf(alt.Months), alt.NeverPaysOff, alt.TotalInterestCents,
             alt.TotalInterestCents - plan.TotalInterestCents, alt.Months - plan.Months);
 
+        // The last 12 months (DECISIONS.md 141): each card's balance worked back from its transactions (a purchase after a
+        // month's end wasn't owed yet; a payment after it still was), plus loans at today's balance, and payments made.
+        var cardIds = visible.Where(d => d.AccountId is not null).Select(d => d.AccountId!.Value).ToList();
+        var cardOwed = visible.Where(d => d.AccountId is not null).Sum(d => d.BalanceCents);
+        var loans = visible.Where(d => d.AccountId is null).Sum(d => d.BalanceCents);
+        var since = start.AddMonths(-12);
+        var cardTxns = await db.Transactions.AsNoTracking().Where(t => cardIds.Contains(t.AccountId) && t.Date >= since)
+            .Select(t => new { t.Date, t.AmountCents, t.Kind }).ToListAsync(ct);
+        var first = await db.Transactions.Where(t => cardIds.Contains(t.AccountId)).MinAsync(t => (DateOnly?)t.Date, ct);
+        var history = new List<DebtHistoryPoint>();
+        for (var i = 12; i >= 1; i--)
+        {
+            var m = start.AddMonths(-i);
+            var end = m.AddMonths(1).AddDays(-1);
+            if (first is null || end < first) continue;
+            var owed = cardOwed - cardTxns.Where(t => t.Date > end).Sum(t => t.AmountCents) + loans;
+            var paid = -cardTxns.Where(t => t.Kind == Core.Transactions.TransactionKind.CardPayment && t.AmountCents < 0 && t.Date >= m && t.Date <= end).Sum(t => t.AmountCents);
+            history.Add(new DebtHistoryPoint(m, Math.Max(0, owed), paid));
+        }
+
         return new DebtSummaryDto(
             visible.Sum(d => d.BalanceCents), visible.Sum(d => d.StartingBalanceCents),
             visible.Sum(d => Math.Max(0, d.StartingBalanceCents - d.BalanceCents)), minimums,
-            dtos.Count(d => d.NeedsDetails), dtos, planDto, cmp);
+            dtos.Count(d => d.NeedsDetails), dtos, planDto, cmp, history);
     }
 
     /// <summary>The debts ready for the plan, for the budget generator and the sweep (cards only).</summary>

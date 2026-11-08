@@ -114,8 +114,13 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
     {
         var rules = await db.CategoryRules.Where(r => r.HouseholdId == householdId)
             .Select(r => new MerchantRule(r.CategoryId, r.Pattern, r.CreatedUtc)).ToListAsync(ct);
-        var categories = await db.Categories.Where(c => c.HouseholdId == householdId && !c.IsHidden)
-            .ToDictionaryAsync(c => c.Name, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
+        var shown = await db.Categories.Where(c => c.HouseholdId == householdId && !c.IsHidden)
+            .Select(c => new { c.Name, c.Id, c.MergedNames }).ToListAsync(ct);
+        var categories = shown.ToDictionary(c => c.Name, c => c.Id, StringComparer.OrdinalIgnoreCase);
+        // A merged category answers to the names it absorbed too (DECISIONS.md 144), unless one is back as its own.
+        foreach (var c in shown)
+            foreach (var old in c.MergedNames)
+                categories.TryAdd(old, c.Id);
 
         // What the user chose by hand, per merchant (only categories that still exist).
         var choices = await db.Transactions
