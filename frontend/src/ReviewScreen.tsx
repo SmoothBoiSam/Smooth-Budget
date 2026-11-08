@@ -10,10 +10,13 @@ import {
   type Transaction,
   type TransactionContext,
 } from './api'
+import BillsSection from './BillsSection'
 import { ErrorNotice, Loading } from './ui'
 import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
+
+const partFromHash = () => (window.location.hash.startsWith('#/review/bills') ? 'bills' : 'transactions')
 
 
 /** Partner money first, then purchases with no category, then the app's least certain guesses, then likely ones. */
@@ -28,7 +31,18 @@ function rank(t: Transaction) {
  * Cards go one at a time with the app's guess up front; the list is for confirming the likely ones in bulk.
  * Nothing here is settled until the user says so (DECISIONS.md 80).
  */
-export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: (count?: number) => void; onSignedOut: () => void }) {
+export default function ReviewScreen({
+  onChanged,
+  onSignedOut,
+  billsCount,
+  onBillsCount,
+}: {
+  onChanged: (count?: number) => void
+  onSignedOut: () => void
+  billsCount: number
+  onBillsCount: (n: number) => void
+}) {
+  const [part, setPart] = useState<'transactions' | 'bills'>(partFromHash)
   const [scope, setScope] = useState<Scope>('todo')
   const [mode, setMode] = useState<'cards' | 'list'>('cards')
   const [queue, setQueue] = useState<Transaction[] | null>(null)
@@ -75,6 +89,18 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: (c
       .catch(fail)
   }, [fail])
 
+  // A link to #/review/bills (a bill line on the Budget tab, a notification) switches parts even while Review is open.
+  useEffect(() => {
+    const onHash = () => setPart(partFromHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  function goTo(p: 'transactions' | 'bills') {
+    setPart(p)
+    window.history.replaceState(null, '', p === 'bills' ? '#/review/bills' : '#/review')
+  }
+
   /** After one card: drop it locally (no jumpy reload), refresh the counts and the badge. */
   async function done(id: string, message: string) {
     setNotice(message)
@@ -109,9 +135,43 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: (c
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <header className="flex items-baseline justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Review</h1>
-        <div role="tablist" aria-label="View" className="flex rounded-full bg-slate-200/70 p-0.5 text-xs font-medium">
+      <h1 className="text-2xl font-bold tracking-tight">Review</h1>
+      {/* Two parts (DECISIONS.md 152): transactions to confirm, and bills the app found or that changed. */}
+      <div role="tablist" aria-label="What to review" className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-slate-200/70 p-1 text-sm font-semibold">
+        {(['transactions', 'bills'] as const).map((p) => {
+          const n = p === 'transactions' ? todoCount : billsCount
+          return (
+            <button
+              key={p}
+              role="tab"
+              type="button"
+              aria-selected={part === p}
+              onClick={() => goTo(p)}
+              className={`flex items-center justify-center gap-1.5 rounded-lg py-2 ${part === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+            >
+              {p === 'transactions' ? 'Transactions' : 'Bills'}
+              {n != null && n > 0 && (
+                <span className="inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] leading-5" style={{ backgroundColor: '#DC2626', color: '#fff' }}>
+                  {n > 99 ? '99+' : n}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {part === 'bills' ? (
+        <BillsSection onSignedOut={onSignedOut} onCount={onBillsCount} />
+      ) : (
+      <>
+      <header className="mt-4 flex items-baseline justify-between gap-3">
+        <p className="text-sm text-slate-500">
+          New purchases are sorted for you right away. Confirm each one or change it.{' '}
+          <a href="#/budget/plan" className="font-medium text-slate-700 underline">
+            Find categories from my history
+          </a>
+        </p>
+        <div role="tablist" aria-label="View" className="flex shrink-0 rounded-full bg-slate-200/70 p-0.5 text-xs font-medium">
           {(['cards', 'list'] as const).map((m) => (
             <button
               key={m}
@@ -126,12 +186,6 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: (c
           ))}
         </div>
       </header>
-      <p className="mt-1 text-sm text-slate-500">
-        New purchases are sorted for you right away. Confirm each one or change it.{' '}
-        <a href="#/budget/plan" className="font-medium text-slate-700 underline">
-          Find categories from my history
-        </a>
-      </p>
 
       {scopes.length > 1 && (
       <div className="mt-4 flex gap-2" role="tablist" aria-label="Which transactions">
@@ -269,6 +323,8 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: (c
           )}
         </>
       )}
+      </>
+      )}
     </div>
   )
 }
@@ -352,13 +408,9 @@ function ReviewCard({
     setCategoryId(list.some((c) => c.id === categoryId) ? categoryId : list.length === 1 ? list[0].id : null)
   }
 
-  async function save(override?: { transfer?: boolean }) {
+  async function save() {
     setBusy(true)
     try {
-      if (override?.transfer) {
-        await budgetApi.updateTransaction(t.id, null, true, null)
-        return onDone(`${titleCase(t.merchant)} is a transfer: never counted as spending.`)
-      }
       if (partnerIn && mode === 'contribution') {
         await budgetApi.updateTransaction(t.id, null, false, null, { partnerPurpose: 'contribution' })
         return onDone(`Counted as money from ${first}.`)
@@ -528,11 +580,6 @@ function ReviewCard({
         <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
           I don’t remember
         </button>
-        {!partnerIn && (
-          <button type="button" onClick={() => void save({ transfer: true })} disabled={busy} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
-            It’s a transfer
-          </button>
-        )}
         <button type="button" onClick={onSkip} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
           Skip for now
         </button>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ApiError, budgetApi, recurringApi, type Category, type RecurringItem, type RecurringSummary, type RecurringUpdate } from './api'
+import { ApiError, budgetApi, isNewFind, needsLook, recurringApi, type Category, type RecurringItem, type RecurringSummary, type RecurringUpdate } from './api'
 import { ErrorNotice, Loading } from './ui'
 import { formatCents, formatDay } from './format'
 
@@ -12,11 +12,11 @@ const every: Record<RecurringItem['frequency'], string> = {
 }
 
 /**
- * Bills and subscriptions (SPEC 4.7), found from your transactions: what needs a look (price changes, charges
- * that stopped, possible duplicates), monthly and annual totals, and each item with its next expected date.
- * Nothing here is entered by hand; you confirm, rename, retype, set a due day, or dismiss.
+ * Review → Bills (SPEC 4.7, DECISIONS.md 152), found from your transactions: what needs a look first (newly found
+ * charges filed as spending, price changes, charges that stopped, possible duplicates), then monthly and annual totals
+ * and every bill with its next expected date. Nothing here is entered by hand; you confirm, rename, move, or dismiss.
  */
-export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }) {
+export default function BillsSection({ onSignedOut, onCount }: { onSignedOut: () => void; onCount: (needsLook: number) => void }) {
   const [s, setS] = useState<RecurringSummary | null>(null)
   const [open, setOpen] = useState<RecurringItem | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -37,16 +37,17 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
       setS(summary)
       setCategories(cats)
       setError(null)
-      // A link to one bill (#/bills/<key>, from the Budget tab) opens it.
-      const key = decodeURIComponent(window.location.hash.replace(/^#\/?bills\/?/, ''))
+      onCount(summary.items.filter(needsLook).length)
+      // A link to one bill (#/review/bills/<key>, from the Budget tab) opens it.
+      const key = decodeURIComponent(window.location.hash.replace(/^#\/?review\/bills\/?/, ''))
       if (key) {
         setOpen(summary.items.find((i) => i.key === key) ?? null)
-        window.history.replaceState(null, '', '#/bills')
+        window.history.replaceState(null, '', '#/review/bills')
       }
     } catch (e) {
       fail(e)
     }
-  }, [fail])
+  }, [fail, onCount])
 
   useEffect(() => {
     void load()
@@ -75,18 +76,14 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
     }
   }
 
-  const alerts = s?.items.filter((i) => i.status === 'priceUp' || i.status === 'priceDown' || i.status === 'possiblyCanceled' || i.possibleDuplicate) ?? []
+  const alerts = s?.items.filter(needsLook) ?? []
   const counted = (i: RecurringItem) => i.status !== 'possiblyCanceled' && i.status !== 'canceled'
   // Bills and subscriptions are one list (DECISIONS.md 143).
   const bills = s?.items ?? []
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <a href="#/more" className="text-sm font-medium text-slate-500">
-        ‹ More
-      </a>
-      <h1 className="mt-1 text-2xl font-bold tracking-tight">Bills</h1>
-      <p className="mt-1 text-sm text-slate-500">Found from your transactions: the same merchant, a similar amount, on a regular schedule.</p>
+    <div>
+      <p className="mt-1 text-sm text-slate-500">Found from your transactions: the same store, a similar amount, on a regular schedule.</p>
 
       {notice && (
         <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -112,7 +109,7 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
               <ul className="mt-2 space-y-2">
                 {alerts.map((i) => (
                   <li key={i.key}>
-                    <Alert item={i} onUpdate={update} onOpen={() => setOpen(i)} />
+                    <Alert item={i} onUpdate={update} onOpen={() => setOpen(i)} onTrackAsBill={trackAsBill} />
                   </li>
                 ))}
               </ul>
@@ -150,8 +147,40 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
   )
 }
 
-function Alert({ item: i, onUpdate, onOpen }: { item: RecurringItem; onUpdate: (u: RecurringUpdate, m: string) => void; onOpen: () => void }) {
+function Alert({
+  item: i,
+  onUpdate,
+  onOpen,
+  onTrackAsBill,
+}: {
+  item: RecurringItem
+  onUpdate: (u: RecurringUpdate, m: string) => void
+  onOpen: () => void
+  onTrackAsBill: (i: RecurringItem) => void
+}) {
   const box = 'rounded-xl px-4 py-3 text-sm ring-1'
+  if (isNewFind(i))
+    return (
+      <div className={`${box} bg-white text-slate-700 ring-slate-200`}>
+        <p>
+          <span className="font-semibold">{i.name}</span> looks recurring: {formatCents(i.amountCents)} {every[i.frequency]}
+          {i.accountName && ` on ${i.accountName}`}, filed {i.categoryName ? `under ${i.categoryName}` : 'with no category'}.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold">
+          <button type="button" onClick={() => onTrackAsBill(i)} className="underline">
+            Make it a bill line
+          </button>
+          {i.categoryName && (
+            <button type="button" onClick={() => onUpdate({ key: i.key, confirmed: true }, `${i.name} stays under ${i.categoryName}.`)} className="underline">
+              Keep it in {i.categoryName}
+            </button>
+          )}
+          <button type="button" onClick={() => onUpdate({ key: i.key, dismissed: true }, `${i.name} won't show as recurring.`)} className="underline">
+            It isn’t recurring
+          </button>
+        </div>
+      </div>
+    )
   if (i.status === 'priceUp' || i.status === 'priceDown')
     return (
       <div className={`${box} bg-amber-50 text-amber-900 ring-amber-200`}>

@@ -195,7 +195,9 @@ export const budgetApi = {
   createAccount: (name: string, type: Account['type'], mask: string | null) =>
     request<Account>('POST', '/accounts', { name, type, mask }),
   categories: () => request<Category[]>('GET', '/budget/categories'),
-  monthTransactions: () => request<{ from: string; to: string; items: Transaction[] }>('GET', '/transactions'),
+  /** back = how many budget months before this one (0 = this month). */
+  monthTransactions: (back = 0) =>
+    request<{ from: string; to: string; items: Transaction[]; label: string | null }>('GET', back > 0 ? `/transactions?back=${back}` : '/transactions'),
   /** Every transaction matching a store, description, category or amount; newest first, up to 100. */
   search: (q: string) => request<Transaction[]>('GET', `/transactions/search?q=${encodeURIComponent(q)}`),
   inbox: () => request<Transaction[]>('GET', '/transactions/inbox'),
@@ -791,7 +793,7 @@ export interface PayAmount {
 }
 export interface PlanItem {
   key: string
-  kind: 'keep' | 'debt' | 'sweep' | 'savings' | 'spending'
+  kind: 'keep' | 'debt' | 'sweep' | 'savings'
   label: string
   cents: number
   destination: string
@@ -1028,9 +1030,17 @@ export const paydayApi = {
 
 // Phone notifications (DECISIONS.md 151).
 export const pushApi = {
-  status: () => request<{ enabled: boolean; publicKey: string | null }>('GET', '/push'),
+  status: () => request<{ enabled: boolean; publicKey: string | null; problem: string | null }>('GET', '/push'),
   subscribe: (s: PushSubscriptionJSON) =>
     request<void>('POST', '/push/subscribe', { endpoint: s.endpoint, keys: { p256dh: s.keys?.p256dh, auth: s.keys?.auth } }),
   unsubscribe: (endpoint: string) => request<void>('POST', '/push/unsubscribe', { endpoint }),
   test: () => request<void>('POST', '/push/test'),
 }
+
+/** A recurring charge the app found under spending (or no category) that you haven't said anything about yet. */
+export const isNewFind = (i: RecurringItem) =>
+  !i.inBillCategory && !i.confirmed && i.status !== 'possiblyCanceled' && i.status !== 'canceled'
+
+/** What Review → Bills asks about (DECISIONS.md 152): new finds, price changes, charges that stopped, possible duplicates. */
+export const needsLook = (i: RecurringItem) =>
+  isNewFind(i) || i.status === 'priceUp' || i.status === 'priceDown' || i.status === 'possiblyCanceled' || i.possibleDuplicate

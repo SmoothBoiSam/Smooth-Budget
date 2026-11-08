@@ -10,7 +10,8 @@ type State =
   | { kind: 'ready'; on: boolean; publicKey: string }
 
 function keyBytes(base64url: string): Uint8Array<ArrayBuffer> {
-  const b64 = (base64url + '='.repeat((4 - (base64url.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')
+  const clean = base64url.replace(/[^A-Za-z0-9_+/-]/g, '')
+  const b64 = (clean + '='.repeat((4 - (clean.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')
   const raw = atob(b64)
   const out = new Uint8Array(new ArrayBuffer(raw.length))
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
@@ -37,7 +38,7 @@ export default function NotificationSetting() {
         const status = await pushApi.status()
         const reg = await registration()
         let next: State
-        if (!status.enabled || !status.publicKey) next = { kind: 'unavailable', why: "Notifications aren't set up on the server yet." }
+        if (!status.enabled || !status.publicKey) next = { kind: 'unavailable', why: status.problem ?? "Notifications aren't set up on the server yet." }
         else if (isIos && !standalone)
           next = { kind: 'unavailable', why: 'On iPhone, add Smooth Budget to your Home Screen first (Share → Add to Home Screen), then open it from there.' }
         else if (!reg) next = { kind: 'unavailable', why: 'This browser can’t show notifications from Smooth Budget.' }

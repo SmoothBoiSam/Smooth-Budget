@@ -251,7 +251,6 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     {
         var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
         string Label(Account a) => a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}";
-        var checking = accounts.Where(a => a.Type == AccountType.Checking).OrderBy(a => a.CreatedUtc).Select(Label).FirstOrDefault() ?? "Checking";
         var savingsAccount = accounts.Where(a => a.Type == AccountType.Savings).OrderBy(a => a.CreatedUtc).Select(Label).FirstOrDefault() ?? "savings";
         var cards = accounts.Where(a => a.Type == AccountType.CreditCard).SelectMany(a => new[] { a.Name, Label(a) }).ToHashSet();
         var categories = await db.Categories.AsNoTracking().Where(x => x.HouseholdId == householdId && !x.IsHidden).ToListAsync(ct);
@@ -259,9 +258,14 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var savingsMonthly = categories.Where(x => x.Type == CategoryType.SavingsTransfer).Sum(x => x.MonthlyLimitCents);
         var savingsCategories = categories.Where(x => x.Type == CategoryType.SavingsTransfer).Select(x => x.Id).ToHashSet();
         var debts = await db.DebtAccounts.AsNoTracking().Include(d => d.Account).Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0).ToListAsync(ct);
-        var target = (c.Household.DebtStrategy == DebtStrategy.Snowball
+        var snowball = c.Household.DebtStrategy == DebtStrategy.Snowball;
+        var targetDebt = (snowball
             ? debts.OrderBy(d => d.BalanceCents)
-            : debts.OrderByDescending(d => d.AprBps ?? 0).ThenByDescending(d => d.BalanceCents)).Select(d => d.Account is { } a ? Label(a) : d.Name).FirstOrDefault() ?? "your card";
+            : debts.OrderByDescending(d => d.AprBps ?? 0).ThenByDescending(d => d.BalanceCents)).FirstOrDefault();
+        string DebtLabel(DebtAccount d) => d.Account is { } a ? Label(a) : d.Name;
+        var target = targetDebt is null ? "your card" : DebtLabel(targetDebt);
+        // With minimums known, each card gets its own line: its minimum, plus the extra on the target (DECISIONS.md 155).
+        var withMinimums = debts.Where(d => d.MinimumPaymentCents > 0 || d == targetDebt).OrderByDescending(d => d == targetDebt).ThenBy(d => d.Name).ToList();
         var items = (await recurring.SummaryAsync(householdId, ct)).Items
             .Where(i => i.Status is not ("possiblyCanceled" or "canceled") && !cards.Contains(i.AccountName)).ToList();
         var sweeps = await db.SweepTasks.AsNoTracking().Where(s => s.HouseholdId == householdId)
@@ -295,26 +299,46 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 return new PlanBill($"bill:{b.Key}", b.Name, mine, b.NextExpected, b.AccountName,
                     covered > 0 ? $"{c.Household.PartnerName ?? "Your partner"} covers {PayEngine.Dollars(Math.Min(covered, b.AmountCents))} of {b.Name}." : null);
             }).ToList();
-            var transfers = new List<PlanTransfer>
+            var debtShare = PaydayPlan.Share(debtMonthly, inMonth.Count, index);
+            var transfers = new List<PlanTransfer>();
+            if (withMinimums.Count > 1)
             {
-                new("debt", "Card payment", PaydayPlan.Share(debtMonthly, inMonth.Count, index), target,
-                    inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(debtMonthly)} card payment in your budget." : $"Your budget's {PayEngine.Dollars(debtMonthly)} card payment."),
-            };
+                var split = PaydayPlan.SplitCardPayment(debtShare,
+                    withMinimums.Select(d => new CardMinimum($"debt:{d.Id}", DebtLabel(d),
+                        PaydayPlan.Share(Math.Min(d.MinimumPaymentCents ?? 0, d.BalanceCents), inMonth.Count, index))).ToList(),
+                    $"debt:{targetDebt!.Id}");
+                var why = snowball ? "smallest balance" : "highest interest";
+                var checkShare = inMonth.Count > 1 ? " (this check's share)" : "";
+                transfers.AddRange(split.Select(s => s.Card.Key == $"debt:{targetDebt.Id}"
+                    ? new PlanTransfer(s.Card.Key, s.ExtraCents > 0 ? "Minimum + extra" : "Minimum payment", s.Cents, s.Card.Destination,
+                        s.ExtraCents > 0
+                            ? $"The {PayEngine.Dollars(s.Card.MinimumCents)} minimum{checkShare}, plus {PayEngine.Dollars(s.ExtraCents)} extra: this card has the {why}."
+                            : $"The minimum{checkShare}. This card has the {why}, so any extra your budget allows goes here.")
+                    : new PlanTransfer(s.Card.Key, "Minimum payment", s.Cents, s.Card.Destination,
+                        $"Just the minimum{checkShare}. Extra goes to {target} first ({why}).")));
+            }
+            else
+                transfers.Add(new("debt", "Card payment", debtShare, target,
+                    inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(debtMonthly)} card payment in your budget." : $"Your budget's {PayEngine.Dollars(debtMonthly)} card payment."));
             if (i == 0)
                 transfers.AddRange(sweeps.Where(s => s.DoneUtc == null || (current && s.DoneUtc >= pay.ToDateTime(TimeOnly.MinValue)))
                     .Select(s => new PlanTransfer($"sweep:{s.Id}", "Last month's leftover", s.AmountCents, s.Destination, "The rollover sweep from your last closed month.")));
             transfers.Add(new("savings", "Savings", PaydayPlan.Share(savingsMonthly, inMonth.Count, index), savingsAccount,
                 inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(savingsMonthly)} savings in your budget." : $"Your budget's {PayEngine.Dollars(savingsMonthly)} savings."));
 
-            var plan = PaydayPlan.Build(landedNet ?? f.NetCents, bills, transfers, checking);
+            var plan = PaydayPlan.Build(landedNet ?? f.NetCents, bills, transfers);
 
             // What happened since payday, for the check you're on now.
             var moves = current
                 ? await db.Transactions.AsNoTracking()
                     .Where(t => t.HouseholdId == householdId && t.Date >= pay && t.Date < next && (t.Kind == TransactionKind.CardPayment || t.IsTransfer))
-                    .Select(t => new { t.AmountCents, t.Kind, Type = t.Account.Type, t.CategoryId }).ToListAsync(ct)
+                    .Select(t => new { t.AmountCents, t.Kind, Type = t.Account.Type, t.CategoryId, t.AccountId }).ToListAsync(ct)
                 : [];
             var cardPaid = moves.Where(m => m.Kind == TransactionKind.CardPayment && m.Type == AccountType.Checking && m.AmountCents > 0).Sum(m => m.AmountCents);
+            // Per card: the payment as the card's own account shows it (a credit). Without those, the checking side for all.
+            long PaidTo(Guid? accountId) => moves.Where(m => m.Type == AccountType.CreditCard && m.AccountId == accountId && m.AmountCents < 0).Sum(m => -m.AmountCents);
+            var cardSideSeen = moves.Any(m => m.Type == AccountType.CreditCard && m.AmountCents < 0);
+            var allDebtLines = plan.Items.Where(x => x.Kind == "debt").Sum(x => x.Cents);
             var intoSavings = accounts.Any(a => a.Type == AccountType.Savings)
                 ? moves.Where(m => m.Type == AccountType.Savings && m.AmountCents < 0).Sum(m => -m.AmountCents)
                 : moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.CategoryId is { } id && savingsCategories.Contains(id)).Sum(m => m.AmountCents);
@@ -335,6 +359,17 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                         return acct.CurrentBalanceCents >= x.Cents
                             ? (true, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}, enough for these.")
                             : (false, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}: {PayEngine.Dollars(x.Cents - acct.CurrentBalanceCents)} short for these.");
+                    case "debt" when x.Key.StartsWith("debt:", StringComparison.Ordinal):
+                        if (x.Cents <= 0) return (true, null);
+                        var card = debts.FirstOrDefault(d => x.Key == $"debt:{d.Id}");
+                        if (cardSideSeen && card?.AccountId is { } cardAccount)
+                        {
+                            var paid = PaidTo(cardAccount);
+                            return paid >= x.Cents ? (true, $"Paid {PayEngine.Dollars(paid)} since payday.")
+                                : (false, paid > 0 ? $"Paid {PayEngine.Dollars(paid)} of {PayEngine.Dollars(x.Cents)} so far." : "No payment to this card seen since payday yet.");
+                        }
+                        return cardPaid >= allDebtLines ? (true, $"Sent {PayEngine.Dollars(cardPaid)} to your cards since payday.")
+                            : (false, cardPaid > 0 ? $"Sent {PayEngine.Dollars(cardPaid)} to your cards so far, of {PayEngine.Dollars(allDebtLines)} in all." : "No card payment seen since payday yet.");
                     case "debt":
                         return x.Cents <= 0 ? (true, null)
                             : cardPaid >= x.Cents ? (true, $"Sent {PayEngine.Dollars(cardPaid)} since payday.")

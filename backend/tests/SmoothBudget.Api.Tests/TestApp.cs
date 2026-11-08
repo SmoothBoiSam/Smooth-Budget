@@ -58,7 +58,7 @@ public class TestApp : WebApplicationFactory<Program>
             services.AddSingleton<TimeProvider>(Clock);
             // Never reach a real push service; notifications are on with throwaway keys.
             services.RemoveAll<SmoothBudget.Api.Notifications.PushOptions>();
-            services.AddSingleton(new SmoothBudget.Api.Notifications.PushOptions { PublicKey = "test-public", PrivateKey = "test-private" });
+            services.AddSingleton(new SmoothBudget.Api.Notifications.PushOptions { PublicKey = TestPushKeys.Public, PrivateKey = TestPushKeys.Private });
             services.RemoveAll<SmoothBudget.Api.Notifications.IPushSender>();
             services.AddSingleton<SmoothBudget.Api.Notifications.IPushSender>(Push);
 
@@ -114,4 +114,11 @@ public sealed class FakePushSender : SmoothBudget.Api.Notifications.IPushSender
         Sent.Enqueue((device.Endpoint, message));
         return Task.FromResult(true);
     }
+}
+
+/// <summary>Keys in the right shape (a P-256 point and a 32-byte scalar) that never sign anything real.</summary>
+public static class TestPushKeys
+{
+    public static readonly string Public = Convert.ToBase64String([4, .. Enumerable.Repeat((byte)7, 64)]).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    public static readonly string Private = Convert.ToBase64String(Enumerable.Repeat((byte)9, 32).ToArray()).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }

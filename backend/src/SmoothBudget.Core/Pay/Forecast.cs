@@ -72,19 +72,25 @@ public static class PayForecast
 public record PlanBill(string Key, string Name, long Cents, DateOnly Due, string Account, string? Note = null);
 public record PlanTransfer(string Key, string Label, long Cents, string Destination, string Why);
 
-/// <param name="Kind">"keep" (bills to leave in an account), "debt", "sweep", "savings" or "spending".</param>
+/// <param name="Kind">"keep" (bills to leave in an account), "debt", "sweep" or "savings".</param>
 /// <param name="Bills">For "keep": the bills it covers.</param>
 public record PlanItem(string Key, string Kind, string Label, long Cents, string Destination, string Why, IReadOnlyList<PlanBill>? Bills = null);
 
 public record PaydayPlanResult(IReadOnlyList<PlanItem> Items, long ShortCents);
 
+/// <param name="MinimumCents">This check's share of the card's minimum payment.</param>
+public record CardMinimum(string Key, string Destination, long MinimumCents);
+/// <param name="ExtraCents">The part beyond the minimum (only the strategy's target card gets any).</param>
+public record CardShare(CardMinimum Card, long Cents, long ExtraCents);
+
 /// <summary>
 /// The payday plan (SPEC 4.6): each expected check allocated across the bills due before the next payday, debt
-/// payments, the rollover sweep, savings and spending money, each with where it goes.
+/// payments, the rollover sweep and savings, each with where it goes. What's left is spending money, which Home shows
+/// as Left to Spend, so the plan doesn't list it (DECISIONS.md 154).
 /// </summary>
 public static class PaydayPlan
 {
-    public static PaydayPlanResult Build(long netCents, IReadOnlyList<PlanBill> bills, IReadOnlyList<PlanTransfer> transfers, string spendingAccount)
+    public static PaydayPlanResult Build(long netCents, IReadOnlyList<PlanBill> bills, IReadOnlyList<PlanTransfer> transfers)
     {
         // One "keep" line per account for every bill due from it before the next payday (DECISIONS.md 138).
         var items = bills.GroupBy(b => b.Account).Select(g =>
@@ -95,13 +101,21 @@ public static class PaydayPlan
                 "Bills paid from this account before your next payday." + string.Concat(list.Where(b => b.Note is not null).Select(b => " " + b.Note)), list);
         }).ToList();
         items.AddRange(transfers.Where(t => t.Cents > 0).Select(t => new PlanItem(t.Key, t.Key.Split(':')[0], t.Label, t.Cents, t.Destination, t.Why)));
-        var used = items.Sum(i => i.Cents);
-        var spending = netCents - used;
-        items.Add(new PlanItem("spending", "spending", "Spending money", Math.Max(0, spending), spendingAccount, "What's left for day-to-day spending until the next check."));
-        return new PaydayPlanResult(items, Math.Max(0, -spending));
+        return new PaydayPlanResult(items, Math.Max(0, items.Sum(i => i.Cents) - netCents));
     }
 
     /// <summary>A monthly amount split evenly over the checks paid in that budget month, the last check taking any odd cent.</summary>
     public static long Share(long monthlyCents, int checksInMonth, int index) =>
         checksInMonth <= 1 ? monthlyCents : monthlyCents / checksInMonth + (index == checksInMonth - 1 ? monthlyCents % checksInMonth : 0);
+
+    /// <summary>
+    /// Splits one check's card payment (DECISIONS.md 155): every card gets its minimum first, and only what's left over
+    /// (the extra) goes to the card the strategy picks. If the payment doesn't cover every minimum, the minimums are still
+    /// listed in full, since missing one costs a fee and hurts your credit; the plan then shows the check as short.
+    /// </summary>
+    public static IReadOnlyList<CardShare> SplitCardPayment(long cents, IReadOnlyList<CardMinimum> cards, string targetKey)
+    {
+        var extra = Math.Max(0, cents - cards.Sum(c => c.MinimumCents));
+        return cards.Select(c => new CardShare(c, c.MinimumCents + (c.Key == targetKey ? extra : 0), c.Key == targetKey ? extra : 0)).ToList();
+    }
 }

@@ -12,11 +12,38 @@ namespace SmoothBudget.Api.Notifications;
 
 public class PushOptions
 {
-    public string? PublicKey { get; init; }
-    public string? PrivateKey { get; init; }
+    private readonly string? _publicKey, _privateKey;
+
+    /// <summary>Base64url. Pasting quirks are forgiven: spaces, quotes, padding, or the whole "VAPID_PUBLIC_KEY=..." line.</summary>
+    public string? PublicKey { get => _publicKey; init => _publicKey = Clean(value); }
+    public string? PrivateKey { get => _privateKey; init => _privateKey = Clean(value); }
     /// <summary>Who push services can contact about this sender: the app's own address, never a person's email.</summary>
     public string Subject { get; init; } = "https://smoothbudget.onrender.com";
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(PublicKey) && !string.IsNullOrWhiteSpace(PrivateKey);
+
+    /// <summary>Why notifications are off, in words for the More screen; null when they're on.</summary>
+    public string? Problem =>
+        string.IsNullOrEmpty(PublicKey) || string.IsNullOrEmpty(PrivateKey) ? "Notifications aren't set up on the server yet."
+        : Bytes(PublicKey) is not { Length: 65 } p || p[0] != 4 ? "The server's VAPID_PUBLIC_KEY isn't a valid key. Copy it again from .env into Render."
+        : Bytes(PrivateKey) is not { Length: 32 } ? "The server's VAPID_PRIVATE_KEY isn't a valid key. Copy it again from .env into Render."
+        : null;
+
+    public bool IsConfigured => Problem is null;
+
+    public static string? Clean(string? key)
+    {
+        if (key is null) return null;
+        var k = key.Trim().Trim('"', '\'', '`').Trim();
+        if (k.StartsWith("VAPID_", StringComparison.OrdinalIgnoreCase) && k.IndexOf('=') is var eq and > 0) k = k[(eq + 1)..].Trim().Trim('"', '\'').Trim();
+        return new string(k.Where(ch => !char.IsWhiteSpace(ch)).ToArray()).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    private static byte[]? Bytes(string base64Url)
+    {
+        var b64 = base64Url.Replace('-', '+').Replace('_', '/');
+        b64 += new string('=', (4 - b64.Length % 4) % 4);
+        try { return Convert.FromBase64String(b64); }
+        catch (FormatException) { return null; }
+    }
 }
 
 public record PushMessage(string Title, string Body, string Url, string Tag);
@@ -113,7 +140,7 @@ public class NotificationService(
         var due = (await recurring.UpcomingAsync(householdId, 20, ct)).Where(b => b.Date == tomorrow).ToList();
         if (due.Count > 0)
             list.Add(($"bills:{tomorrow:yyyy-MM-dd}", new PushMessage(due.Count == 1 ? "Bill due tomorrow" : "Bills due tomorrow",
-                string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/bills", "bills")));
+                string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/review/bills", "bills")));
 
         var b = await budget.GetAsync(householdId, ct);
         foreach (var line in b.Groups.Where(g => g.CountsTowardLeftToSpend).SelectMany(g => g.Categories).Where(c => c.RemainingCents < 0 && c.LimitCents > 0))
@@ -172,7 +199,7 @@ public class NotificationBackground(IServiceScopeFactory scopes, PushOptions opt
 public record PushKeys(string P256dh, string Auth);
 public record PushSubscribeRequest(string Endpoint, PushKeys Keys);
 public record PushUnsubscribeRequest(string Endpoint);
-public record PushStatusDto(bool Enabled, string? PublicKey);
+public record PushStatusDto(bool Enabled, string? PublicKey, string? Problem = null);
 
 public static class NotificationEndpoints
 {
@@ -186,11 +213,11 @@ public static class NotificationEndpoints
     public static void MapNotificationEndpoints(this WebApplication app)
     {
         var g = app.MapGroup("/api/push").RequireAuthorization();
-        g.MapGet("", (PushOptions o) => new PushStatusDto(o.IsConfigured, o.IsConfigured ? o.PublicKey : null));
+        g.MapGet("", (PushOptions o) => new PushStatusDto(o.IsConfigured, o.IsConfigured ? o.PublicKey : null, o.Problem));
 
         g.MapPost("/subscribe", async (PushSubscribeRequest req, HttpContext ctx, AppDbContext db, PushOptions o, TimeProvider clock, CancellationToken ct) =>
         {
-            if (!o.IsConfigured) return Results.Problem("Notifications aren't set up on this server.", statusCode: 409);
+            if (!o.IsConfigured) return Results.Problem(o.Problem, statusCode: 409);
             if (!IsPushServiceUrl(req.Endpoint ?? "") || req.Keys is null || string.IsNullOrWhiteSpace(req.Keys.P256dh) || req.Keys.P256dh.Length > 200
                 || string.IsNullOrWhiteSpace(req.Keys.Auth) || req.Keys.Auth.Length > 100)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["endpoint"] = ["That isn't a browser push address."] });
@@ -217,7 +244,7 @@ public static class NotificationEndpoints
 
         g.MapPost("/test", async (HttpContext ctx, NotificationService svc, PushOptions o, CancellationToken ct) =>
         {
-            if (!o.IsConfigured) return Results.Problem("Notifications aren't set up on this server.", statusCode: 409);
+            if (!o.IsConfigured) return Results.Problem(o.Problem, statusCode: 409);
             await svc.SendTestAsync(ctx.User.HouseholdId(), ct);
             return Results.NoContent();
         });

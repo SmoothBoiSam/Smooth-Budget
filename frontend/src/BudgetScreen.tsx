@@ -340,11 +340,9 @@ function Group({
   today: string
 }) {
   const spending = g.countsTowardLeftToSpend
-  // Each detected bill and subscription under the bill line it's filed in (DECISIONS.md 101); ones filed elsewhere
-  // (a streaming charge in Entertainment) are listed after, so every recurring charge shows here individually.
+  // Each detected bill under the bill line it's filed in (DECISIONS.md 101). Ones filed under spending are asked
+  // about in Review → Bills (DECISIONS.md 152).
   const live = bills.filter((b) => b.status !== 'canceled')
-  const lineIds = new Set(g.categories.map((c) => c.id))
-  const elsewhere = live.filter((b) => !b.categoryId || !lineIds.has(b.categoryId))
   const [open, setOpen] = useRemembered(`budget.${g.type}`, true)
   return (
     <section aria-labelledby={`g-${g.type}`} className="mt-7">
@@ -378,22 +376,6 @@ function Group({
           )
         })}
       </ul>
-      {elsewhere.length > 0 && (
-        <>
-          <p className="mt-3 text-xs text-slate-500">
-            Also recurring, but filed under spending categories. Make one its own bill line on the{' '}
-            <a href="#/bills" className="underline">
-              Bills screen
-            </a>
-            .
-          </p>
-          <ul className="mt-1 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white px-4 ring-1 ring-slate-200">
-            {elsewhere.map((b) => (
-              <BillItemRow key={b.key} b={b} month={month} today={today} showCategory />
-            ))}
-          </ul>
-        </>
-      )}
         </>
       )}
     </section>
@@ -423,7 +405,7 @@ function BillItems({ lineId, items, month, today }: { lineId: string; items: Rec
 }
 
 /** One bill or subscription: paid this budget month, due (or late), or next due after it. */
-function BillItemRow({ b, month, today, showCategory }: { b: RecurringItem; month: { start: string; end: string }; today: string; showCategory?: boolean }) {
+function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: string; end: string }; today: string }) {
   const paidThisMonth = b.lastDate >= month.start && b.lastDate <= month.end
   const [text, cls] =
     b.status === 'possiblyCanceled'
@@ -437,12 +419,11 @@ function BillItemRow({ b, month, today, showCategory }: { b: RecurringItem; mont
             : [`Next ${formatDay(b.nextExpected)}`, 'text-slate-400']
   return (
     <li>
-      <a href={`#/bills/${encodeURIComponent(b.key)}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
+      <a href={`#/review/bills/${encodeURIComponent(b.key)}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
         <span className="min-w-0">
           <span className="block truncate">{b.name}</span>
           <span className={`block text-xs ${cls}`}>
             {text}
-            {showCategory && b.categoryName && <span className="text-slate-400"> · in {b.categoryName}</span>}
           </span>
         </span>
         <span className="shrink-0 tabular-nums">
@@ -513,6 +494,25 @@ function SearchableList({ month, onSelect, onError }: { month: Transaction[]; on
   const [q, setQ] = useState('')
   const [found, setFound] = useState<{ q: string; items: Transaction[] } | null>(null)
   const query = q.trim()
+  // Step back through earlier months to check how everything was filed (DECISIONS.md 153). 0 = this month.
+  const [back, setBack] = useState(0)
+  const [earlier, setEarlier] = useState<{ back: number; label: string; items: Transaction[] } | null>(null)
+
+  useEffect(() => {
+    if (back === 0) return
+    const run = { live: true }
+    budgetApi
+      .monthTransactions(back)
+      .then((r) => run.live && setEarlier({ back, label: r.label ?? '', items: r.items }))
+      .catch((e) => run.live && onError(e))
+    return () => {
+      run.live = false
+    }
+    // `month` changes after any save, so an edit in an earlier month shows up right away.
+  }, [back, month, onError])
+
+  const shown = back === 0 ? month : earlier?.back === back ? earlier.items : null
+  const label = back === 0 ? 'This month' : earlier?.back === back ? earlier.label : '…'
 
   useEffect(() => {
     if (query.length < 2) return
@@ -542,14 +542,30 @@ function SearchableList({ month, onSelect, onError }: { month: Transaction[]; on
         aria-label="Search transactions"
         className="mt-4 block w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-base"
       />
-      {!searching && <p className="mt-2 text-xs text-slate-500">This month. Search looks through every month.</p>}
+      {!searching && (
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-white px-2 py-1.5 ring-1 ring-slate-200">
+          <button type="button" onClick={() => setBack(back + 1)} disabled={back >= 120} aria-label="Earlier month" className="rounded-lg px-3 py-1.5 text-lg font-semibold text-slate-600 disabled:opacity-30">
+            ‹
+          </button>
+          <span className="text-sm font-semibold" aria-live="polite">
+            {label}
+          </span>
+          <button type="button" onClick={() => setBack(Math.max(0, back - 1))} disabled={back === 0} aria-label="Later month" className="rounded-lg px-3 py-1.5 text-lg font-semibold text-slate-600 disabled:opacity-30">
+            ›
+          </button>
+        </div>
+      )}
+      {!searching && <p className="mt-2 text-xs text-slate-500">Tap any transaction to change it. Search looks through every month.</p>}
       {searching && results === null && <Loading label="Searching" />}
       {searching && results && (
         <p className="mt-2 text-xs text-slate-500">
           {results.length === 100 ? 'The newest 100 matches' : `${results.length} ${results.length === 1 ? 'match' : 'matches'}`} in every month
         </p>
       )}
-      {!searching && <TransactionList items={month} empty="No transactions this month yet. Import a CSV from More." onSelect={onSelect} />}
+      {!searching && shown === null && <Loading />}
+      {!searching && shown && (
+        <TransactionList items={shown} empty={back === 0 ? 'No transactions this month yet. Import a CSV from More.' : `No transactions in ${label}.`} onSelect={onSelect} />
+      )}
       {searching && results && <TransactionList items={results} empty={`Nothing matches “${query}”.`} onSelect={onSelect} />}
     </>
   )

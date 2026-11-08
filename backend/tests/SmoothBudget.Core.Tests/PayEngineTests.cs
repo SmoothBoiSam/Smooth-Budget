@@ -253,19 +253,28 @@ public class PayEngineTests
     {
         var plan = PaydayPlan.Build(1_500_00,
             [new("bill:rent", "Rent", 850_00, new(2027, 3, 1), "Checking"), new("bill:phone", "Phone", 60_00, new(2027, 2, 25), "Checking")],
-            [new("debt", "Card payment", 200_00, "Test Visa", "Half the month's card payment."), new("savings", "Savings", 100_00, "Test Savings", "Half the month's savings."), new("sweep:x", "Sweep", 0, "Test Visa", "")],
-            "Checking");
+            [new("debt", "Card payment", 200_00, "Test Visa", "Half the month's card payment."), new("savings", "Savings", 100_00, "Test Savings", "Half the month's savings."), new("sweep:x", "Sweep", 0, "Test Visa", "")]);
         // The bills become one "keep" line for the account they're paid from, listing each.
-        Assert.Equal(["keep:Checking", "debt", "savings", "spending"], plan.Items.Select(i => i.Key));
+        Assert.Equal(["keep:Checking", "debt", "savings"], plan.Items.Select(i => i.Key)); // spending money is Home's Left to Spend
         var keep = plan.Items[0];
         Assert.Equal(("2 bills due Feb 25 to Mar 1", 910_00L, "Checking"), (keep.Label, keep.Cents, keep.Destination));
         Assert.Equal(["Phone", "Rent"], keep.Bills!.Select(b => b.Name));
-        Assert.Equal(290_00, plan.Items[^1].Cents);
         Assert.Equal(0, plan.ShortCents);
 
-        var short_ = PaydayPlan.Build(1_000_00, [new("bill:rent", "Rent", 850_00, new(2027, 3, 1), "Checking")], [new("debt", "Card payment", 200_00, "Test Visa", "")], "Checking");
-        Assert.Equal((0L, 50_00L), (short_.Items[^1].Cents, short_.ShortCents));
+        var short_ = PaydayPlan.Build(1_000_00, [new("bill:rent", "Rent", 850_00, new(2027, 3, 1), "Checking")], [new("debt", "Card payment", 200_00, "Test Visa", "")]);
+        Assert.Equal(50_00L, short_.ShortCents);
 
         Assert.Equal((150_00L, 150_01L), (PaydayPlan.Share(300_01, 2, 0), PaydayPlan.Share(300_01, 2, 1)));
+    }
+
+    [Fact]
+    public void Every_card_gets_its_minimum_before_the_extra_goes_to_the_target()
+    {
+        CardMinimum visa = new("debt:visa", "Test Visa", 25_00), store = new("debt:store", "Test Store Card", 35_00);
+        // $200 this check: both minimums ($60), and the other $140 on the target (say the Visa has the higher APR).
+        var split = PaydayPlan.SplitCardPayment(200_00, [visa, store], "debt:visa");
+        Assert.Equal([("debt:visa", 165_00L, 140_00L), ("debt:store", 35_00L, 0L)], split.Select(s => (s.Card.Key, s.Cents, s.ExtraCents)));
+        // A payment smaller than the minimums still lists every minimum in full; nothing extra.
+        Assert.Equal([25_00L, 35_00L], PaydayPlan.SplitCardPayment(40_00, [visa, store], "debt:visa").Select(s => s.Cents));
     }
 }

@@ -29,7 +29,8 @@ public record ReviewSummaryDto(ReviewCounts Month, ReviewCounts Earlier, ReviewC
 public record MerchantHistoryDto(string CategoryName, int Count);
 public record TransactionContextDto(IReadOnlyList<MerchantHistoryDto> History);
 
-public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<TransactionDto> Items);
+/// <param name="Label">The budget month shown ("October 2026"), when one was asked for by how far back it is.</param>
+public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<TransactionDto> Items, string? Label = null);
 
 /// <param name="CategoryId">The category to use; null leaves it uncategorized.</param>
 /// <param name="IsTransfer">True marks it as a transfer (never spending).</param>
@@ -53,19 +54,25 @@ public static partial class TransactionEndpoints
 
         // GET /api/transactions                 -> the current budget month
         // GET /api/transactions?from=..&to=..   -> any date range (inclusive)
-        group.MapGet("/transactions", async (DateOnly? from, DateOnly? to, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
+        // GET /api/transactions?back=2          -> the budget month two before this one (DECISIONS.md 153)
+        group.MapGet("/transactions", async (DateOnly? from, DateOnly? to, int? back, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
+            string? label = null;
             if (from is null || to is null)
             {
                 var h = await db.Households.AsNoTracking().SingleAsync(x => x.Id == householdId, ct);
-                var month = new BudgetMonthCalendar(h.BudgetMonthStartDay).MonthContaining(HomeSummaryService.TodayIn(h.TimeZoneId, clock));
+                var calendar = new BudgetMonthCalendar(h.BudgetMonthStartDay);
+                var month = calendar.MonthContaining(HomeSummaryService.TodayIn(h.TimeZoneId, clock));
+                for (var i = 0; i < Math.Clamp(back ?? 0, 0, 120); i++)
+                    month = calendar.MonthContaining(month.Start.AddDays(-1));
                 from ??= month.Start;
                 to ??= month.End;
+                label = month.Label.ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
             }
             var items = await Project(db.Transactions.Where(t => t.HouseholdId == householdId && t.Date >= from && t.Date <= to))
                 .ToListAsync(ct);
-            return Results.Ok(new TransactionListDto(from.Value, to.Value, items));
+            return Results.Ok(new TransactionListDto(from.Value, to.Value, items, label));
         });
 
         // Search every transaction (DECISIONS.md 150): by store, description or category, or by amount ("12.50" finds

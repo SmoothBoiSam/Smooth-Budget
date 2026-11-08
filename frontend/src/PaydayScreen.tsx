@@ -58,6 +58,7 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
 
   const empty = s && s.scheduleMonths.length === 0 && s.stubCount === 0
   const [historyOpen, setHistoryOpen] = useRemembered('payday.history', true)
+  const [doneOpen, setDoneOpen] = useState(false)
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
@@ -86,14 +87,37 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
       {s && !empty && (
         <>
           <ul className="mt-4 space-y-3">
-            {s.checks.map((c, i) => (
-              <li key={c.payDate}>
-                <CheckCard c={c} first={i === 0} onToggle={(item) => void toggle(c, item)} />
-              </li>
-            ))}
+            {s.checks
+              .filter((c) => !finished(c))
+              .map((c) => (
+                <li key={c.payDate}>
+                  <CheckCard c={c} onToggle={(item) => void toggle(c, item)} />
+                </li>
+              ))}
           </ul>
 
           <DebtSavingsLinks debt={debt} savings={savings} />
+
+          {/* A check whose plan is all done is put away (DECISIONS.md 154), one tap from coming back. */}
+          {s.checks.some(finished) && (
+            <section aria-labelledby="done-h" className="mt-6">
+              <h2 id="done-h">
+                <button type="button" onClick={() => setDoneOpen(!doneOpen)} aria-expanded={doneOpen} className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+                  <Caret open={doneOpen} />
+                  Finished paychecks
+                </button>
+              </h2>
+              {doneOpen && (
+                <ul className="mt-2 space-y-3">
+                  {s.checks.filter(finished).map((c) => (
+                    <li key={c.payDate}>
+                      <CheckCard c={c} onToggle={(item) => void toggle(c, item)} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           {s.history.length > 0 && (
             <section aria-labelledby="hist-h" className="mt-6">
@@ -142,6 +166,9 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
   )
 }
 
+/** A paid check whose every plan item is done. */
+const finished = (c: PayCheck) => c.isCurrent && !!c.plan && c.plan.items.length > 0 && c.plan.items.every((i) => i.done)
+
 /** Debt and Savings, one tap away under the plan (they used to be tabs of their own). */
 function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings: SavingsSummary | null }) {
   const debtLine = !debt
@@ -153,15 +180,15 @@ function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings
     ? 'Goals and what you’ve saved'
     : `${formatCents(savings.totalSavedCents)} saved${savings.thisMonthCents > 0 ? ` · ${formatCents(savings.thisMonthCents)} moved in this month` : ''}`
   return (
-    <div className="mt-4 grid gap-3">
+    <div className="mt-4 space-y-3">
       {(
         [
           ['#/debt', 'Debt', debtLine, icons.debt],
           ['#/savings', 'Savings', savingsLine, icons.savings],
         ] as const
       ).map(([href, title, line, icon]) => (
-        <a key={href} href={href} className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
-          <span className="shrink-0">{icon}</span>
+        <a key={href} href={href} className="flex w-full min-w-0 items-center gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+          <span className="w-7 shrink-0">{icon}</span>
           <span className="min-w-0 flex-1">
             <span className="block font-semibold">{title}</span>
             <span className="block truncate text-sm text-slate-500">{line}</span>
@@ -180,9 +207,34 @@ const monthYear = (iso: string) => {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
-function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onToggle: (item: PlanItem) => void }) {
+function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) => void }) {
   const [open, setOpen] = useState(false)
-  const [planOpen, setPlanOpen] = useState(first)
+  const [planOpen, setPlanOpen] = useState(c.isCurrent)
+  // Future checks start folded to one line (DECISIONS.md 154); the one you're on starts open.
+  const [folded, setFolded] = useState(!c.isCurrent || finished(c))
+  const known = c.hasSchedule || c.landedNetCents !== null
+  if (folded)
+    return (
+      <button
+        type="button"
+        onClick={() => setFolded(false)}
+        aria-expanded={false}
+        className="flex w-full items-center gap-3 rounded-2xl bg-white px-4 py-3 text-left ring-1 ring-slate-200"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">{c.isCurrent ? `Paid ${weekday(c.payDate)}` : weekday(c.payDate)}</span>
+          <span className="block truncate text-xs text-slate-500">
+            {finished(c)
+              ? `All ${c.plan!.items.length} done`
+              : known
+                ? `Covers ${formatDay(c.periodStart)}–${formatDay(c.periodEnd)}`
+                : `Import your ${monthName(c.periodStart)} schedule to forecast it`}
+          </span>
+        </span>
+        {known && <span className="shrink-0 font-semibold tabular-nums">{c.landedNetCents === null && 'about '}{formatCents(c.landedNetCents ?? c.netCents)}</span>}
+        <Caret open={false} />
+      </button>
+    )
   return (
     <article className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <div className="flex items-baseline justify-between gap-3">
@@ -190,8 +242,13 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
           {c.isCurrent ? `Paid ${weekday(c.payDate)}` : weekday(c.payDate)}
           {c.isCurrent && <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">You're on this check</span>}
         </h2>
-        <span className="text-xs text-slate-500">
+        <span className="shrink-0 text-xs text-slate-500">
           Covers {formatDay(c.periodStart)}–{formatDay(c.periodEnd)}
+          {(!c.isCurrent || finished(c)) && (
+            <button type="button" onClick={() => setFolded(true)} className="ml-2 font-medium text-sky-700">
+              Fold
+            </button>
+          )}
         </span>
       </div>
       {!c.hasSchedule && c.landedNetCents === null ? (
@@ -245,7 +302,7 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
               <button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex w-full items-center justify-between text-sm font-semibold">
                 Payday plan
                 <span className="text-xs font-normal text-slate-500">
-                  {c.plan.items.filter((i) => i.kind !== 'spending' && i.done).length} of {c.plan.items.filter((i) => i.kind !== 'spending').length} done
+                  {c.plan.items.filter((i) => i.done).length} of {c.plan.items.length} done
                 </span>
               </button>
               {planOpen && (
@@ -272,7 +329,7 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
   )
 }
 
-/** One part of the payday plan. Spending money is just a number; the rest can be checked off, or are done on their own. */
+/** One part of the payday plan: check it off, or it's done on its own from your accounts. */
 function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
   const [billsOpen, setBillsOpen] = useState(false)
   const body = (
@@ -282,13 +339,6 @@ function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
       <span className="block text-xs text-slate-500">{item.why}</span>
     </span>
   )
-  if (item.kind === 'spending')
-    return (
-      <div className="flex items-start gap-3 px-1 py-1.5">
-        <span aria-hidden className="mt-1.5 size-4 shrink-0 text-center text-slate-400">·</span>
-        {body}
-      </div>
-    )
   return (
     <div className="px-1 py-1.5">
       <label className="flex cursor-pointer items-start gap-3">
@@ -331,8 +381,6 @@ function planText(i: PlanItem) {
   switch (i.kind) {
     case 'keep':
       return `Keep ${amount} in ${i.destination} for ${i.label}`
-    case 'spending':
-      return `Keep ${amount} in ${i.destination} for spending`
     default:
       return `Send ${amount} to ${i.destination} (${i.label.toLowerCase()})`
   }

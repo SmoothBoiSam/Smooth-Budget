@@ -215,3 +215,27 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
             Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PushDevices.AnyAsync(d => d.Endpoint == endpoint));
     }
 }
+
+public class PushKeyTests
+{
+    [Theory]
+    [InlineData("  {0}\n")]
+    [InlineData("\"{0}\"")]
+    [InlineData("VAPID_PUBLIC_KEY={0}")]
+    [InlineData("{0}=")]
+    public void A_pasted_key_is_cleaned_up(string pasted)
+    {
+        var o = new SmoothBudget.Api.Notifications.PushOptions { PublicKey = string.Format(pasted, TestPushKeys.Public), PrivateKey = TestPushKeys.Private };
+        Assert.Equal(TestPushKeys.Public, o.PublicKey);
+        Assert.True(o.IsConfigured);
+    }
+
+    [Fact]
+    public void A_wrong_key_says_so_instead_of_failing_on_the_phone()
+    {
+        var o = new SmoothBudget.Api.Notifications.PushOptions { PublicKey = TestPushKeys.Private, PrivateKey = TestPushKeys.Private };
+        Assert.False(o.IsConfigured);
+        Assert.Contains("VAPID_PUBLIC_KEY", o.Problem);
+        Assert.Equal("Notifications aren't set up on the server yet.", new SmoothBudget.Api.Notifications.PushOptions().Problem);
+    }
+}

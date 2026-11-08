@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, api, budgetApi, type Me } from './api'
+import { ApiError, api, budgetApi, needsLook, recurringApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
-import BillsScreen from './BillsScreen'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
 import HomeScreen from './HomeScreen'
@@ -17,12 +16,17 @@ import { OfflineBar } from './ui'
 
 function currentRoute(): Route {
   const hash = window.location.hash.replace(/^#\/?/, '')
+  // Bills moved into Review (DECISIONS.md 152); old links land there.
+  if (hash === 'bills' || hash.startsWith('bills/')) {
+    window.history.replaceState(null, '', '#/review/' + hash)
+    return 'review'
+  }
   if (hash === 'budget/inbox') {
     // Reviewing moved to its own tab; old links land there.
     window.history.replaceState(null, '', '#/review')
     return 'review'
   }
-  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash === 'payday/setup' ? 'paysetup' : hash === 'bills' || hash.startsWith('bills/') ? 'bills' : hash === 'partner' ? 'partner' : hash === 'more' ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'review' || hash.startsWith('review/') ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash === 'payday/setup' ? 'paysetup' : hash === 'partner' ? 'partner' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {
@@ -60,6 +64,16 @@ export default function App() {
     if (me) refreshInbox()
   }, [me, route, refreshInbox])
 
+  // Bills that need a look count on the Review badge too; worked out once per sign-in, then kept current by Review.
+  const [billsCount, setBillsCount] = useState(0)
+  useEffect(() => {
+    if (!me) return
+    recurringApi
+      .summary()
+      .then((s) => setBillsCount(s.items.filter(needsLook).length))
+      .catch(() => undefined)
+  }, [me])
+
   // Review passes the count it already has, so the badge doesn't ask the server again.
   const reviewChanged = useCallback((known?: number) => (typeof known === 'number' ? setInboxCount(known) : refreshInbox()), [refreshInbox])
 
@@ -88,15 +102,14 @@ export default function App() {
       {!online && <OfflineBar />}
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
       {route === 'budget' && <BudgetScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
-      {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} />}
+      {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} billsCount={billsCount} onBillsCount={setBillsCount} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} />}
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
-      {route === 'bills' && <BillsScreen onSignedOut={signedOut} />}
       {route === 'partner' && <PartnerScreen onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
-      <BottomNav route={route} inboxCount={inboxCount} />
+      <BottomNav route={route} inboxCount={inboxCount + billsCount} />
     </>
   )
 }

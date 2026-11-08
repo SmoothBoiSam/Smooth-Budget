@@ -3,7 +3,6 @@ import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportRe
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import BankConnections from './BankConnections'
-import PartnerSetting from './PartnerSetting'
 import SweepSetting from './SweepSetting'
 import { formatTime } from './format'
 
@@ -52,43 +51,33 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
     onSignedOut()
   }
 
-  return (
-    <div className="mx-auto min-h-screen max-w-md space-y-8 bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <h1 className="text-2xl font-bold tracking-tight">More</h1>
-      {error && (
-        <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
-      )}
+  // Merchant rules and recent imports grow over time, so each has its own page (DECISIONS.md 156).
+  const [sub, setSub] = useState(subFromHash)
+  useEffect(() => {
+    const onHash = () => {
+      setSub(subFromHash())
+      window.scrollTo(0, 0)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
-      <a href="#/partner" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
-        <span>
-          <span className="block font-semibold">Partner</span>
-          <span className="block text-sm text-slate-500">Fixed contributions, split categories, and who owes whom</span>
-        </span>
-        <span aria-hidden className="font-semibold text-slate-400">›</span>
-      </a>
+  const shell = 'mx-auto min-h-screen max-w-md space-y-8 bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28'
+  const errorBox = error && (
+    <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
+      {error}
+    </p>
+  )
 
-      <a href="#/bills" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
-        <span>
-          <span className="block font-semibold">Bills</span>
-          <span className="block text-sm text-slate-500">Found from your transactions: prices, due dates, and what stopped</span>
-        </span>
-        <span aria-hidden className="font-semibold text-slate-400">›</span>
-      </a>
-
-      <BankConnections onChanged={changed} />
-
-      <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
-
-      <section aria-labelledby="imports-h">
-        <h2 id="imports-h" className="text-sm font-semibold text-slate-700">
-          Recent imports
-        </h2>
+  if (sub === 'imports')
+    return (
+      <div className={shell}>
+        <SubHeader title="Recent imports" />
+        {errorBox}
         {batches.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">Nothing imported yet.</p>
+          <p className="text-sm text-slate-500">Nothing imported yet.</p>
         ) : (
-          <ul className="mt-2 divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
+          <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
             {batches.map((b) => (
               <li key={b.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
@@ -107,18 +96,18 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
             ))}
           </ul>
         )}
-      </section>
+      </div>
+    )
 
-      <section aria-labelledby="rules-h">
-        <h2 id="rules-h" className="text-sm font-semibold text-slate-700">
-          Merchant rules
-        </h2>
+  if (sub === 'rules')
+    return (
+      <div className={shell}>
+        <SubHeader title="Merchant rules" />
+        {errorBox}
         {rules.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">
-            No rules yet. When you recategorize a transaction, tick "Always use this category" to create one.
-          </p>
+          <p className="text-sm text-slate-500">No rules yet. When you recategorize a transaction, tick "Always use this category" to create one.</p>
         ) : (
-          <ul className="mt-2 divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
+          <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
             {rules.map((r) => (
               <li key={r.id} className="flex items-center gap-3 px-4 py-3">
                 <p className="min-w-0 flex-1 text-sm">
@@ -131,7 +120,30 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
             ))}
           </ul>
         )}
-      </section>
+      </div>
+    )
+
+  return (
+    <div className={shell}>
+      <h1 className="text-2xl font-bold tracking-tight">More</h1>
+      {errorBox}
+
+      <a href="#/partner" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
+        <span>
+          <span className="block font-semibold">Partner</span>
+          <span className="block text-sm text-slate-500">Their name on transfers, fixed contributions, split categories, and who owes whom</span>
+        </span>
+        <span aria-hidden className="font-semibold text-slate-400">›</span>
+      </a>
+
+      <BankConnections onChanged={changed} />
+
+      <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
+
+      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
+        <SubLink href="#/more/imports" title="Recent imports" detail={batches.length === 0 ? 'Nothing imported yet' : `${batches.length} ${batches.length === 1 ? 'file' : 'files'}, with undo`} />
+        <SubLink href="#/more/rules" title="Merchant rules" detail={rules.length === 0 ? 'None yet' : `${rules.length} ${rules.length === 1 ? 'rule' : 'rules'}`} />
+      </div>
 
       <section aria-labelledby="settings-h" className="space-y-3">
         <h2 id="settings-h" className="text-sm font-semibold text-slate-700">
@@ -140,7 +152,6 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         <AppearanceSetting />
         <NotificationSetting />
         <SweepSetting />
-        <PartnerSetting onChanged={changed} />
         <div className="flex items-center justify-between rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
           <span className="truncate text-sm text-slate-500">{me.email}</span>
           <button type="button" onClick={signOut} className="text-sm font-medium text-slate-700">
@@ -149,6 +160,34 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         </div>
       </section>
     </div>
+  )
+}
+
+const subFromHash = () => {
+  const h = window.location.hash
+  return h.startsWith('#/more/rules') ? 'rules' : h.startsWith('#/more/imports') ? 'imports' : null
+}
+
+function SubHeader({ title }: { title: string }) {
+  return (
+    <div>
+      <a href="#/more" className="text-sm font-medium text-slate-500">
+        ‹ More
+      </a>
+      <h1 className="mt-1 text-2xl font-bold tracking-tight">{title}</h1>
+    </div>
+  )
+}
+
+function SubLink({ href, title, detail }: { href: string; title: string; detail: string }) {
+  return (
+    <a href={href} className="flex items-center justify-between gap-3 px-4 py-3.5">
+      <span className="min-w-0">
+        <span className="block font-semibold">{title}</span>
+        <span className="block truncate text-sm text-slate-500">{detail}</span>
+      </span>
+      <span aria-hidden className="font-semibold text-slate-400">›</span>
+    </a>
   )
 }
 

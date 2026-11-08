@@ -71,7 +71,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal([("Regular", 799_44L), ("Boarding Pay", 83_38L), ("NonTax Per Diem", 239_85L)], feb22.Lines.Select(l => (l.Name, l.Cents)));
         Assert.True(feb22.LowConfidence); // no stubs yet: a flat 80% of gross
         Assert.Equal((long)Math.Round(feb22.GrossCents * 0.8m), feb22.NetCents);
-        Assert.Equal("spending", feb22.Plan!.Items[^1].Kind);
+        Assert.DoesNotContain(feb22.Plan!.Items, i => i.Kind == "spending"); // Home's Left to Spend covers it (DECISIONS.md 154)
 
         // Overtime on the first trip adds the extra half on the check that covers it; a re-import keeps the choice.
         await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, ["T1001 02/04"], []), Json);
@@ -162,8 +162,10 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
 
         // The plan's checklist remembers what you sent.
         var next = after.Checks[0];
-        await c.PutAsJsonAsync($"/api/payday/plan/{next.PayDate:yyyy-MM-dd}/spending", new ChecklistRequest(true), Json);
-        Assert.True((await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Key == "spending").Done);
+        var put = await c.PutAsJsonAsync($"/api/payday/plan/{next.PayDate:yyyy-MM-dd}/savings", new ChecklistRequest(true), Json);
+        Assert.True(put.IsSuccessStatusCode);
+        using (var scope = app.Services.CreateScope())
+            Assert.True(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PaydayChecklistItems.AnyAsync(x => x.PayDate == next.PayDate && x.Key == "savings"));
     }
 
     [Fact]
@@ -205,7 +207,23 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal((200_00L, false, "Sent $120.00 of $200.00 so far."), (items["debt"].Cents, items["debt"].Done, items["debt"].Status));
         // Half the month's $100 savings: the $50 transfer covers it.
         Assert.Equal((50_00L, true, true), (items["savings"].Cents, items["savings"].Done, items["savings"].Auto));
-        Assert.Null(items["spending"].Status);
+        Assert.False(items.ContainsKey("spending"));
+
+        // Two cards with minimums: each gets its own line. This check pays half of each minimum ($20 and $15), and the
+        // rest of its $200 goes to the card with the higher APR (avalanche).
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            DebtAccount Debt(string name, long balance, int apr, long min) => new()
+            {
+                Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = name, BalanceCents = balance, AprBps = apr, MinimumPaymentCents = min,
+                StartingBalanceCents = balance, StartedOn = new DateOnly(2027, 1, 1), CreatedUtc = DateTime.UtcNow,
+            };
+            db.DebtAccounts.AddRange(Debt("Test Store Card", 500_00, 1999, 30_00), Debt("Test Visa", 2_000_00, 2499, 40_00));
+            await db.SaveChangesAsync();
+        }
+        var debtLines = (await Payday(c)).Checks[0].Plan!.Items.Where(i => i.Kind == "debt").ToList();
+        Assert.Equal([("Test Visa", 185_00L, "Minimum + extra"), ("Test Store Card", 15_00L, "Minimum payment")], debtLines.Select(i => (i.Destination, i.Cents, i.Label)));
 
         // The next checks keep their plans for reference, without statuses.
         Assert.All((await Payday(c)).Checks.Skip(1).Where(x => x.Plan is not null).SelectMany(x => x.Plan!.Items), i => Assert.Null(i.Status));

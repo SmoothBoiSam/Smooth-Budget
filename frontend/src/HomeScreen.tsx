@@ -190,70 +190,6 @@ function daysBetween(from: string, to: string) {
   return Math.round(day(to) - day(from))
 }
 
-/** "Can I afford this?" (DECISIONS.md 148): type a price and see Left to Spend and the daily amount after it. */
-function AffordCheck({ summary: s }: { summary: HomeSummary }) {
-  const [open, setOpen] = useState(false)
-  const [amount, setAmount] = useState('')
-  const cents = Math.round(Number(amount.replace(/[$,\s]/g, '')) * 100)
-  const valid = amount.trim() !== '' && Number.isFinite(cents) && cents > 0
-  const after = s.leftToSpendCents - cents
-  const perDay = Math.max(0, Math.floor(after / Math.max(1, s.daysRemaining)))
-  return (
-    <section className="mt-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
-      {!open ? (
-        <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center justify-between text-sm font-medium text-slate-700">
-          Can I afford this?
-          <span aria-hidden className="font-semibold text-slate-400">
-            ›
-          </span>
-        </button>
-      ) : (
-        <>
-          <label className="block">
-            <span className="text-sm font-medium text-slate-700">Can I afford this?</span>
-            <span className="mt-1 flex items-center rounded-xl border border-slate-300 bg-white px-3">
-              <span className="text-slate-400">$</span>
-              <input
-                autoFocus
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                className="w-full bg-transparent px-1 py-2.5 text-base outline-none"
-              />
-            </span>
-          </label>
-          {valid && (
-            <p className={`mt-2 text-sm ${after < 0 ? 'text-red-700' : 'text-slate-700'}`}>
-              {after < 0 ? (
-                <>
-                  That’s <span className="font-semibold tabular-nums">{formatCents(-after)}</span> more than you have left this month.
-                </>
-              ) : (
-                <>
-                  Yes. You’d have <span className="font-semibold tabular-nums">{formatCents(after)}</span> left, about{' '}
-                  <span className="font-semibold tabular-nums">{formatCents(perDay)}</span> a day for {s.daysRemaining}{' '}
-                  {s.daysRemaining === 1 ? 'day' : 'days'}.
-                </>
-              )}
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false)
-              setAmount('')
-            }}
-            className="mt-2 text-xs font-medium text-slate-500"
-          >
-            Close
-          </button>
-        </>
-      )}
-    </section>
-  )
-}
-
 function Summary({ summary: s }: { summary: HomeSummary }) {
   const style = statusStyles[s.status]
   // What lasts until the next check: the safe daily amount for each day before payday (DECISIONS.md 148).
@@ -295,8 +231,6 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
           )}
         </dl>
       </section>
-
-      <AffordCheck summary={s} />
 
       <ul className="mt-4 space-y-2 text-sm">
         {s.carriedInDeficitCents > 0 && (
@@ -391,28 +325,6 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
         </a>
       )}
 
-      {s.upcomingBills && s.upcomingBills.length > 0 && (
-        <section aria-labelledby="upcoming-h" className="mt-6">
-          <div className="flex items-baseline justify-between">
-            <h2 id="upcoming-h" className="text-sm font-semibold text-slate-700">
-              Coming up
-            </h2>
-            <a href="#/bills" className="text-xs font-medium text-slate-500 underline">
-              All bills
-            </a>
-          </div>
-          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white text-sm ring-1 ring-slate-200">
-            {s.upcomingBills.map((b) => (
-              <li key={b.name + b.date} className="flex justify-between gap-3 px-4 py-2.5">
-                <span className="min-w-0 truncate">
-                  {b.name} <span className="text-slate-400">· {formatDay(b.date)}</span>
-                </span>
-                <span className="shrink-0 tabular-nums">{formatCents(b.amountCents)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </>
   )
 }

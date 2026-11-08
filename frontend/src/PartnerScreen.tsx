@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, partnerPlanApi, type Category, type ContributionStatus, type PartnerOverview } from './api'
 import { ErrorNotice, Loading } from './ui'
+import PartnerSetting from './PartnerSetting'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars, titleCase } from './format'
 
 const purposeLabel: Record<PartnerOverview['recent'][number]['purpose'], string> = {
@@ -65,6 +66,10 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
         ‹ More
       </a>
       <h1 className="mt-1 text-2xl font-bold tracking-tight">Partner</h1>
+      <div className="mt-4">
+        {/* The name on their transfers, moved here from More → Settings (DECISIONS.md 156). */}
+        <PartnerSetting onChanged={() => void load()} />
+      </div>
 
       {notice && (
         <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -76,7 +81,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
 
       {o && !o.partnerName && (
         <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
-          Set your partner’s name as it shows on their transfers (More → Settings) so the app can recognize them.
+          Set your partner’s name as it shows on their transfers (above) so the app can recognize them.
         </p>
       )}
 
