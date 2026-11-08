@@ -288,16 +288,20 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             var share = $"{(inMonth.Count == 2 ? "Half" : $"1/{inMonth.Count}")} of the month's";
 
             // Bills still to come before the next payday (for the current check: from today, since paid ones are done).
-            // A bill your partner's fixed contribution goes toward (rent) only needs your share.
+            // A bill your partner's fixed contribution goes toward (rent) still needs all of it in the account when it's
+            // charged, since their money lands there too (DECISIONS.md 165); only your share comes out of this check.
             var from = current ? c.Today : pay;
             var offsetUsed = new HashSet<Guid>();
+            // The name as it shows on their transfers ("ALEX RIVERA"): just the first name, in normal case.
+            var partner = c.Household.PartnerName?.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() is { } pn
+                ? char.ToUpperInvariant(pn[0]) + pn[1..].ToLowerInvariant() : "Your partner";
             var bills = items.Where(b => b.NextExpected >= from && b.NextExpected < next).OrderBy(b => b.NextExpected).Select(b =>
             {
                 var covered = b.CategoryId is { } cat && offsetUsed.Add(cat)
-                    ? arrangements.Where(a => a.CategoryId == cat && a.StartsOn <= b.NextExpected).Sum(a => a.AmountCents) : 0;
-                var mine = Math.Max(0, b.AmountCents - covered);
-                return new PlanBill($"bill:{b.Key}", b.Name, mine, b.NextExpected, b.AccountName,
-                    covered > 0 ? $"{c.Household.PartnerName ?? "Your partner"} covers {PayEngine.Dollars(Math.Min(covered, b.AmountCents))} of {b.Name}." : null);
+                    ? Math.Min(b.AmountCents, arrangements.Where(a => a.CategoryId == cat && a.StartsOn <= b.NextExpected).Sum(a => a.AmountCents)) : 0;
+                return new PlanBill($"bill:{b.Key}", b.Name, b.AmountCents, b.NextExpected, b.AccountName,
+                    covered > 0 ? $"{b.Name} counts in full: {partner} sends {PayEngine.Dollars(covered)} of it to this account, so {PayEngine.Dollars(b.AmountCents - covered)} is yours from this check." : null,
+                    covered);
             }).ToList();
             var debtShare = PaydayPlan.Share(debtMonthly, inMonth.Count, index);
             var transfers = new List<PlanTransfer>();
@@ -358,7 +362,8 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                         if (acct?.PlaidAccountId is null) return (false, "Check this one yourself: the app doesn't get this account's balance from the bank.");
                         return acct.CurrentBalanceCents >= x.Cents
                             ? (true, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}, enough for these.")
-                            : (false, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}: {PayEngine.Dollars(x.Cents - acct.CurrentBalanceCents)} short for these.");
+                            : (false, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}: {PayEngine.Dollars(x.Cents - acct.CurrentBalanceCents)} short for these."
+                                      + (x.FromOthersCents > 0 ? $" That counts the {PayEngine.Dollars(x.FromOthersCents)} {partner} sends, if it hasn't arrived yet." : ""));
                     case "debt" when x.Key.StartsWith("debt:", StringComparison.Ordinal):
                         if (x.Cents <= 0) return (true, null);
                         var card = debts.FirstOrDefault(d => x.Key == $"debt:{d.Id}");

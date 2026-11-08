@@ -268,6 +268,19 @@ public class PayEngineTests
     }
 
     [Fact]
+    public void Keep_counts_the_whole_bill_even_where_a_partner_sends_part_of_it()
+    {
+        // Rent is $1,650; your partner sends $800 of it into checking. Checking needs all $1,650 when rent is charged,
+        // but only your $850 (plus the phone and card) comes out of this $1,000 check.
+        var plan = PaydayPlan.Build(1_000_00,
+            [new("bill:rent", "Rent", 1_650_00, new(2027, 3, 1), "Checking", FromOthersCents: 800_00), new("bill:phone", "Phone", 60_00, new(2027, 2, 25), "Checking")],
+            [new("debt", "Card payment", 200_00, "Test Visa", "")]);
+        var keep = plan.Items.Single(i => i.Kind == "keep");
+        Assert.Equal((1_710_00L, 800_00L), (keep.Cents, keep.FromOthersCents));
+        Assert.Equal(110_00L, plan.ShortCents); // 850 + 60 + 200 = 1,110 from a 1,000 check
+    }
+
+    [Fact]
     public void Every_card_gets_its_minimum_before_the_extra_goes_to_the_target()
     {
         CardMinimum visa = new("debt:visa", "Test Visa", 25_00), store = new("debt:store", "Test Store Card", 35_00);

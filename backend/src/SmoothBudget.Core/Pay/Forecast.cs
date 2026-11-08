@@ -69,12 +69,16 @@ public static class PayForecast
 }
 
 /// <param name="Account">Where it's charged: a checking bill needs the cash left there.</param>
-public record PlanBill(string Key, string Name, long Cents, DateOnly Due, string Account, string? Note = null);
+/// <param name="Cents">The whole bill: what has to be in the account when it's charged.</param>
+/// <param name="FromOthersCents">The part someone else sends into that account first (your partner's fixed contribution toward rent).</param>
+public record PlanBill(string Key, string Name, long Cents, DateOnly Due, string Account, string? Note = null, long FromOthersCents = 0);
 public record PlanTransfer(string Key, string Label, long Cents, string Destination, string Why);
 
 /// <param name="Kind">"keep" (bills to leave in an account), "debt", "sweep" or "savings".</param>
 /// <param name="Bills">For "keep": the bills it covers.</param>
-public record PlanItem(string Key, string Kind, string Label, long Cents, string Destination, string Why, IReadOnlyList<PlanBill>? Bills = null);
+/// <param name="FromOthersCents">For "keep": the part of it that arrives from someone else rather than from this check.</param>
+public record PlanItem(string Key, string Kind, string Label, long Cents, string Destination, string Why, IReadOnlyList<PlanBill>? Bills = null,
+    long FromOthersCents = 0);
 
 public record PaydayPlanResult(IReadOnlyList<PlanItem> Items, long ShortCents);
 
@@ -92,16 +96,19 @@ public static class PaydayPlan
 {
     public static PaydayPlanResult Build(long netCents, IReadOnlyList<PlanBill> bills, IReadOnlyList<PlanTransfer> transfers)
     {
-        // One "keep" line per account for every bill due from it before the next payday (DECISIONS.md 138).
+        // One "keep" line per account for every bill due from it before the next payday (DECISIONS.md 138). It's the whole
+        // of each bill, since that's what the account needs when it's charged, even where your partner sends part of it
+        // into the account first (DECISIONS.md 165). Only this check's own part counts against the check.
         var items = bills.GroupBy(b => b.Account).Select(g =>
         {
             var list = g.OrderBy(b => b.Due).ToList();
             var when = list.Count == 1 ? $"due {list[0].Due:MMM d}" : $"due {list[0].Due:MMM d} to {list[^1].Due:MMM d}";
             return new PlanItem($"keep:{g.Key}", "keep", $"{list.Count} bill{(list.Count == 1 ? "" : "s")} {when}", list.Sum(b => b.Cents), g.Key,
-                "Bills paid from this account before your next payday." + string.Concat(list.Where(b => b.Note is not null).Select(b => " " + b.Note)), list);
+                "Bills paid from this account before your next payday." + string.Concat(list.Where(b => b.Note is not null).Select(b => " " + b.Note)), list,
+                list.Sum(b => Math.Min(b.FromOthersCents, b.Cents)));
         }).ToList();
         items.AddRange(transfers.Where(t => t.Cents > 0).Select(t => new PlanItem(t.Key, t.Key.Split(':')[0], t.Label, t.Cents, t.Destination, t.Why)));
-        return new PaydayPlanResult(items, Math.Max(0, items.Sum(i => i.Cents) - netCents));
+        return new PaydayPlanResult(items, Math.Max(0, items.Sum(i => i.Cents - i.FromOthersCents) - netCents));
     }
 
     /// <summary>A monthly amount split evenly over the checks paid in that budget month, the last check taking any odd cent.</summary>
