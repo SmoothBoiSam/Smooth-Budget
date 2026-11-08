@@ -128,14 +128,6 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
       <h1 className="text-2xl font-bold tracking-tight">More</h1>
       {errorBox}
 
-      <a href="#/partner" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
-        <span>
-          <span className="block font-semibold">Partner</span>
-          <span className="block text-sm text-slate-500">Their name on transfers, fixed contributions, split categories, and who owes whom</span>
-        </span>
-        <span aria-hidden className="font-semibold text-slate-400">›</span>
-      </a>
-
       <BankConnections onChanged={changed} />
 
       <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
@@ -144,6 +136,15 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         <SubLink href="#/more/imports" title="Recent imports" detail={batches.length === 0 ? 'Nothing imported yet' : `${batches.length} ${batches.length === 1 ? 'file' : 'files'}, with undo`} />
         <SubLink href="#/more/rules" title="Merchant rules" detail={rules.length === 0 ? 'None yet' : `${rules.length} ${rules.length === 1 ? 'rule' : 'rules'}`} />
       </div>
+
+      {/* Under imports and rules (DECISIONS.md 162). */}
+      <a href="#/partner" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
+        <span>
+          <span className="block font-semibold">Partner</span>
+          <span className="block text-sm text-slate-500">Their name on transfers, fixed contributions, split categories, and who owes whom</span>
+        </span>
+        <span aria-hidden className="font-semibold text-slate-400">›</span>
+      </a>
 
       <section aria-labelledby="settings-h" className="space-y-3">
         <h2 id="settings-h" className="text-sm font-semibold text-slate-700">

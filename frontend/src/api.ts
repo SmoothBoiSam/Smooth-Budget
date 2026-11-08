@@ -198,8 +198,17 @@ export const budgetApi = {
   /** back = how many budget months before this one (0 = this month). */
   monthTransactions: (back = 0) =>
     request<{ from: string; to: string; items: Transaction[]; label: string | null }>('GET', back > 0 ? `/transactions?back=${back}` : '/transactions'),
-  /** Every transaction matching a store, description, category or amount; newest first, up to 100. */
-  search: (q: string) => request<Transaction[]>('GET', `/transactions/search?q=${encodeURIComponent(q)}`),
+  /** Every transaction matching all the filters set (DECISIONS.md 164); newest first, up to 200, with the full count and total. */
+  search: (f: SearchFilters) => {
+    const p = new URLSearchParams()
+    if (f.q.trim()) p.set('q', f.q.trim())
+    if (f.categoryId) p.set('categoryId', f.categoryId)
+    if (f.min) p.set('min', f.min)
+    if (f.max) p.set('max', f.max)
+    if (f.from) p.set('from', f.from)
+    if (f.to) p.set('to', f.to)
+    return request<{ items: Transaction[]; total: number; netCents: number }>('GET', `/transactions/search?${p}`)
+  },
   inbox: () => request<Transaction[]>('GET', '/transactions/inbox'),
   inboxCount: () => request<{ count: number; review: number }>('GET', '/transactions/inbox/count'),
   review: (scope: ReviewScope = 'month') => request<Transaction[]>('GET', `/transactions/review?scope=${scope}`),
@@ -1040,6 +1049,26 @@ export const pushApi = {
     request<void>('POST', '/push/subscribe', { endpoint: s.endpoint, keys: { p256dh: s.keys?.p256dh, auth: s.keys?.auth } }),
   unsubscribe: (endpoint: string) => request<void>('POST', '/push/unsubscribe', { endpoint }),
   test: () => request<void>('POST', '/push/test'),
+  /** Each kind of notification and whether it's on, for the whole household (DECISIONS.md 163). */
+  types: () => request<NotificationType[]>('GET', '/push/types'),
+  setType: (id: string, on: boolean) => request<void>('PUT', `/push/types/${encodeURIComponent(id)}`, { on }),
+}
+
+/** Transaction search filters. Amounts are dollars as typed ("12.50"), dates are yyyy-mm-dd; empty means not set. */
+export interface SearchFilters {
+  q: string
+  categoryId: string
+  min: string
+  max: string
+  from: string
+  to: string
+}
+
+export interface NotificationType {
+  id: string
+  title: string
+  detail: string
+  on: boolean
 }
 
 /** A recurring charge the app found under spending (or no category) that you haven't said anything about yet. */

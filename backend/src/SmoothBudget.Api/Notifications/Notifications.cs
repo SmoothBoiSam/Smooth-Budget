@@ -80,13 +80,49 @@ public class WebPushSender(HttpClient http, PushOptions options, ILogger<WebPush
     }
 }
 
-/// <summary>What's worth a buzz right now, each piece sent once: payday, bills due tomorrow, a category going over, and low cash.</summary>
+/// <summary>One kind of notification, each with its own switch in More → Settings (DECISIONS.md 163).</summary>
+public record NotificationTypeDto(string Id, string Title, string Detail, bool On);
+
+/// <summary>
+/// What's worth a buzz right now, each piece sent once: payday, bills due tomorrow, a category going over, Left to Spend
+/// running low, low cash, bill price rises, a late partner contribution, a bank that needs you, and a weekly review nudge.
+/// </summary>
 public class NotificationService(
     AppDbContext db, TimeProvider clock, IPushSender sender, Home.HomeSummaryService home, Budget.BudgetSummaryService budget,
     Bills.RecurringService recurring, Payday.PaydayService payday)
 {
     /// <summary>No buzzing at night: news waits for the morning.</summary>
     public const int FirstHour = 8, LastHour = 21;
+    /// <summary>The weekly review reminder: Sunday, from this hour.</summary>
+    public const int ReviewHour = 17;
+
+    public static readonly (string Id, string Title, string Detail)[] Types =
+    [
+        ("payday", "Payday", "The day a paycheck lands, with about how much."),
+        ("bills", "Bills due tomorrow", "The day before a bill or subscription is charged."),
+        ("over", "Category over budget", "When a spending category goes over its limit, once a month each."),
+        ("low", "Left to Spend running low", "When under 15% of this month's spending money is left, and again if it drops below zero."),
+        ("cash", "Account short before payday", "When an account won't cover the bills due before your next check."),
+        ("price", "Bill price went up", "When a bill or subscription charges more than it used to."),
+        ("partner", "Partner contribution late", "When a fixed contribution from your partner hasn't arrived by the end of its usual days."),
+        ("bank", "Bank needs you", "When a bank connection stops syncing and needs you to sign in again. Weekly until it's fixed."),
+        ("review", "Weekly review reminder", "Sunday evening, when purchases are waiting for you to confirm."),
+    ];
+
+    public async Task<List<NotificationTypeDto>> TypesAsync(Guid householdId, CancellationToken ct)
+    {
+        var off = await db.Households.Where(h => h.Id == householdId).Select(h => h.NotificationsOff).SingleAsync(ct);
+        return Types.Select(t => new NotificationTypeDto(t.Id, t.Title, t.Detail, !off.Contains(t.Id))).ToList();
+    }
+
+    public async Task<bool> SetTypeAsync(Guid householdId, string id, bool on, CancellationToken ct)
+    {
+        if (!Types.Any(t => t.Id == id)) return false;
+        var h = await db.Households.SingleAsync(x => x.Id == householdId, ct);
+        h.NotificationsOff = on ? h.NotificationsOff.Where(x => x != id).ToList() : h.NotificationsOff.Append(id).Distinct().ToList();
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
 
     public async Task<int> CheckAsync(Guid householdId, CancellationToken ct = default)
     {
@@ -94,21 +130,17 @@ public class NotificationService(
         if (devices.Count == 0) return 0;
         var household = await db.Households.AsNoTracking().SingleAsync(h => h.Id == householdId, ct);
         var zone = TimeZoneInfo.FindSystemTimeZoneById(household.TimeZoneId);
-        var hour = TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone).Hour;
-        if (hour < FirstHour || hour >= LastHour) return 0;
+        var local = TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone);
+        if (local.Hour < FirstHour || local.Hour >= LastHour) return 0;
 
         var sent = (await db.NotificationLogs.Where(l => l.HouseholdId == householdId).Select(l => l.Key).ToListAsync(ct)).ToHashSet();
         var news = new List<(string Key, PushMessage Message)>();
-        foreach (var n in await WhatsNewAsync(householdId, ct))
-            if (!sent.Contains(n.Key)) news.Add(n);
-        // Several over-budget categories at once arrive as one notification.
-        var over = news.Where(n => n.Key.StartsWith("over:", StringComparison.Ordinal)).ToList();
-        if (over.Count > 1)
-        {
-            news.RemoveAll(over.Contains);
-            news.Add((string.Join("|", over.Select(o => o.Key)), new PushMessage("Over budget",
-                string.Join(" ", over.Select(o => o.Message.Body)), "#/budget", "over")));
-        }
+        // A type you turned off isn't logged as sent either, so turning it back on picks up what's still true.
+        foreach (var n in await WhatsNewAsync(household, local, ct))
+            if (!sent.Contains(n.Key) && !household.NotificationsOff.Contains(n.Type)) news.Add((n.Key, n.Message));
+        // Several over-budget categories (or price rises) at once arrive as one notification.
+        Merge(news, "over:", "Over budget", "#/budget", "over");
+        Merge(news, "price:", "Bill prices went up", "#/review/bills", "price");
 
         foreach (var (key, message) in news)
         {
@@ -125,39 +157,82 @@ public class NotificationService(
         return news.Count;
     }
 
-    private async Task<List<(string Key, PushMessage Message)>> WhatsNewAsync(Guid householdId, CancellationToken ct)
+    private static void Merge(List<(string Key, PushMessage Message)> news, string prefix, string title, string url, string tag)
     {
+        var same = news.Where(n => n.Key.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+        if (same.Count < 2) return;
+        news.RemoveAll(same.Contains);
+        news.Add((string.Join("|", same.Select(o => o.Key)), new PushMessage(title, string.Join(" ", same.Select(o => o.Message.Body)), url, tag)));
+    }
+
+    private async Task<List<(string Type, string Key, PushMessage Message)>> WhatsNewAsync(Household household, DateTimeOffset local, CancellationToken ct)
+    {
+        var householdId = household.Id;
         var h = await home.GetAsync(householdId, ct);
         var today = h.Today;
-        var list = new List<(string, PushMessage)>();
+        var list = new List<(string, string, PushMessage)>();
 
         var check = (await payday.GetAsync(householdId, ct)).Checks.FirstOrDefault(c => c.PayDate == today);
         if (check is not null)
-            list.Add(($"payday:{today:yyyy-MM-dd}", new PushMessage("Payday",
+            list.Add(("payday", $"payday:{today:yyyy-MM-dd}", new PushMessage("Payday",
                 $"About {PayEngine.Dollars(check.NetCents)} lands today. Your plan says where it goes.", "#/payday", "payday")));
 
         var tomorrow = today.AddDays(1);
         var due = (await recurring.UpcomingAsync(householdId, 20, ct)).Where(b => b.Date == tomorrow).ToList();
         if (due.Count > 0)
-            list.Add(($"bills:{tomorrow:yyyy-MM-dd}", new PushMessage(due.Count == 1 ? "Bill due tomorrow" : "Bills due tomorrow",
+            list.Add(("bills", $"bills:{tomorrow:yyyy-MM-dd}", new PushMessage(due.Count == 1 ? "Bill due tomorrow" : "Bills due tomorrow",
                 string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/review/bills", "bills")));
 
         var b = await budget.GetAsync(householdId, ct);
         foreach (var line in b.Groups.Where(g => g.CountsTowardLeftToSpend).SelectMany(g => g.Categories).Where(c => c.RemainingCents < 0 && c.LimitCents > 0))
-            list.Add(($"over:{b.BudgetMonth.Start:yyyy-MM-dd}:{line.Id}", new PushMessage("Over budget",
+            list.Add(("over", $"over:{b.BudgetMonth.Start:yyyy-MM-dd}:{line.Id}", new PushMessage("Over budget",
                 $"{line.Name} is {PayEngine.Dollars(-line.RemainingCents)} over this month.", "#/budget", "over")));
 
+        // Left to Spend: once when it runs low, and once more if it goes below zero, each budget month.
+        var month = $"{h.BudgetMonth.Start:yyyy-MM-dd}";
+        if (h.Status == "overspent")
+            list.Add(("low", $"overspent:{month}", new PushMessage("Overspent",
+                $"Left to Spend is {PayEngine.Dollars(-h.LeftToSpendCents)} below zero with {Days(h.DaysRemaining)} left. What's spent beyond it comes out of next month.", "#/", "low")));
+        else if (h.Status == "low")
+            list.Add(("low", $"low:{month}", new PushMessage("Left to Spend is running low",
+                $"{PayEngine.Dollars(h.LeftToSpendCents)} left with {Days(h.DaysRemaining)} to go: about {PayEngine.Dollars(h.SafeToSpendPerDayCents)} a day.", "#/", "low")));
+
         foreach (var w in h.CashWarnings ?? [])
-            list.Add(($"cash:{(w.NextPayDate ?? h.BudgetMonth.End):yyyy-MM-dd}:{w.Account}", new PushMessage("Low on cash",
+            list.Add(("cash", $"cash:{(w.NextPayDate ?? h.BudgetMonth.End):yyyy-MM-dd}:{w.Account}", new PushMessage("Low on cash",
                 $"{w.Account} is {PayEngine.Dollars(w.ShortCents)} short for the bills due before payday.", "#/payday", "cash")));
+
+        // A price rise you haven't said "Got it" to, once per new price.
+        foreach (var i in (await recurring.SummaryAsync(householdId, ct)).Items.Where(i => i.Status == "priceUp"))
+            list.Add(("price", $"price:{i.Key}:{i.AmountCents}", new PushMessage("Bill price went up",
+                $"{i.Name} went up{(i.PreviousAmountCents is { } was ? $" from {PayEngine.Dollars(was)}" : "")} to {PayEngine.Dollars(i.AmountCents)}.", "#/review/bills", "price")));
+
+        var partner = household.PartnerName is { Length: > 0 } p ? p.Split(' ')[0] : "Your partner";
+        foreach (var c in (h.Contributions ?? []).Where(c => c.State == "late"))
+            list.Add(("partner", $"partnerlate:{c.WindowStart:yyyy-MM-dd}:{c.ArrangementId}", new PushMessage("Partner contribution late",
+                $"{partner}'s {PayEngine.Dollars(c.ExpectedCents)} toward {c.CategoryName} hasn't arrived. Left to Spend counts without it for now.", "#/partner", "partner")));
+
+        // A bank that stopped syncing: weekly until it's fixed (the week is part of the key).
+        var week = System.Globalization.ISOWeek.GetYear(today.ToDateTime(TimeOnly.MinValue)) * 100 + System.Globalization.ISOWeek.GetWeekOfYear(today.ToDateTime(TimeOnly.MinValue));
+        foreach (var item in await db.PlaidItems.AsNoTracking()
+                     .Where(i => i.HouseholdId == householdId && (i.Status == PlaidItemStatus.LoginRequired || i.Status == PlaidItemStatus.Error)).ToListAsync(ct))
+            list.Add(("bank", $"bank:{item.Id}:{week}", new PushMessage($"{item.InstitutionName ?? "Your bank"} needs you",
+                item.Status == PlaidItemStatus.LoginRequired
+                    ? $"{item.InstitutionName ?? "Your bank"} wants you to sign in again before it can keep syncing. Tap Reconnect in More."
+                    : $"Syncing {item.InstitutionName ?? "your bank"} stopped working. Open More to reconnect it.", "#/more", "bank")));
+
+        var waiting = h.ReviewCount + h.UncategorizedCount;
+        if (local.DayOfWeek == DayOfWeek.Sunday && local.Hour >= ReviewHour && waiting > 0)
+            list.Add(("review", $"review:{today:yyyy-MM-dd}", new PushMessage("A few minutes of review",
+                $"{waiting} {(waiting == 1 ? "purchase is" : "purchases are")} waiting for you to confirm this month.", "#/review", "review")));
         return list;
     }
+
+    private static string Days(int n) => n == 1 ? "1 day" : $"{n} days";
 
     public async Task SendTestAsync(Guid householdId, CancellationToken ct)
     {
         foreach (var device in await db.PushDevices.Where(d => d.HouseholdId == householdId).ToListAsync(ct))
-            if (!await sender.SendAsync(device, new PushMessage("Smooth Budget", "Notifications are on. Paydays, bills due tomorrow, "
-                    + "categories going over and low cash will show up here.", "#/", "test"), ct))
+            if (!await sender.SendAsync(device, new PushMessage("Smooth Budget", "Notifications are on. Choose which kinds you get in More → Settings.", "#/", "test"), ct))
                 db.PushDevices.Remove(device);
         await db.SaveChangesAsync(ct);
     }
@@ -200,6 +275,7 @@ public record PushKeys(string P256dh, string Auth);
 public record PushSubscribeRequest(string Endpoint, PushKeys Keys);
 public record PushUnsubscribeRequest(string Endpoint);
 public record PushStatusDto(bool Enabled, string? PublicKey, string? Problem = null);
+public record NotificationTypeRequest(bool On);
 
 public static class NotificationEndpoints
 {
@@ -241,6 +317,11 @@ public static class NotificationEndpoints
             await db.PushDevices.Where(d => d.HouseholdId == householdId && d.Endpoint == req.Endpoint).ExecuteDeleteAsync(ct);
             return Results.NoContent();
         });
+
+        // Each kind of notification has its own switch, for the whole household (DECISIONS.md 163).
+        g.MapGet("/types", async (HttpContext ctx, NotificationService svc, CancellationToken ct) => await svc.TypesAsync(ctx.User.HouseholdId(), ct));
+        g.MapPut("/types/{id}", async (string id, NotificationTypeRequest req, HttpContext ctx, NotificationService svc, CancellationToken ct) =>
+            await svc.SetTypeAsync(ctx.User.HouseholdId(), id, req.On, ct) ? Results.NoContent() : Results.NotFound());
 
         g.MapPost("/test", async (HttpContext ctx, NotificationService svc, PushOptions o, CancellationToken ct) =>
         {

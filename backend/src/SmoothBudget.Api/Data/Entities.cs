@@ -47,6 +47,8 @@ public class Household
     public string SavingsPriority { get; set; } = "StarterFund,Debt,Savings";
     /// <summary>The budget updates itself whenever anything it depends on changes (DECISIONS.md 135).</summary>
     public bool AutoBudget { get; set; } = true;
+    /// <summary>Notification types you turned off in More → Settings (DECISIONS.md 163). Everything else is on.</summary>
+    public List<string> NotificationsOff { get; set; } = [];
 
     public DateTime CreatedUtc { get; set; }
 

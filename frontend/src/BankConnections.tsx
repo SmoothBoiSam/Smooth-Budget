@@ -192,17 +192,26 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                         Add accounts
                       </button>
                     )}
-                    {i.status === 'Active' && (
-                      <button type="button" disabled={busy !== null} onClick={() => resync(i)} className="text-slate-600">
-                        Refresh categories from bank
-                      </button>
-                    )}
                     {config.sandboxShortcut && i.status === 'Active' && (
                       <button type="button" onClick={() => refreshSandbox(i)} className="text-slate-600">
                         Simulate new activity
                       </button>
                     )}
-                    <button type="button" onClick={() => remove(i)} className="text-red-600">
+                  </div>
+                  {/* Stacked, with Refresh as a real blue button (DECISIONS.md 162). Fixed colors so the dark theme keeps them. */}
+                  <div className="mt-3 grid gap-2">
+                    {i.status === 'Active' && (
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => resync(i)}
+                        className="w-full rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50"
+                        style={{ backgroundColor: '#2563EB', color: '#fff' }}
+                      >
+                        Refresh categories from bank
+                      </button>
+                    )}
+                    <button type="button" onClick={() => remove(i)} className="w-full rounded-xl py-2.5 text-sm font-semibold text-red-600 ring-1 ring-red-200">
                       Disconnect
                     </button>
                   </div>

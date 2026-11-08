@@ -543,6 +543,10 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.PrimitiveCollection<List<string>>("NotificationsOff")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
                     b.Property<DateOnly?>("PartnerLabelsStartAfter")
                         .HasColumnType("date");
 

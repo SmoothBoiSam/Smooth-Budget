@@ -13,6 +13,7 @@ import {
   type LastMonth,
   type ReviewSummary,
   type RecurringItem,
+  type SearchFilters,
   recurringApi,
   type Transaction,
 } from './api'
@@ -218,7 +219,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
 
       {summary && view.kind === 'all' && (
-        <SearchableList month={month} onSelect={setSelected} onError={searchFailed} />
+        <SearchableList month={month} categories={categories} onSelect={setSelected} onError={searchFailed} />
       )}
 
       {selected && (
@@ -489,11 +490,24 @@ function CategoryHeader({ line: c }: { line: BudgetCategoryLine }) {
   )
 }
 
-/** This month's transactions, or a search across all of them (DECISIONS.md 150) once you type two letters. */
-function SearchableList({ month, onSelect, onError }: { month: Transaction[]; onSelect: (t: Transaction) => void; onError: (e: unknown) => void }) {
-  const [q, setQ] = useState('')
-  const [found, setFound] = useState<{ q: string; items: Transaction[] } | null>(null)
-  const query = q.trim()
+/**
+ * This month's transactions (with arrows back through earlier months), or a search across all of them (DECISIONS.md 150,
+ * 164): words, a category, an amount range and a date range, all applied together.
+ */
+function SearchableList({
+  month,
+  categories,
+  onSelect,
+  onError,
+}: {
+  month: Transaction[]
+  categories: Category[]
+  onSelect: (t: Transaction) => void
+  onError: (e: unknown) => void
+}) {
+  const [f, setF] = useState<SearchFilters>(noFilters)
+  const [open, setOpen] = useState(false)
+  const [found, setFound] = useState<{ key: string; items: Transaction[]; total: number; netCents: number } | null>(null)
   // Step back through earlier months to check how everything was filed (DECISIONS.md 153). 0 = this month.
   const [back, setBack] = useState(0)
   const [earlier, setEarlier] = useState<{ back: number; label: string; items: Transaction[] } | null>(null)
@@ -514,34 +528,143 @@ function SearchableList({ month, onSelect, onError }: { month: Transaction[]; on
   const shown = back === 0 ? month : earlier?.back === back ? earlier.items : null
   const label = back === 0 ? 'This month' : earlier?.back === back ? earlier.label : '…'
 
+  // Only what's filled in and makes sense is sent; a half-typed amount or a backwards range waits.
+  const minBad = f.min !== '' && parseDollars(f.min) === null
+  const maxBad = f.max !== '' && parseDollars(f.max) === null
+  const amountsBackwards = !minBad && !maxBad && f.min !== '' && f.max !== '' && parseDollars(f.min)! > parseDollars(f.max)!
+  const datesBackwards = f.from !== '' && f.to !== '' && f.from > f.to
+  const sent: SearchFilters = {
+    q: f.q.trim().length >= 2 ? f.q : '',
+    categoryId: f.categoryId,
+    min: minBad || amountsBackwards ? '' : f.min.replace(/[$,\s]/g, ''),
+    max: maxBad || amountsBackwards ? '' : f.max.replace(/[$,\s]/g, ''),
+    from: datesBackwards ? '' : f.from,
+    to: datesBackwards ? '' : f.to,
+  }
+  const key = JSON.stringify(sent)
+  const searching = key !== JSON.stringify(noFilters)
+  const filterCount = [f.categoryId, f.min || f.max, f.from || f.to].filter(Boolean).length
+
   useEffect(() => {
-    if (query.length < 2) return
+    if (!searching) return
     const run = { live: true }
     // Wait for a pause in typing before asking the server.
     const timer = window.setTimeout(() => {
       budgetApi
-        .search(query)
-        .then((items) => run.live && setFound({ q: query, items }))
+        .search(JSON.parse(key) as SearchFilters)
+        .then((r) => run.live && setFound({ key, ...r }))
         .catch((e) => run.live && onError(e))
-    }, 250)
+    }, 300)
     return () => {
       run.live = false
       window.clearTimeout(timer)
     }
-  }, [query, onError])
+  }, [key, searching, onError])
 
-  const searching = query.length >= 2
-  const results = searching && found?.q === query ? found.items : null
+  const results = searching && found?.key === key ? found : null
+  const set = (patch: Partial<SearchFilters>) => setF((x) => ({ ...x, ...patch }))
+  const categoryName = categories.find((c) => c.id === f.categoryId)?.name
+  const field = 'block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-base'
+
   return (
     <>
-      <input
-        type="search"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Search a store, category or amount"
-        aria-label="Search transactions"
-        className="mt-4 block w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-base"
-      />
+      <div className="mt-4 flex gap-2">
+        <input
+          type="search"
+          value={f.q}
+          onChange={(e) => set({ q: e.target.value })}
+          placeholder="Store, description or amount"
+          aria-label="Search transactions"
+          className="block min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-base"
+        />
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls="search-filters"
+          onClick={() => setOpen(!open)}
+          className={`shrink-0 rounded-xl px-3.5 text-sm font-semibold ring-1 ${open || filterCount > 0 ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-300'}`}
+        >
+          Filters{filterCount > 0 && ` · ${filterCount}`}
+        </button>
+      </div>
+
+      {open && (
+        <div id="search-filters" className="mt-2 space-y-3 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">Category</span>
+            <select value={f.categoryId} onChange={(e) => set({ categoryId: e.target.value })} className={`mt-1 ${field}`}>
+              <option value="">Any category</option>
+              {groupOrder.map((type) => {
+                const inType = categories.filter((c) => c.type === type)
+                return inType.length === 0 ? null : (
+                  <optgroup key={type} label={groupNames[type]}>
+                    {inType.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )
+              })}
+            </select>
+          </label>
+
+          <fieldset>
+            <legend className="text-xs font-medium text-slate-600">Amount (charges or refunds)</legend>
+            <div className="mt-1 flex items-center gap-2">
+              <input aria-label="At least" placeholder="$ min" inputMode="decimal" value={f.min} onChange={(e) => set({ min: e.target.value })}
+                aria-invalid={minBad || amountsBackwards} className={`${field} ${minBad || amountsBackwards ? 'border-red-400' : ''}`} />
+              <span className="text-slate-400">to</span>
+              <input aria-label="At most" placeholder="$ max" inputMode="decimal" value={f.max} onChange={(e) => set({ max: e.target.value })}
+                aria-invalid={maxBad || amountsBackwards} className={`${field} ${maxBad || amountsBackwards ? 'border-red-400' : ''}`} />
+            </div>
+            {amountsBackwards && <p className="mt-1 text-xs text-red-700">The lowest amount is bigger than the highest.</p>}
+            <p className="mt-1 text-xs text-slate-500">Fill in one for "at least" or "at most", or the same in both for an exact amount.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend className="text-xs font-medium text-slate-600">Dates</legend>
+            <div className="mt-1 flex items-center gap-2">
+              <input type="date" aria-label="From" value={f.from} max={f.to || undefined} onChange={(e) => set({ from: e.target.value })} className={field} />
+              <span className="text-slate-400">to</span>
+              <input type="date" aria-label="To" value={f.to} min={f.from || undefined} onChange={(e) => set({ to: e.target.value })} className={field} />
+            </div>
+            {datesBackwards && <p className="mt-1 text-xs text-red-700">The start date is after the end date.</p>}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {datePresets().map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => set({ from: p.from, to: p.to })}
+                  aria-pressed={f.from === p.from && f.to === p.to}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${f.from === p.from && f.to === p.to ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setF({ ...noFilters, q: f.q })} className="flex-1 rounded-lg bg-slate-100 py-2 text-sm font-medium text-slate-700">
+              Clear filters
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="flex-1 rounded-lg bg-slate-900 py-2 text-sm font-semibold text-white">
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* What's being searched, each removable, while the filters are folded away. */}
+      {!open && filterCount > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {f.categoryId && <Chip label={categoryName ?? 'Category'} onRemove={() => set({ categoryId: '' })} />}
+          {(f.min || f.max) && <Chip label={amountLabel(f.min, f.max)} onRemove={() => set({ min: '', max: '' })} />}
+          {(f.from || f.to) && <Chip label={dateLabel(f.from, f.to)} onRemove={() => set({ from: '', to: '' })} />}
+        </div>
+      )}
+
       {!searching && (
         <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-white px-2 py-1.5 ring-1 ring-slate-200">
           <button type="button" onClick={() => setBack(back + 1)} disabled={back >= 120} aria-label="Earlier month" className="rounded-lg px-3 py-1.5 text-lg font-semibold text-slate-600 disabled:opacity-30">
@@ -555,19 +678,69 @@ function SearchableList({ month, onSelect, onError }: { month: Transaction[]; on
           </button>
         </div>
       )}
-      {!searching && <p className="mt-2 text-xs text-slate-500">Tap any transaction to change it. Search looks through every month.</p>}
+      {!searching && <p className="mt-2 text-xs text-slate-500">Tap any transaction to change it. Search and filters look through every month.</p>}
       {searching && results === null && <Loading label="Searching" />}
       {searching && results && (
-        <p className="mt-2 text-xs text-slate-500">
-          {results.length === 100 ? 'The newest 100 matches' : `${results.length} ${results.length === 1 ? 'match' : 'matches'}`} in every month
-        </p>
+        <div className="mt-3 flex items-baseline justify-between gap-3 text-xs text-slate-500" aria-live="polite">
+          <p>
+            <span className="font-semibold text-slate-700">
+              {results.total} {results.total === 1 ? 'match' : 'matches'}
+            </span>
+            {results.total > 0 && ` · ${formatCents(Math.abs(results.netCents))} ${results.netCents < 0 ? 'back' : 'spent'}`}
+            {results.total > results.items.length && ` · showing the newest ${results.items.length}`}
+          </p>
+          <button type="button" onClick={() => setF(noFilters)} className="shrink-0 font-medium text-slate-700 underline">
+            Clear all
+          </button>
+        </div>
       )}
       {!searching && shown === null && <Loading />}
       {!searching && shown && (
         <TransactionList items={shown} empty={back === 0 ? 'No transactions this month yet. Import a CSV from More.' : `No transactions in ${label}.`} onSelect={onSelect} />
       )}
-      {searching && results && <TransactionList items={results} empty={`Nothing matches “${query}”.`} onSelect={onSelect} />}
+      {searching && results && <TransactionList items={results.items} empty="Nothing matches all of that. Try removing a filter." onSelect={onSelect} />}
     </>
+  )
+}
+
+const noFilters: SearchFilters = { q: '', categoryId: '', min: '', max: '', from: '', to: '' }
+const groupOrder: Category['type'][] = ['Variable', 'FixedBill', 'DebtPayment', 'SavingsTransfer']
+const groupNames: Record<Category['type'], string> = { Variable: 'Spending', FixedBill: 'Bills', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
+
+/** yyyy-mm-dd in the phone's own time zone. */
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+function datePresets() {
+  const now = new Date()
+  const daysAgo = (n: number) => isoDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n))
+  const y = now.getFullYear()
+  return [
+    { label: 'Last 30 days', from: daysAgo(29), to: isoDay(now) },
+    { label: 'Last 3 months', from: isoDay(new Date(y, now.getMonth() - 3, now.getDate())), to: isoDay(now) },
+    { label: 'This year', from: `${y}-01-01`, to: isoDay(now) },
+    { label: 'Last year', from: `${y - 1}-01-01`, to: `${y - 1}-12-31` },
+  ]
+}
+
+function amountLabel(min: string, max: string) {
+  const m = (s: string) => `$${s.replace(/[$,\s]/g, '')}`
+  if (min && max) return min === max ? `Exactly ${m(min)}` : `${m(min)} to ${m(max)}`
+  return min ? `At least ${m(min)}` : `At most ${m(max)}`
+}
+
+function dateLabel(from: string, to: string) {
+  if (from && to) return `${formatDay(from)} – ${formatDay(to)}`
+  return from ? `Since ${formatDay(from)}` : `Until ${formatDay(to)}`
+}
+
+function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 py-1 pr-1 pl-2.5 text-xs font-medium text-white">
+      {label}
+      <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="rounded-full px-1.5 leading-none text-slate-300">
+        ×
+      </button>
+    </span>
   )
 }
 

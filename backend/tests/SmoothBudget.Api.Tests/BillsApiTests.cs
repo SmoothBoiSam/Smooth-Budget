@@ -214,6 +214,53 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         using (var scope = app.Services.CreateScope())
             Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PushDevices.AnyAsync(d => d.Endpoint == endpoint));
     }
+
+    [Fact]
+    public async Task Each_kind_of_notification_has_its_own_switch_and_a_bank_that_needs_you_says_so()
+    {
+        var c = await HistoryAsync();
+        var household = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+        var endpoint = $"https://fcm.googleapis.com/fcm/send/test-{Guid.NewGuid():N}";
+        await c.PostAsJsonAsync("/api/push/subscribe", new { endpoint, keys = new { p256dh = "k", auth = "a" } }, Json);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.PlaidItems.Add(new PlaidItem
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, PlaidItemId = $"item-{Guid.NewGuid():N}", AccessTokenEncrypted = "not-a-real-token",
+                InstitutionName = "Fake Bank", Status = PlaidItemStatus.LoginRequired, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        async Task<List<SmoothBudget.Api.Notifications.PushMessage>> CheckAt(DateTimeOffset utc)
+        {
+            app.Clock.SetUtcNow(utc);
+            var before = app.Push.Sent.Count(s => s.Endpoint == endpoint);
+            using var scope = app.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Notifications.NotificationService>().CheckAsync(household);
+            return app.Push.Sent.Where(s => s.Endpoint == endpoint).Skip(before).Select(s => s.Message).ToList();
+        }
+
+        // Every kind starts on.
+        var types = (await c.GetFromJsonAsync<List<SmoothBudget.Api.Notifications.NotificationTypeDto>>("/api/push/types", Json))!;
+        Assert.Equal(["payday", "bills", "over", "low", "cash", "price", "partner", "bank", "review"], types.Select(t => t.Id));
+        Assert.All(types, t => Assert.True(t.On));
+
+        // Bills turned off: the morning before City Electric is due says nothing about it, but the bank still gets through.
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/push/types/bills", new SmoothBudget.Api.Notifications.NotificationTypeRequest(false), Json)).StatusCode);
+        Assert.False((await c.GetFromJsonAsync<List<SmoothBudget.Api.Notifications.NotificationTypeDto>>("/api/push/types", Json))!.Single(t => t.Id == "bills").On);
+        var morning = await CheckAt(new DateTimeOffset(2026, 11, 11, 17, 0, 0, TimeSpan.Zero));
+        Assert.DoesNotContain(morning, m => m.Tag == "bills");
+        var bank = Assert.Single(morning, m => m.Tag == "bank");
+        Assert.Equal("Fake Bank needs you", bank.Title);
+        // Once a week while it's broken, not every half hour.
+        Assert.DoesNotContain(await CheckAt(new DateTimeOffset(2026, 11, 11, 18, 0, 0, TimeSpan.Zero)), m => m.Tag == "bank");
+
+        // Back on: what's still true (the bill is still due tomorrow) arrives.
+        await c.PutAsJsonAsync("/api/push/types/bills", new SmoothBudget.Api.Notifications.NotificationTypeRequest(true), Json);
+        Assert.Contains(await CheckAt(new DateTimeOffset(2026, 11, 11, 19, 0, 0, TimeSpan.Zero)), m => m.Tag == "bills");
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PutAsJsonAsync("/api/push/types/nope", new SmoothBudget.Api.Notifications.NotificationTypeRequest(false), Json)).StatusCode);
+    }
 }
 
 public class PushKeyTests

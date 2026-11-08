@@ -39,6 +39,10 @@ public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<Trans
 /// back for something, send the category instead (DECISIONS.md 100).</param>
 public record UpdateTransactionRequest(Guid? CategoryId, bool IsTransfer, string? RulePattern, string? PartnerPurpose = null);
 
+/// <param name="Total">How many matched, even beyond the ones listed.</param>
+/// <param name="NetCents">What the matches add up to: money out minus refunds, leaving out transfers and money coming in.</param>
+public record SearchResultDto(IReadOnlyList<TransactionDto> Items, int Total, long NetCents);
+
 /// <param name="BillChargesMoved">Filed under a bill: that bill's other charges that moved there too (DECISIONS.md 158).</param>
 public record UpdateTransactionResult(TransactionDto Transaction, int RuleAppliedTo, int BillChargesMoved = 0);
 
@@ -48,6 +52,7 @@ public record RuleDto(Guid Id, string Pattern, Guid CategoryId, string CategoryN
 public static partial class TransactionEndpoints
 {
     public const int InboxLimit = 500;
+    public const int SearchLimit = 200;
 
     public static void MapTransactionEndpoints(this IEndpointRouteBuilder app)
     {
@@ -76,25 +81,51 @@ public static partial class TransactionEndpoints
             return Results.Ok(new TransactionListDto(from.Value, to.Value, items, label));
         });
 
-        // Search every transaction (DECISIONS.md 150): by store, description or category, or by amount ("12.50" finds
-        // $12.50 either way). Newest first, at most 100.
-        group.MapGet("/transactions/search", async (string? q, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        // Search every transaction (DECISIONS.md 150, 164). Every filter you set applies at once: words (store, description
+        // or category; a number like "12.50" also finds that amount), one category, an amount range, and a date range.
+        // Newest first, at most SearchLimit, with how many matched in all and what they add up to.
+        group.MapGet("/transactions/search", async (string? q, Guid? categoryId, decimal? min, decimal? max, DateOnly? from, DateOnly? to,
+            HttpContext ctx, AppDbContext db, CancellationToken ct) =>
         {
             var text = (q ?? "").Trim();
-            if (text.Length < 2 || text.Length > 100) return Results.Ok(Array.Empty<TransactionDto>());
+            if (text.Length > 100 || min < 0 || max < 0 || (min is { } lo && max is { } hi && lo > hi) || (from is { } f && to is { } t && f > t))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["search"] = ["Check the filters: a low amount or date can't be after the high one."] });
+            var words = text.Length >= 2 ? text : null;
+            if (words is null && categoryId is null && min is null && max is null && from is null && to is null)
+                return Results.Ok(new SearchResultDto([], 0, 0));
+
             var householdId = ctx.User.HouseholdId();
-            var like = "%" + text.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
-            var mine = db.Transactions.Where(t => t.HouseholdId == householdId);
-            var byText = mine.Where(t => EF.Functions.ILike(t.Merchant, like, "\\") || EF.Functions.ILike(t.Description, like, "\\")
-                || (t.Category != null && EF.Functions.ILike(t.Category.Name, like, "\\")));
-            long? cents = decimal.TryParse(text.TrimStart('$').Replace(",", ""), System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var dollars) && dollars > 0 && dollars < 10_000_000
-                ? (long)Math.Round(dollars * 100) : null;
-            var matches = cents is { } c
-                ? mine.Where(t => t.AmountCents == c || t.AmountCents == -c || EF.Functions.ILike(t.Merchant, like, "\\")
-                    || EF.Functions.ILike(t.Description, like, "\\") || (t.Category != null && EF.Functions.ILike(t.Category.Name, like, "\\")))
-                : byText;
-            return Results.Ok(await Project(matches).Take(100).ToListAsync(ct));
+            var matches = db.Transactions.Where(x => x.HouseholdId == householdId);
+            if (words is not null)
+            {
+                var like = "%" + words.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+                long? cents = decimal.TryParse(words.TrimStart('$').Replace(",", ""), System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture, out var dollars) && dollars > 0 && dollars < 10_000_000
+                    ? (long)Math.Round(dollars * 100) : null;
+                matches = matches.Where(x => EF.Functions.ILike(x.Merchant, like, "\\") || EF.Functions.ILike(x.Description, like, "\\")
+                    || (x.Category != null && EF.Functions.ILike(x.Category.Name, like, "\\"))
+                    || (cents != null && (x.AmountCents == cents || x.AmountCents == -cents)));
+            }
+            if (categoryId is { } cat) matches = matches.Where(x => x.CategoryId == cat);
+            // Amounts are sizes: a $40 refund matches $30 to $50 just like a $40 charge.
+            if (min is { } minDollars)
+            {
+                var c = (long)Math.Round(minDollars * 100);
+                matches = matches.Where(x => x.AmountCents >= c || x.AmountCents <= -c);
+            }
+            if (max is { } maxDollars)
+            {
+                var c = (long)Math.Round(maxDollars * 100);
+                matches = matches.Where(x => x.AmountCents <= c && x.AmountCents >= -c);
+            }
+            if (from is { } start) matches = matches.Where(x => x.Date >= start);
+            if (to is { } end) matches = matches.Where(x => x.Date <= end);
+
+            var total = await matches.CountAsync(ct);
+            // Money out minus refunds, leaving out transfers and money coming in (paychecks).
+            var net = await matches.Where(x => !x.IsTransfer && x.Kind != TransactionKind.Income && x.Kind != TransactionKind.PartnerContribution)
+                .SumAsync(x => (long?)x.AmountCents, ct) ?? 0;
+            return Results.Ok(new SearchResultDto(await Project(matches).Take(SearchLimit).ToListAsync(ct), total, net));
         });
 
         // Everything that affects spending but has no category yet, newest first (SPEC section 4.3).

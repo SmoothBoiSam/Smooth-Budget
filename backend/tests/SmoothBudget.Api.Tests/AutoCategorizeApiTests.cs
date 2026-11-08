@@ -582,7 +582,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
             "11/09/2026,11/10/2026,TAQUERIA UNO,Food & Drink,Sale,-25.00,",
             "11/10/2026,11/11/2026,100% JUICE BAR,Food & Drink,Sale,-12.50,");
         async Task<List<string>> Find(string q) =>
-            (await c.GetFromJsonAsync<List<TransactionDto>>($"/api/transactions/search?q={Uri.EscapeDataString(q)}", Json))!.Select(t => t.Merchant).ToList();
+            (await c.GetFromJsonAsync<SearchResultDto>($"/api/transactions/search?q={Uri.EscapeDataString(q)}", Json))!.Items.Select(t => t.Merchant).ToList();
 
         Assert.Equal(["FRESH MARKET"], await Find("fresh")); // any month, any case
         Assert.Equal(["FRESH MARKET"], await Find("groceries")); // by category
@@ -590,5 +590,33 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(["JUICE BAR"], await Find("0% j")); // a % is just a character (this one matches the description)
         Assert.Empty(await Find("x")); // too short
         Assert.Equal(["JUICE BAR", "FRESH MARKET"], await Find("ar")); // newest first
+    }
+
+    [Fact]
+    public async Task Search_filters_by_words_category_amount_and_dates_together()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard,
+            "03/08/2026,03/09/2026,FRESH MARKET,Groceries,Sale,-80.00,",
+            "10/02/2026,10/03/2026,FRESH MARKET,Groceries,Sale,-42.10,",
+            "10/20/2026,10/21/2026,FRESH MARKET,Groceries,Sale,-130.00,",
+            "10/22/2026,10/23/2026,FRESH MARKET,Groceries,Return,15.00,",
+            "11/09/2026,11/10/2026,TAQUERIA UNO,Food & Drink,Sale,-45.00,");
+        var groceries = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Groceries").Id;
+        async Task<SearchResultDto> Search(string query) => (await c.GetFromJsonAsync<SearchResultDto>($"/api/transactions/search?{query}", Json))!;
+
+        // Words, a category, an amount range and a date range, all at once.
+        var r = await Search($"q=fresh&categoryId={groceries}&min=10&max=100&from=2026-10-01&to=2026-10-31");
+        Assert.Equal([42_10L, -15_00L], r.Items.Select(t => t.AmountCents).Order().Reverse().ToList()); // the $130 is too big, March is outside
+        Assert.Equal((2, 27_10L), (r.Total, r.NetCents)); // $42.10 spent less the $15 return
+
+        // Filters work without words too.
+        Assert.Equal(["TAQUERIA UNO", "FRESH MARKET", "FRESH MARKET", "FRESH MARKET"], (await Search("from=2026-10-01")).Items.Select(t => t.Merchant).ToList());
+        Assert.Equal(2, (await Search("min=44&max=100")).Total); // $45 and $80
+
+        // Nothing set: nothing listed. A backwards range is refused.
+        Assert.Equal(0, (await Search("q=f")).Total);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.GetAsync("/api/transactions/search?min=50&max=10")).StatusCode);
     }
 }
