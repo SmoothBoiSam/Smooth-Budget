@@ -78,6 +78,15 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
         Assert.True((await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0].Trips[0].Overtime);
 
+        // Dropping a trip leaves it on the list and out of pay; a re-import keeps that choice while the trip is still there.
+        await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, [], [], ["T1001 02/04"]), Json);
+        var dropped = (await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0];
+        Assert.Equal((true, 756), (dropped.Trips[0].Dropped, dropped.CreditMinutes));
+        Assert.Equal(Hm.Pay(504, 30_32), (await Payday(c)).Checks[1].Lines.Single(l => l.Name == "Regular").Cents);
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        Assert.True((await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0].Trips[0].Dropped);
+        await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, ["T1001 02/04"], []), Json);
+
         // The CSV export is the fallback; a file that's neither is refused.
         var csv = await Schedule(c, PayFixtures.Csv, "schedule.csv", confirm: false);
         Assert.Equal("csv", (await csv.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("month").GetProperty("source").GetString());
@@ -157,11 +166,30 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task A_differently_printed_stub_still_reads_every_tax_line()
+    {
+        // Another print of the same pay advice places the tax amounts about 15 points right of their headings.
+        var c = await NewUserAsync(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
+        var stub = PayFixtures.Stubs[^1];
+        var review = await Upload(c, "/api/payday/paystubs", FakeStubPdf.Build(stub, taxShift: 16), "stub.pdf", "application/pdf");
+        var parsed = JsonSerializer.Deserialize<StubReviewDto>(await review.Content.ReadAsStringAsync(), Json)!;
+        Assert.Empty(parsed.Problems);
+        Assert.Equal(stub.Taxes, parsed.Stub.Taxes);
+    }
+
+    [Fact]
     public async Task Profile_rules_and_model_are_editable()
     {
         var c = await NewUserAsync(new DateTimeOffset(2027, 1, 25, 18, 0, 0, TimeSpan.Zero));
         Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/payday/profile", new ProfileRequest(10, true, true, 75), Json)).StatusCode);
         Assert.Equal(41_14, (await c.GetFromJsonAsync<ProfileDto>("/api/payday/profile", Json))!.RateCents);
+
+        // A date of hire replaces years of service: today (Jan 25, 2027) that's 4 years, and the raise comes on the anniversary.
+        await c.PutAsJsonAsync("/api/payday/profile", new ProfileRequest(0, true, true, 75, new DateOnly(2022, 3, 1)), Json);
+        var hired = (await c.GetFromJsonAsync<ProfileDto>("/api/payday/profile", Json))!;
+        Assert.Equal((4, 33_11L, new DateOnly(2027, 3, 1), 34_29L), (hired.YearsOfService, hired.RateCents, hired.NextRaiseOn!.Value, hired.NextRaiseRateCents!.Value));
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/payday/profile", new ProfileRequest(0, true, true, 75, new DateOnly(2030, 1, 1)), Json)).StatusCode);
+        await c.PutAsJsonAsync("/api/payday/profile", new ProfileRequest(10, true, true, 75), Json);
 
         var rules = PayRules.Default with { PerDiemCentsPerHour = 2_50 };
         Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/payday/rules", JsonContent.Create(rules, options: Json))).StatusCode);

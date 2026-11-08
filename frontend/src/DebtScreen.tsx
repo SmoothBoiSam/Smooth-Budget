@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
 import { ErrorNotice, Loading } from './ui'
-import { centsToInput, formatCents, formatDay, parseDollars } from './format'
+import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 /** "2030-10-01" -> "Oct 2030". */
@@ -343,7 +343,7 @@ function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
         <p className="mt-0.5 text-xs text-slate-500">
           {d.aprBps !== null && `${formatApr(d.aprBps)} APR`}
           {d.minimumCents !== null && ` · ${formatCents(d.minimumCents)} min`}
-          {d.nextDueDate && ` · due ${formatDay(d.nextDueDate)}`}
+          {d.nextDueDate && ` · due ${formatDay(d.nextDueDate)}${d.dueDay === 31 ? " (last day)" : ""}`}
           {d.paidOffBy && <span className="text-slate-700"> · paid off {formatMonth(d.paidOffBy)}</span>}
         </p>
       )}
@@ -563,7 +563,16 @@ function DebtSheet({
             <Money value={minimum} onChange={setMinimum} label="Minimum payment" />
           </Field>
           <Field label="Due day of the month">
-            <input value={dueDay} onChange={(e) => setDueDay(e.target.value)} inputMode="numeric" placeholder="25" className={inputCls} />
+            <select aria-label="Due day of the month" value={dueDay} onChange={(e) => setDueDay(e.target.value)} className={inputCls}>
+              <option value="">Not set</option>
+              {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={String(d)}>
+                  {ordinal(d)}
+                </option>
+              ))}
+              {/* Stored as 31: the 31st where there is one, otherwise the 30th, 29th or 28th. */}
+              <option value="31">Last day of the month</option>
+            </select>
           </Field>
           <Field label={debt?.isCard ? 'Credit limit' : 'Original amount'}>
             <Money value={limit} onChange={setLimit} label="Limit" />

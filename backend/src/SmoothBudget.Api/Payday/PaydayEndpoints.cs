@@ -8,7 +8,7 @@ using SmoothBudget.Core.Pay;
 namespace SmoothBudget.Api.Payday;
 
 public record DayDto(DateOnly Date, string Report, string Release, int CreditMinutes, int DutyMinutes, int Legs, string Route);
-public record TripDto(string Key, string Code, DateOnly Start, DateOnly End, int CreditMinutes, int TafbMinutes, int RevenueLegs, bool Overtime,
+public record TripDto(string Key, string Code, DateOnly Start, DateOnly End, int CreditMinutes, int TafbMinutes, int RevenueLegs, bool Overtime, bool Dropped,
     long PayCents, long CreditPayCents, long BoardingCents, long PerDiemCents, IReadOnlyList<DayDto> Days);
 public record EntryDto(string Key, string Code, DateTime Start, DateTime End, int CreditMinutes, bool Paid);
 
@@ -17,8 +17,10 @@ public record EntryDto(string Key, string Code, DateTime Start, DateTime End, in
 public record ScheduleMonthDto(int Year, int Month, string Source, bool Reserve, DateTime? ImportedUtc, int CreditMinutes, int ShortfallMinutes,
     int OverrideMinutes, IReadOnlyList<TripDto> Trips, IReadOnlyList<EntryDto> Entries, IReadOnlyList<string> Checks, IReadOnlyList<string> Warnings);
 
-public record ScheduleChoicesRequest(bool Reserve, List<string> Overtime, List<string> PaidEntries);
-public record ProfileRequest(int YearsOfService, bool FullTime, bool HolidayPay, int FlatNetPercent);
+/// <param name="Dropped">Trips you dropped after importing (left out of pay until the next import).</param>
+public record ScheduleChoicesRequest(bool Reserve, List<string> Overtime, List<string> PaidEntries, List<string>? Dropped = null);
+/// <param name="HireDate">When set, years of service follow from it and YearsOfService is ignored.</param>
+public record ProfileRequest(int YearsOfService, bool FullTime, bool HolidayPay, int FlatNetPercent, DateOnly? HireDate = null);
 public record ChecklistRequest(bool Done);
 
 /// <param name="Prediction">What the app had predicted for this check, if it had.</param>
@@ -57,8 +59,11 @@ public static class PaydayEndpoints
         {
             if (req.YearsOfService is < 0 or > 60 || req.FlatNetPercent is < 1 or > 100)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["profile"] = ["Years of service is 0 to 60, and the flat estimate 1 to 100%."] });
+            if (req.HireDate is { } hd && (hd > DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime).AddDays(1) || hd.Year < 1960))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["hireDate"] = ["Enter your InFlight date of hire."] });
             var p = await svc.ProfileAsync(ctx.User.HouseholdId(), ct);
             (p.YearsOfService, p.FullTime, p.HolidayPay, p.FlatNetPercent, p.UpdatedUtc) = (req.YearsOfService, req.FullTime, req.HolidayPay, req.FlatNetPercent, clock.GetUtcNow().UtcDateTime);
+            p.HireDate = req.HireDate;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
@@ -111,7 +116,7 @@ public static class PaydayEndpoints
             if (confirm != true)
             {
                 var keep = existing is null ? null : PaydayService.Input(existing);
-                var preview = new ScheduleMonthInput(parsed, existing?.Reserve ?? false, keep?.OvertimeKeys ?? new HashSet<string>(), keep?.PaidEntryKeys ?? new HashSet<string>());
+                var preview = new ScheduleMonthInput(parsed, existing?.Reserve ?? false, keep?.OvertimeKeys ?? new HashSet<string>(), keep?.PaidEntryKeys ?? new HashSet<string>(), keep?.DroppedKeys);
                 return Results.Ok(new { month = MonthDto(preview, null, c), replaces = existing is not null });
             }
             if (existing is null)
@@ -122,6 +127,7 @@ public static class PaydayEndpoints
             // Your overtime and paid-entry choices survive a re-import when the same pairing or entry is still there.
             existing.OvertimeKeys = string.Join('\n', PaydayService.Keys(existing.OvertimeKeys).Where(k => parsed.Pairings.Any(p => p.Key == k)));
             existing.PaidEntryKeys = string.Join('\n', PaydayService.Keys(existing.PaidEntryKeys).Where(k => parsed.Entries.Any(e => e.Key == k)));
+            existing.DroppedKeys = string.Join('\n', PaydayService.Keys(existing.DroppedKeys).Where(k => parsed.Pairings.Any(p => p.Key == k)));
             (existing.Source, existing.Json, existing.ImportedUtc) = (parsed.Source, JsonSerializer.Serialize(parsed, PaydayService.Json), clock.GetUtcNow().UtcDateTime);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { month = MonthDto(PaydayService.Input(existing), existing.ImportedUtc, c), replaces = false });
@@ -143,6 +149,7 @@ public static class PaydayEndpoints
             m.Reserve = req.Reserve;
             m.OvertimeKeys = string.Join('\n', req.Overtime.Where(k => parsed.Pairings.Any(p => p.Key == k)).Distinct());
             m.PaidEntryKeys = string.Join('\n', req.PaidEntries.Where(k => parsed.Entries.Any(e => e.Key == k)).Distinct());
+            m.DroppedKeys = string.Join('\n', (req.Dropped ?? []).Where(k => parsed.Pairings.Any(p => p.Key == k)).Distinct());
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
@@ -261,9 +268,9 @@ public static class PaydayEndpoints
             Math.Max(0, credit - c.Rules.OverrideAboveHours * 60),
             s.Pairings.Select(p =>
             {
-                var pay = PayEngine.Trip(p, m.OvertimeKeys.Contains(p.Key), c.ProfileInput, c.Rules);
+                var pay = PayEngine.Trip(p, m.OvertimeKeys.Contains(p.Key), c.InputOn(DateOnly.FromDateTime(p.Start)), c.Rules);
                 return new TripDto(p.Key, p.Code, DateOnly.FromDateTime(p.Start), p.Days[^1].Date, p.CreditMinutes, p.TafbMinutes, p.RevenueLegs,
-                    m.OvertimeKeys.Contains(p.Key), pay.TotalCents, pay.CreditCents + pay.OvertimeCents, pay.BoardingCents, pay.PerDiemCents,
+                    m.OvertimeKeys.Contains(p.Key), m.DroppedKeys?.Contains(p.Key) == true, pay.TotalCents, pay.CreditCents + pay.OvertimeCents, pay.BoardingCents, pay.PerDiemCents,
                     p.Days.Select(d => new DayDto(d.Date, d.Report.ToString("HH:mm"), d.Release.ToString("HH:mm"), d.CreditMinutes, d.DutyMinutes, d.Legs.Count,
                         string.Join("–", d.Legs.Select(l => l.Origin).Append(d.Legs.LastOrDefault()?.Destination ?? "")))).ToList());
             }).ToList(),

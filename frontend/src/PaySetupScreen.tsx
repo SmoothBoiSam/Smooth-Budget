@@ -10,7 +10,8 @@ import {
   type StubReview,
   type WithholdingModel,
 } from './api'
-import { ErrorNotice } from './ui'
+import { useRemembered } from './offline'
+import { Caret, ErrorNotice } from './ui'
 import { formatCents, formatDay } from './format'
 
 const hm = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
@@ -76,6 +77,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
     try {
       const r = await paydayApi.previewSchedule(file)
       setPreview({ file, month: r.month, replaces: r.replaces })
+      setTimeout(() => document.getElementById('schedule-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
     } catch (err) {
       fail(err)
     }
@@ -109,7 +111,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
       <Section title="Monthly schedule" hint="The SkedPlus+ detailed text export (.txt) is exact; the older CSV works too, with estimated times. Re-importing a month replaces it.">
         <FileButton label="Import a schedule" accept=".txt,.csv,text/plain,text/csv" onChange={pickSchedule} />
         {preview && (
-          <div className="mt-3 rounded-xl bg-white p-4 ring-2 ring-sky-600">
+          <div id="schedule-preview" className="mt-3 scroll-mt-4 rounded-xl bg-white p-4 ring-2 ring-sky-600">
             <p className="text-sm font-semibold">
               {monthLabel(preview.month.year, preview.month.month)}: {preview.month.trips.length} trips, {hm(preview.month.creditMinutes)} credit
               {preview.replaces ? ' (replaces the month you imported before)' : ''}
@@ -139,7 +141,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
         <ul className="mt-3 space-y-3">
           {months.map((m) => (
             <li key={`${m.year}-${m.month}`}>
-              <MonthCard m={m} busy={busy} act={act} />
+              <MonthCard m={m} busy={busy} act={act} onUpdate={pickSchedule} />
             </li>
           ))}
         </ul>
@@ -202,7 +204,7 @@ function FileButton({ label, accept, onChange }: { label: string; accept: string
   )
 }
 
-function MonthBody({ m, onOvertime, onPaid }: { m: ScheduleMonth; onOvertime?: (key: string) => void; onPaid?: (key: string) => void }) {
+function MonthBody({ m, onOvertime, onPaid, onDropped }: { m: ScheduleMonth; onOvertime?: (key: string) => void; onPaid?: (key: string) => void; onDropped?: (key: string) => void }) {
   return (
     <>
       {m.shortfallMinutes > 0 && (
@@ -213,8 +215,8 @@ function MonthBody({ m, onOvertime, onPaid }: { m: ScheduleMonth; onOvertime?: (
       {m.overrideMinutes > 0 && <p className="mt-2 text-xs text-emerald-700">{hm(m.overrideMinutes)} above 87 hours: the override is forecast (an estimate).</p>}
       <ul className="mt-2 space-y-2">
         {m.trips.map((t) => (
-          <li key={t.key} className="rounded-lg bg-slate-50 px-3 py-2">
-            <div className="flex items-baseline justify-between gap-2 text-sm">
+          <li key={t.key} className={`rounded-lg bg-slate-50 px-3 py-2 ${t.dropped ? 'opacity-60' : ''}`}>
+            <div className={`flex items-baseline justify-between gap-2 text-sm ${t.dropped ? 'line-through' : ''}`}>
               <span className="font-medium">
                 {t.code} · {formatDay(t.start)}–{formatDay(t.end)}
               </span>
@@ -229,6 +231,12 @@ function MonthBody({ m, onOvertime, onPaid }: { m: ScheduleMonth; onOvertime?: (
               <label className="mt-1 flex items-center gap-2 text-xs">
                 <input type="checkbox" checked={t.overtime} onChange={() => onOvertime(t.key)} className="accent-slate-900" />
                 Flown as overtime (1.5×)
+              </label>
+            )}
+            {onDropped && (
+              <label className="mt-1 flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={t.dropped} onChange={() => onDropped(t.key)} className="accent-slate-900" />
+                I dropped this trip (left out of pay)
               </label>
             )}
           </li>
@@ -268,27 +276,51 @@ function MonthBody({ m, onOvertime, onPaid }: { m: ScheduleMonth; onOvertime?: (
   )
 }
 
-function MonthCard({ m, busy, act }: { m: ScheduleMonth; busy: boolean; act: Act }) {
+function MonthCard({ m, busy, act, onUpdate }: { m: ScheduleMonth; busy: boolean; act: Act; onUpdate: (e: ChangeEvent<HTMLInputElement>) => void }) {
   const overtime = m.trips.filter((t) => t.overtime).map((t) => t.key)
   const paid = m.entries.filter((e) => e.paid).map((e) => e.key)
-  const save = (reserve: boolean, ot: string[], pe: string[]) => void act(() => paydayApi.setChoices(m.year, m.month, reserve, ot, pe), 'Saved. The forecast is updated.')
+  const dropped = m.trips.filter((t) => t.dropped).map((t) => t.key)
+  const [open, setOpen] = useRemembered(`schedule.${m.year}-${m.month}`, true)
+  const save = (reserve: boolean, ot: string[], pe: string[], dr: string[] = dropped) =>
+    void act(() => paydayApi.setChoices(m.year, m.month, reserve, ot, pe, dr), 'Saved. The forecast is updated.')
   const flip = (list: string[], key: string) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key])
   return (
     <div className="rounded-xl bg-white p-4 ring-1 ring-slate-200">
-      <div className="flex items-baseline justify-between gap-2">
-        <h3 className="font-semibold">{monthLabel(m.year, m.month)}</h3>
-        <span className="text-xs text-slate-500">
-          {hm(m.creditMinutes)} credit · {m.source === 'text' ? 'text export' : 'CSV (estimated)'}
-        </span>
-      </div>
+      <h3>
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-2 text-left">
+          <span className="flex items-center gap-1 font-semibold">
+            <Caret open={open} />
+            {monthLabel(m.year, m.month)}
+          </span>
+          <span className="text-xs font-normal text-slate-500">
+            {hm(m.creditMinutes)} credit · {m.trips.length - dropped.length} trips · {m.source === 'text' ? 'text export' : 'CSV (estimated)'}
+          </span>
+        </button>
+      </h3>
+      {open && (
+        <>
       <label className="mt-2 flex items-center gap-2 text-sm">
         <input type="checkbox" checked={m.reserve} disabled={busy} onChange={() => save(!m.reserve, overtime, paid)} className="accent-slate-900" />
         Reserve this month (the 76-hour guarantee, split across the two checks)
       </label>
-      <MonthBody m={m} onOvertime={(k) => save(m.reserve, flip(overtime, k), paid)} onPaid={(k) => save(m.reserve, overtime, flip(paid, k))} />
-      <button type="button" disabled={busy} onClick={() => void act(() => paydayApi.removeMonth(m.year, m.month), `Removed ${monthLabel(m.year, m.month)}.`)} className="mt-2 text-xs font-medium text-red-600">
-        Remove this month
-      </button>
+      <MonthBody
+        m={m}
+        onOvertime={(k) => save(m.reserve, flip(overtime, k), paid)}
+        onPaid={(k) => save(m.reserve, overtime, flip(paid, k))}
+        onDropped={(k) => save(m.reserve, overtime, paid, flip(dropped, k))}
+      />
+      <p className="mt-3 text-xs text-slate-500">Picked up or traded a trip? Upload the updated export for this month: it replaces the month and keeps your choices for trips that are still there.</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <label className="cursor-pointer rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">
+          Upload an updated schedule
+          <input type="file" accept=".txt,.csv,text/plain,text/csv" onChange={onUpdate} className="sr-only" />
+        </label>
+        <button type="button" disabled={busy} onClick={() => void act(() => paydayApi.removeMonth(m.year, m.month), `Removed ${monthLabel(m.year, m.month)}.`)} className="text-xs font-medium text-red-600">
+          Remove this month
+        </button>
+      </div>
+        </>
+      )}
     </div>
   )
 }
@@ -448,14 +480,34 @@ function NumberInput({ label, value, step, onChange }: { label: string; value: n
 
 function ProfileSection({ p, busy, act }: { p: PayProfile; busy: boolean; act: Act }) {
   const [d, setD] = useState(p)
-  const changed = d.yearsOfService !== p.yearsOfService || d.fullTime !== p.fullTime || d.holidayPay !== p.holidayPay || d.flatNetPercent !== p.flatNetPercent
+  const changed =
+    d.hireDate !== p.hireDate || d.yearsOfService !== p.yearsOfService || d.fullTime !== p.fullTime || d.holidayPay !== p.holidayPay || d.flatNetPercent !== p.flatNetPercent
+  const save = () =>
+    act(() => paydayApi.setProfile({ hireDate: d.hireDate, yearsOfService: d.yearsOfService, fullTime: d.fullTime, holidayPay: d.holidayPay, flatNetPercent: d.flatNetPercent }), 'Profile saved.')
   return (
-    <Section title="Pay profile" hint={`Your hourly rate comes from years of service in the pay rules table: ${formatCents(p.rateCents)}/hour now.`}>
+    <Section title="Pay profile" hint="Your hourly rate comes from the pay rules table, by years of service since your date of hire.">
       <div className="space-y-2 rounded-xl bg-white p-4 text-sm ring-1 ring-slate-200">
         <label className="flex items-center justify-between gap-2">
-          Completed years of service
-          <NumberInput label="Years of service" value={d.yearsOfService} step={1} onChange={(v) => setD({ ...d, yearsOfService: Math.max(0, Math.round(v)) })} />
+          InFlight date of hire
+          <input
+            type="date"
+            aria-label="Date of hire"
+            value={d.hireDate ?? ''}
+            onChange={(e) => setD({ ...d, hireDate: e.target.value || null })}
+            className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5"
+          />
         </label>
+        <p className="text-xs text-slate-500">
+          {p.hireDate
+            ? `${p.yearsOfService} completed year${p.yearsOfService === 1 ? '' : 's'}: ${formatCents(p.rateCents)}/hour now.${p.nextRaiseOn && p.nextRaiseRateCents ? ` It goes up to ${formatCents(p.nextRaiseRateCents)} on ${formatDay(p.nextRaiseOn)}, ${p.nextRaiseOn.slice(0, 4)}.` : ''}`
+            : `${formatCents(p.rateCents)}/hour now. Set your date of hire and the rate advances on its own each anniversary.`}
+        </p>
+        {!d.hireDate && (
+          <label className="flex items-center justify-between gap-2">
+            Or: completed years of service
+            <NumberInput label="Years of service" value={d.yearsOfService} step={1} onChange={(v) => setD({ ...d, yearsOfService: Math.max(0, Math.round(v)) })} />
+          </label>
+        )}
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={d.fullTime} onChange={() => setD({ ...d, fullTime: !d.fullTime })} className="accent-slate-900" />
           Full-time (80-hour line guarantee; part-time is 40)
@@ -469,7 +521,7 @@ function ProfileSection({ p, busy, act }: { p: PayProfile; busy: boolean; act: A
           <NumberInput label="Flat take-home percent" value={d.flatNetPercent} step={1} onChange={(v) => setD({ ...d, flatNetPercent: Math.round(v) })} />
         </label>
         {changed && (
-          <button type="button" disabled={busy} onClick={() => void act(() => paydayApi.setProfile(d), 'Profile saved.')} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
+          <button type="button" disabled={busy} onClick={() => void save()} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
             Save profile
           </button>
         )}

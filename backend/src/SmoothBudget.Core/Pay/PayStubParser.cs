@@ -18,7 +18,9 @@ public class PayStubParseException(string message) : Exception(message);
 public static class PayStubParser
 {
     private const double RowTolerance = 2.5;
-    private const double ColumnTolerance = 14;
+    // Numbers go to the nearest column. Different prints of the same pay advice place them up to ~15 points from
+    // their heading's right edge, and columns are 40+ points apart, so nearest-within-30 is unambiguous.
+    private const double ColumnTolerance = 30;
 
     public static ParsedPayStub Parse(IReadOnlyList<PageWord> words)
     {

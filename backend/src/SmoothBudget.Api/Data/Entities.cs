@@ -388,8 +388,10 @@ public class PayProfile
 {
     public Guid Id { get; set; }
     public Guid HouseholdId { get; set; }
-    /// <summary>Completed years of service: picks the hourly rate from the rules table.</summary>
+    /// <summary>Completed years of service, used only when no date of hire is set.</summary>
     public int YearsOfService { get; set; }
+    /// <summary>The InFlight date of hire: years of service (and the rate) follow from it, advancing on each anniversary.</summary>
+    public DateOnly? HireDate { get; set; }
     public bool FullTime { get; set; } = true;
     /// <summary>Eligible for holiday pay (full-time, past 90 days).</summary>
     public bool HolidayPay { get; set; } = true;
@@ -417,6 +419,8 @@ public class ScheduleMonth
     public string OvertimeKeys { get; set; } = "";
     /// <summary>Non-flying entries you switched on as paid, newline-separated.</summary>
     public string PaidEntryKeys { get; set; } = "";
+    /// <summary>Trips you dropped after importing (left out of pay), newline-separated.</summary>
+    public string DroppedKeys { get; set; } = "";
     public DateTime ImportedUtc { get; set; }
 }
 

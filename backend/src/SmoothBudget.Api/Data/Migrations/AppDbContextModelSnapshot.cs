@@ -693,6 +693,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<bool>("FullTime")
                         .HasColumnType("boolean");
 
+                    b.Property<DateOnly?>("HireDate")
+                        .HasColumnType("date");
+
                     b.Property<bool>("HolidayPay")
                         .HasColumnType("boolean");
 
@@ -937,6 +940,10 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("DroppedKeys")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<Guid>("HouseholdId")
                         .HasColumnType("uuid");

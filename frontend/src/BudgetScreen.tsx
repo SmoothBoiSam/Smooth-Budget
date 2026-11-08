@@ -16,7 +16,8 @@ import {
   recurringApi,
   type Transaction,
 } from './api'
-import { ErrorNotice, Loading } from './ui'
+import { useRemembered } from './offline'
+import { Caret, ErrorNotice, Loading } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import CategoryEditSheet from './CategoryEditSheet'
 import { centsToInput, formatCents, formatDay, formatSigned, parseDollars, titleCase } from './format'
@@ -340,16 +341,22 @@ function Group({
   const live = bills.filter((b) => b.status !== 'canceled')
   const lineIds = new Set(g.categories.map((c) => c.id))
   const elsewhere = live.filter((b) => !b.categoryId || !lineIds.has(b.categoryId))
+  const [open, setOpen] = useRemembered(`budget.${g.type}`, true)
   return (
     <section aria-labelledby={`g-${g.type}`} className="mt-7">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 id={`g-${g.type}`} className="text-sm font-semibold text-slate-700">
-          {g.label}
-        </h2>
-        <p className="text-xs tabular-nums text-slate-500">
-          {formatCents(g.spentCents)} {spending ? 'spent' : 'paid'} of {formatCents(g.limitCents)}
-        </p>
-      </div>
+      <h2 id={`g-${g.type}`}>
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
+          <span className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+            <Caret open={open} />
+            {g.label}
+          </span>
+          <span className="text-xs font-normal tabular-nums text-slate-500">
+            {formatCents(g.spentCents)} {spending ? 'spent' : 'paid'} of {formatCents(g.limitCents)}
+          </span>
+        </button>
+      </h2>
+      {open && (
+        <>
       {!spending && <p className="text-xs text-slate-400">Not part of Left to Spend</p>}
       {g.type === 'DebtPayment' && (
         <p className="text-xs text-slate-400">Card payments count only what you pay beyond this month’s card purchases, which already count in their own categories.</p>
@@ -362,13 +369,7 @@ function Group({
               <a href={`#/budget/c/${c.id}`} className="block px-4 py-3 hover:bg-slate-50">
                 <CategoryRow line={c} spending={spending} />
               </a>
-              {items.length > 0 && (
-                <ul className="mb-2 ml-4 mr-4 divide-y divide-slate-100 border-l-2 border-slate-100 pl-3">
-                  {items.map((b) => (
-                    <BillItemRow key={b.key} b={b} month={month} today={today} />
-                  ))}
-                </ul>
-              )}
+              {items.length > 0 && <BillItems lineId={c.id} items={items} month={month} today={today} />}
             </li>
           )
         })}
@@ -389,7 +390,31 @@ function Group({
           </ul>
         </>
       )}
+        </>
+      )}
     </section>
+  )
+}
+
+/** The bills and subscriptions under one bill line; a long list folds behind a caret. */
+function BillItems({ lineId, items, month, today }: { lineId: string; items: RecurringItem[]; month: { start: string; end: string }; today: string }) {
+  const [open, setOpen] = useRemembered(`budget.items.${lineId}`, items.length <= 3)
+  return (
+    <div className="mb-2 ml-4 mr-4 border-l-2 border-slate-100 pl-3">
+      {items.length > 3 && (
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-center gap-1 py-1 text-xs font-medium text-slate-500">
+          <Caret open={open} />
+          {items.length} bills and subscriptions
+        </button>
+      )}
+      {open && (
+        <ul className="divide-y divide-slate-100">
+          {items.map((b) => (
+            <BillItemRow key={b.key} b={b} month={month} today={today} />
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

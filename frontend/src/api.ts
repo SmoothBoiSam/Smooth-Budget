@@ -808,6 +808,10 @@ export interface PayProfile {
   fullTime: boolean
   holidayPay: boolean
   flatNetPercent: number
+  /** InFlight date of hire: years of service and the rate follow from it. */
+  hireDate: string | null
+  nextRaiseOn: string | null
+  nextRaiseRateCents: number | null
 }
 export interface PaydaySummary {
   profile: PayProfile
@@ -827,6 +831,8 @@ export interface Trip {
   tafbMinutes: number
   revenueLegs: number
   overtime: boolean
+  /** Dropped after importing: left out of pay. */
+  dropped: boolean
   payCents: number
   creditPayCents: number
   boardingCents: number
@@ -962,7 +968,7 @@ export const paydayApi = {
   summary: () => request<PaydaySummary>('GET', '/payday'),
   setDone: (payDate: string, key: string, done: boolean) =>
     request<void>('PUT', `/payday/plan/${payDate}/${encodeURIComponent(key)}`, { done }),
-  setProfile: (p: Omit<PayProfile, 'rateCents'>) => request<void>('PUT', '/payday/profile', p),
+  setProfile: (p: Omit<PayProfile, 'rateCents' | 'nextRaiseOn' | 'nextRaiseRateCents'>) => request<void>('PUT', '/payday/profile', p),
   rules: () => request<{ rules: PayRules; edited: boolean }>('GET', '/payday/rules'),
   setRules: (r: PayRules) => request<void>('PUT', '/payday/rules', r),
   resetRules: () => request<void>('DELETE', '/payday/rules'),
@@ -970,8 +976,8 @@ export const paydayApi = {
     upload<{ month: ScheduleMonth; replaces: boolean }>('/payday/schedule', fileForm(file, { confirm: 'false' })),
   importSchedule: (file: File) => upload<{ month: ScheduleMonth }>('/payday/schedule', fileForm(file, { confirm: 'true' })),
   schedule: () => request<ScheduleMonth[]>('GET', '/payday/schedule'),
-  setChoices: (year: number, month: number, reserve: boolean, overtime: string[], paidEntries: string[]) =>
-    request<void>('PUT', `/payday/schedule/${year}/${month}`, { reserve, overtime, paidEntries }),
+  setChoices: (year: number, month: number, reserve: boolean, overtime: string[], paidEntries: string[], dropped: string[]) =>
+    request<void>('PUT', `/payday/schedule/${year}/${month}`, { reserve, overtime, paidEntries, dropped }),
   removeMonth: (year: number, month: number) => request<void>('DELETE', `/payday/schedule/${year}/${month}`),
   reviewStub: (file: File) => upload<StubReview>('/payday/paystubs', fileForm(file)),
   confirmStub: (stub: StubData) =>

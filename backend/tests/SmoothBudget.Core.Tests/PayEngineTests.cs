@@ -19,6 +19,29 @@ public class PayEngineTests
     }
 
     [Fact]
+    public void Years_of_service_follow_the_date_of_hire_and_the_rate_steps_up_on_the_anniversary()
+    {
+        var hire = new DateOnly(2023, 11, 20);
+        Assert.Equal((2, 3, 3), (PayRules.YearsOfService(hire, new(2026, 11, 19)), PayRules.YearsOfService(hire, new(2026, 11, 20)), PayRules.YearsOfService(hire, new(2027, 11, 19))));
+        Assert.Equal((new DateOnly(2026, 11, 20), 31_26L), Rules.NextRaise(hire, new(2026, 11, 7))!.Value);
+        Assert.Equal((new DateOnly(2027, 11, 20), 33_11L), Rules.NextRaise(hire, new(2026, 11, 20))!.Value);
+        Assert.Null(Rules.NextRaise(new DateOnly(1990, 1, 1), new(2026, 11, 7))); // past the top step
+        Assert.Equal(0, PayRules.YearsOfService(new DateOnly(2027, 1, 1), new(2026, 11, 7)));
+    }
+
+    [Fact]
+    public void A_dropped_trip_stays_on_the_list_but_is_left_out_of_pay()
+    {
+        var s = ScheduleTextParser.Parse(PayFixtures.Text, Rules);
+        var feb1 = PayCalendar.PeriodContaining(new(2027, 2, 1), Rules);
+        var month = new ScheduleMonthInput(s, false, new HashSet<string>(), new HashSet<string>(), new HashSet<string> { "T1001 02/04" });
+        var g = PayEngine.Gross(feb1, month, Profile, Rules);
+        Assert.Equal(Hm.Pay(504, 30_32), g.Lines.Single(l => l.Name == "Regular").Cents); // only T1002's first two days
+        Assert.Equal(756, PayEngine.MonthCreditMinutes(month));
+        Assert.Equal(2, month.Schedule.Pairings.Count);
+    }
+
+    [Fact]
     public void Credit_rules_day_and_pairing()
     {
         Assert.Equal(278, CreditRules.DayCredit(249, 555, Rules)); // 9:15 duty ÷ 2 = 4:37.5, rounded up to 4:38, beats legs 4:09

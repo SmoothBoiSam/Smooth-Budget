@@ -15,7 +15,8 @@ public static class FakeStubPdf
 {
     public const string Name = "Pretend Person", Street = "1 Fake Street", Ssn = "XXX-XX-4321", EmployeeId = "999999", BankAccount = "123456789012";
 
-    public static byte[] Build(PayStubData s)
+    /// <param name="taxShift">Moves the tax amounts right of their headings, as another print of the same pay advice does.</param>
+    public static byte[] Build(PayStubData s, double taxShift = 0)
     {
         var b = new PdfDocumentBuilder();
         var font = b.AddStandard14Font(Standard14Font.Helvetica);
@@ -63,12 +64,12 @@ public static class FakeStubPdf
             if (i < s.Taxes.Count)
             {
                 T(s.Taxes[i].Name, 400, y);
-                R(M(s.Taxes[i].CurrentCents), curR, y);
-                R(M(s.Taxes[i].CurrentCents * 9), taxYtdR, y);
+                R(M(s.Taxes[i].CurrentCents), curR + taxShift, y);
+                R(M(s.Taxes[i].CurrentCents * 9), taxYtdR + taxShift, y);
             }
         }
         T("Total:", 40, y); R(M(s.GrossCents), earnR, y); R(M(s.GrossCents * 9), ytdR, y);
-        T("Total", 399, y); R(M(s.TotalTaxesCents), curR, y); R(M(s.TotalTaxesCents * 9), taxYtdR, y);
+        T("Total", 399, y); R(M(s.TotalTaxesCents), curR + taxShift, y); R(M(s.TotalTaxesCents * 9), taxYtdR + taxShift, y);
 
         // Deductions.
         y -= 20;

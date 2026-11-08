@@ -26,7 +26,10 @@ public record CheckDto(
 /// <param name="Source">"deposit", "stub" or null (not landed yet).</param>
 public record HistoryDto(DateOnly PayDate, long PredictedNetCents, long LowNetCents, long HighNetCents, long? ActualNetCents, long? VarianceCents, string? Source);
 
-public record ProfileDto(int YearsOfService, long RateCents, bool FullTime, bool HolidayPay, int FlatNetPercent);
+/// <param name="YearsOfService">Today: from the date of hire when it's set.</param>
+/// <param name="NextRaiseOn">The anniversary on which the rate next goes up, and to what.</param>
+public record ProfileDto(int YearsOfService, long RateCents, bool FullTime, bool HolidayPay, int FlatNetPercent,
+    DateOnly? HireDate = null, DateOnly? NextRaiseOn = null, long? NextRaiseRateCents = null);
 
 public record PaydayDto(
     ProfileDto Profile, int StubCount, bool ModelLearned, bool ModelEdited, IReadOnlyList<CheckDto> Checks, IReadOnlyList<HistoryDto> History,
@@ -35,7 +38,13 @@ public record PaydayDto(
 /// <summary>Everything the pay engine needs for one household.</summary>
 public sealed record PayContext(
     PayRules Rules, PayProfile Profile, PayProfileInput ProfileInput, Dictionary<(int Year, int Month), ScheduleMonthInput> Months,
-    List<(Guid Id, PayStubData Stub)> Stubs, WithholdingModel? LearnedModel, WithholdingModel? Model, DateOnly Today, Household Household, BudgetMonthCalendar Calendar);
+    List<(Guid Id, PayStubData Stub)> Stubs, WithholdingModel? LearnedModel, WithholdingModel? Model, DateOnly Today, Household Household, BudgetMonthCalendar Calendar)
+{
+    public int YearsOn(DateOnly day) => Profile.HireDate is { } hire ? PayRules.YearsOfService(hire, day) : Profile.YearsOfService;
+
+    /// <summary>The profile with the hourly rate in effect on a day (it steps up on each hire anniversary).</summary>
+    public PayProfileInput InputOn(DateOnly day) => ProfileInput with { RateCentsPerHour = Rules.RateFor(YearsOn(day)) };
+}
 
 /// <summary>
 /// The Payday tab (SPEC 4.6, 5): the next checks with a range, the payday plan for each, and predicted vs actual once
@@ -71,18 +80,23 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             .Select(s => (s.Id, JsonSerializer.Deserialize<PayStubData>(s.Json, Json)!)).ToList();
         var learned = Withholding.Learn(stubs.Select(s => s.Item2).ToList(), rules.Lines);
         var edited = profile.ModelJson is null ? null : JsonSerializer.Deserialize<WithholdingModel>(profile.ModelJson, Json);
-        return new PayContext(rules, profile, new PayProfileInput(rules.RateFor(profile.YearsOfService), profile.FullTime, profile.HolidayPay),
+        var years = profile.HireDate is { } hire ? PayRules.YearsOfService(hire, today) : profile.YearsOfService;
+        return new PayContext(rules, profile, new PayProfileInput(rules.RateFor(years), profile.FullTime, profile.HolidayPay),
             map, stubs, learned, edited ?? learned, today, household, calendar);
     }
 
     public static ScheduleMonthInput Input(ScheduleMonth m) => new(
-        JsonSerializer.Deserialize<ParsedSchedule>(m.Json, Json)!, m.Reserve, Keys(m.OvertimeKeys), Keys(m.PaidEntryKeys));
+        JsonSerializer.Deserialize<ParsedSchedule>(m.Json, Json)!, m.Reserve, Keys(m.OvertimeKeys), Keys(m.PaidEntryKeys), Keys(m.DroppedKeys));
 
     public static HashSet<string> Keys(string stored) => stored.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
 
-    public static ForecastCheck Forecast(PayContext c, PayPeriod p, long typicalMiss) =>
-        PayForecast.Check(PayEngine.Gross(p, c.Months.GetValueOrDefault((p.Start.Year, p.Start.Month)), c.ProfileInput, c.Rules),
-            c.Model, c.ProfileInput.RateCentsPerHour, c.Profile.FlatNetPercent, typicalMiss);
+    /// <summary>Each check uses the rate in effect on the first day it covers.</summary>
+    public static ForecastCheck Forecast(PayContext c, PayPeriod p, long typicalMiss)
+    {
+        var profile = c.InputOn(p.Start);
+        return PayForecast.Check(PayEngine.Gross(p, c.Months.GetValueOrDefault((p.Start.Year, p.Start.Month)), profile, c.Rules),
+            c.Model, profile.RateCentsPerHour, c.Profile.FlatNetPercent, typicalMiss);
+    }
 
     /// <summary>The next check, for Home (no history writes).</summary>
     public async Task<ForecastCheck?> NextAsync(Guid householdId, CancellationToken ct)
@@ -133,8 +147,12 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             c.Months.Keys.OrderByDescending(k => k).Select(k => $"{k.Year}-{k.Month:00}").ToList());
     }
 
-    public static ProfileDto ProfileOf(PayContext c) =>
-        new(c.Profile.YearsOfService, c.ProfileInput.RateCentsPerHour, c.Profile.FullTime, c.Profile.HolidayPay, c.Profile.FlatNetPercent);
+    public static ProfileDto ProfileOf(PayContext c)
+    {
+        var raise = c.Profile.HireDate is { } hire ? c.Rules.NextRaise(hire, c.Today) : null;
+        return new(c.YearsOn(c.Today), c.ProfileInput.RateCentsPerHour, c.Profile.FullTime, c.Profile.HolidayPay, c.Profile.FlatNetPercent,
+            c.Profile.HireDate, raise?.On, raise?.CentsPerHour);
+    }
 
     private async Task<long> TypicalMissAsync(Guid householdId, CancellationToken ct) =>
         PayForecast.TypicalMiss((await db.PayPeriodForecasts.AsNoTracking()

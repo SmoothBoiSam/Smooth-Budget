@@ -40,3 +40,9 @@ export function centsToInput(cents: number): string {
   const c = cents % 100
   return c === 0 ? String(d) : `${d}.${String(c).padStart(2, '0')}`
 }
+
+/** 1 -> "1st", 22 -> "22nd", 13 -> "13th". */
+export function ordinal(n: number): string {
+  const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
+  return `${n}${s}`
+}

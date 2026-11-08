@@ -55,7 +55,12 @@ public record PayProfileInput(long RateCentsPerHour, bool FullTime = true, bool 
 /// <param name="Reserve">Awarded reserve this month: the 76-hour guarantee replaces trip credit for base pay.</param>
 /// <param name="OvertimeKeys">Pairings you flew as overtime (1.5×).</param>
 /// <param name="PaidEntryKeys">Non-flying entries you switched on as paid (all are unpaid by default).</param>
-public record ScheduleMonthInput(ParsedSchedule Schedule, bool Reserve, IReadOnlySet<string> OvertimeKeys, IReadOnlySet<string> PaidEntryKeys);
+/// <param name="DroppedKeys">Trips you dropped after importing: kept on the list, left out of pay.</param>
+public record ScheduleMonthInput(ParsedSchedule Schedule, bool Reserve, IReadOnlySet<string> OvertimeKeys, IReadOnlySet<string> PaidEntryKeys, IReadOnlySet<string>? DroppedKeys = null)
+{
+    /// <summary>The trips you're flying: everything imported except the ones you dropped.</summary>
+    public IEnumerable<Pairing> Flown => Schedule.Pairings.Where(p => DroppedKeys is null || !DroppedKeys.Contains(p.Key));
+}
 
 /// <param name="Name">The pay stub's name for the line, so withholding treats it the way your stubs do.</param>
 /// <param name="Note">How it was figured, in plain words.</param>
@@ -100,7 +105,7 @@ public static class PayEngine
 
         // Credit: day credits on their days; a pairing's guarantee top-up (TAFB ÷ 4 above the day credits) on its last day.
         long regular = 0, overtime = 0;
-        foreach (var p in s.Pairings)
+        foreach (var p in month.Flown)
         {
             var mins = p.Days.Where(d => inPeriod(d.Date)).Sum(d => d.CreditMinutes)
                        + (inPeriod(p.Days[^1].Date) ? p.CreditMinutes - p.DayCreditSum : 0);
@@ -139,7 +144,7 @@ public static class PayEngine
             }
         }
 
-        var legs = s.Pairings.SelectMany(p => p.Days).Where(d => inPeriod(d.Date)).Sum(d => d.RevenueLegs);
+        var legs = month.Flown.SelectMany(p => p.Days).Where(d => inPeriod(d.Date)).Sum(d => d.RevenueLegs);
         if (legs > 0)
         {
             var perLeg = BoardingPerLeg(rate, rules);
@@ -149,7 +154,7 @@ public static class PayEngine
 
         var awayStart = period.Start.ToDateTime(TimeOnly.MinValue);
         var awayEnd = period.End.AddDays(1).ToDateTime(TimeOnly.MinValue);
-        var away = s.Pairings.Sum(p => Overlap(p.Start, p.End, awayStart, awayEnd));
+        var away = month.Flown.Sum(p => Overlap(p.Start, p.End, awayStart, awayEnd));
         if (away > 0)
             lines.Add(new GrossLine(names.PerDiem, Hm.Pay(away, rules.PerDiemCentsPerHour), $"{Hm.Format(away)} away from base at {Dollars(rules.PerDiemCentsPerHour)}/hour."));
 
@@ -170,7 +175,7 @@ public static class PayEngine
     public static int MonthCreditMinutes(ScheduleMonthInput month, DateOnly? through = null)
     {
         var total = 0;
-        foreach (var p in month.Schedule.Pairings)
+        foreach (var p in month.Flown)
         {
             total += p.Days.Where(d => through is null || d.Date <= through).Sum(d => d.CreditMinutes);
             if (through is null || p.Days[^1].Date <= through) total += p.CreditMinutes - p.DayCreditSum;

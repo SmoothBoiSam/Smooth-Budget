@@ -176,7 +176,8 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
                 }
                 if (c.NextPaymentDueDate is { } due && (d.DueDay is null || d.FromBank))
                 {
-                    d.DueDay = due.Day;
+                    // A due date on the last day of its month means "the last day" (stored as 31), so it moves with the month.
+                    d.DueDay = due.Day == DateTime.DaysInMonth(due.Year, due.Month) ? 31 : due.Day;
                     changed = true;
                 }
                 if (changed)
@@ -209,7 +210,7 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
 
     public static string Label(DebtAccount d) => d.Account?.Mask is { } mask ? $"{d.Name} ••{mask}" : d.Name;
 
-    /// <summary>The next due date on or after today; a due day past the end of a short month falls on its last day.</summary>
+    /// <summary>The next due date on or after today. Day 31 means "the last day of the month"; any day past the end of a short month falls on its last day.</summary>
     public static DateOnly NextDue(DateOnly today, int dueDay)
     {
         DateOnly In(DateOnly month) => new(month.Year, month.Month, Math.Min(dueDay, DateTime.DaysInMonth(month.Year, month.Month)));

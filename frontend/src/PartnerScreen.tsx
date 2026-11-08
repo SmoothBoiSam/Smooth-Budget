@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, partnerPlanApi, type Category, type ContributionStatus, type PartnerOverview } from './api'
 import { ErrorNotice, Loading } from './ui'
-import { centsToInput, formatCents, formatDay, parseDollars, titleCase } from './format'
+import { centsToInput, formatCents, formatDay, ordinal, parseDollars, titleCase } from './format'
 
 const purposeLabel: Record<PartnerOverview['recent'][number]['purpose'], string> = {
   waiting: 'Waiting for a label',
@@ -168,11 +168,6 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
       )}
     </div>
   )
-}
-
-function ordinal(n: number) {
-  const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
-  return `${n}${s}`
 }
 
 function MonthStatus({ s }: { s: ContributionStatus }) {

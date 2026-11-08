@@ -34,3 +34,12 @@ export function OfflineBar() {
     </div>
   )
 }
+
+/** The caret on a collapsible section: points down when closed, up when open. */
+export function Caret({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`size-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}>
+      <path d="m5 8 5 5 5-5" />
+    </svg>
+  )
+}

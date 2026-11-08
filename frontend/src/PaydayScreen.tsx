@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, paydayApi, type PayCheck, type PaydaySummary, type PlanItem } from './api'
-import { ErrorNotice, Loading } from './ui'
+import { useRemembered } from './offline'
+import { Caret, ErrorNotice, Loading } from './ui'
 import { formatCents, formatDay } from './format'
 
 const weekday = (iso: string) => {
@@ -49,6 +50,7 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
   }
 
   const empty = s && s.scheduleMonths.length === 0 && s.stubCount === 0
+  const [historyOpen, setHistoryOpen] = useRemembered('payday.history', true)
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
@@ -85,9 +87,13 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
 
           {s.history.length > 0 && (
             <section aria-labelledby="hist-h" className="mt-6">
-              <h2 id="hist-h" className="text-sm font-semibold text-slate-700">
-                Predicted vs actual
+              <h2 id="hist-h">
+                <button type="button" onClick={() => setHistoryOpen(!historyOpen)} aria-expanded={historyOpen} className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+                  <Caret open={historyOpen} />
+                  Predicted vs actual
+                </button>
               </h2>
+              {historyOpen && (
               <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
                 {s.history.map((h) => (
                   <li key={h.payDate} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
@@ -112,6 +118,7 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
                   </li>
                 ))}
               </ul>
+              )}
             </section>
           )}
 

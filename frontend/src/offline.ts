@@ -57,3 +57,24 @@ export function useOnline() {
   }, [])
   return online
 }
+
+/** Open/closed state of a collapsible section, remembered on this device (DECISIONS.md 132). */
+export function useRemembered(key: string, initial: boolean) {
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem('smoothbudget.open.' + key)
+      return v === null ? initial : v === '1'
+    } catch {
+      return initial
+    }
+  })
+  const set = (next: boolean) => {
+    setOpen(next)
+    try {
+      localStorage.setItem('smoothbudget.open.' + key, next ? '1' : '0')
+    } catch {
+      /* not remembered: fine */
+    }
+  }
+  return [open, set] as const
+}

@@ -57,6 +57,23 @@ public record PayRules
     public long RateFor(int yearsOfService) =>
         Rates.Where(r => r.Years <= Math.Max(0, yearsOfService)).OrderByDescending(r => r.Years).Select(r => r.CentsPerHour).FirstOrDefault(Rates.Count > 0 ? Rates.Min(r => r.CentsPerHour) : 0);
 
+    /// <summary>Completed years of service on a day. Rates advance on the anniversary of the InFlight date of hire (Appendix A).</summary>
+    public static int YearsOfService(DateOnly hire, DateOnly on)
+    {
+        var years = on.Year - hire.Year;
+        if (on < hire.AddYears(years)) years--;
+        return Math.Max(0, years);
+    }
+
+    /// <summary>The next anniversary on which the hourly rate goes up, and the new rate (null at the top step).</summary>
+    public (DateOnly On, long CentsPerHour)? NextRaise(DateOnly hire, DateOnly today)
+    {
+        var current = RateFor(YearsOfService(hire, today));
+        for (var y = YearsOfService(hire, today) + 1; y <= 60; y++)
+            if (RateFor(y) > current) return (hire.AddYears(y), RateFor(y));
+        return null;
+    }
+
     public AirportZone? Airport(string code) => Airports.FirstOrDefault(a => string.Equals(a.Code, code, StringComparison.OrdinalIgnoreCase));
 
     public static PayRules Default { get; } = new()
