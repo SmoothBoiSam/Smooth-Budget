@@ -549,6 +549,38 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(System.Net.HttpStatusCode.NotFound, (await c.DeleteAsync($"/api/budget/categories/{Guid.NewGuid()}")).StatusCode);
     }
 
+    [Fact]
+    public async Task Refreshing_from_the_bank_starts_every_category_over_from_its_guesses()
+    {
+        // DECISIONS.md 176: your own picks are cleared too, and everything is filed again from the bank and the merchant name.
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard,
+            "11/08/2026,11/09/2026,FRESH MARKET,Groceries,Sale,-80.00,",
+            "11/09/2026,11/10/2026,TAQUERIA UNO,Food & Drink,Sale,-25.00,",
+            "11/10/2026,11/11/2026,LAWYER LLP,Professional Services,Sale,-300.00,");
+        var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        Guid Id(string name) => cats.Single(x => x.Name == name).Id;
+        var rows = await All(c);
+        // You filed the groceries under Eating out and the lawyer under Shopping by hand.
+        await c.PatchAsJsonAsync($"/api/transactions/{rows.Single(t => t.Merchant == "FRESH MARKET").Id}", new UpdateTransactionRequest(Id("Eating out"), false, null), Json);
+        await c.PatchAsJsonAsync($"/api/transactions/{rows.Single(t => t.Merchant == "LAWYER LLP").Id}", new UpdateTransactionRequest(Id("Shopping"), false, null), Json);
+
+        var res = await c.PostAsync("/api/budget/categories/reset-from-bank", null);
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        var r = (await res.Content.ReadFromJsonAsync<ResetCategoriesResult>(Json))!;
+        Assert.Equal(3, r.Cleared);
+        Assert.Empty(r.BankNotes); // no bank connection here: what the CSV said is used
+
+        rows = await All(c);
+        var grocery = rows.Single(t => t.Merchant == "FRESH MARKET");
+        Assert.Equal(("Groceries", true), (grocery.CategoryName, grocery.NeedsReview)); // the bank's label again, waiting for you
+        Assert.Equal("Eating out", rows.Single(t => t.Merchant == "TAQUERIA UNO").CategoryName);
+        var lawyer = rows.Single(t => t.Merchant == "LAWYER LLP");
+        Assert.Null(lawyer.CategoryId); // no guess: it waits in Review with no category
+        Assert.Contains((await c.GetFromJsonAsync<List<TransactionDto>>("/api/transactions/review?scope=month", Json))!, t => t.Id == lawyer.Id);
+    }
+
     // ---- Merging categories (DECISIONS.md 144) ----------------------------------------------------------
 
     [Fact]

@@ -101,6 +101,9 @@ public sealed class CategorizationContext(
 /// <summary>Filed / Guesses: automatic categories still waiting for the user (likely / unsure). Confirmed ones aren't counted.</summary>
 public record AutoCategorizeResult(int Filed, int Guesses, int StillUncategorized, int PartnerContributions);
 
+/// <summary>Cleared: categories wiped; Filed / Guesses / StillUncategorized: where they landed again; BankNotes: banks that couldn't be reached.</summary>
+public record ResetCategoriesResult(int Cleared, int Filed, int Guesses, int StillUncategorized, IReadOnlyList<string> BankNotes);
+
 public record SuggestedCategoryDto(string Name, string Type, bool IsDiscretionary, int TransactionCount);
 
 /// <summary>
@@ -214,6 +217,24 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
             StillUncategorized: spending.Count(t => TransactionRules.NeedsCategory(t.CategoryId is not null, t.IsTransfer, t.Kind, t.AmountCents)),
             PartnerContributions: rows.Count(t => t.Kind == TransactionKind.PartnerContribution));
     }
+
+    /// <summary>
+    /// Starts every category over (DECISIONS.md 176): clears every category on spending, including the ones you picked by
+    /// hand, so <see cref="RunAsync"/> files them again from your merchant rules, the merchant name and the bank's
+    /// category alone. Transfers, and money between you and your partner that you labeled, are left as they are.
+    /// Returns how many were cleared.
+    /// </summary>
+    public async Task<int> ResetAsync(Guid householdId, CancellationToken ct) =>
+        await db.Transactions
+            .Where(t => t.HouseholdId == householdId && !t.IsTransfer && t.CategorySource != CategorySource.Transfer
+                        && !(t.CategorySource == CategorySource.User && (t.IsPartnerTransfer || t.Kind == TransactionKind.PartnerContribution)))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.CategoryId, (Guid?)null)
+                .SetProperty(t => t.SuggestedCategoryId, (Guid?)null)
+                .SetProperty(t => t.CategorySource, CategorySource.None)
+                .SetProperty(t => t.NeedsReview, false)
+                .SetProperty(t => t.CategoryUnsure, false)
+                .SetProperty(t => t.CategoryReason, (string?)null), ct);
 
     /// <summary>Categories worth adding: groups of uncategorized transactions the bank labels alike (e.g. 104 "Transportation").</summary>
     public async Task<List<SuggestedCategoryDto>> SuggestionsAsync(Guid householdId, CancellationToken ct)

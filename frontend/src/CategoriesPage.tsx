@@ -23,6 +23,7 @@ export default function CategoriesPage({
   onDeleted: (message: string) => void
 }) {
   const [deleting, setDeleting] = useState<Category | null>(null)
+  const [resetting, setResetting] = useState(false)
 
   return (
     <div className="pb-6">
@@ -60,6 +61,32 @@ export default function CategoriesPage({
         )
       })}
 
+      {/* Moved here from More → Bank connections (DECISIONS.md 176). Fixed colors so the dark theme keeps them. */}
+      <section className="mt-8 rounded-xl bg-white p-4 ring-1 ring-slate-200" aria-labelledby="reset-cats-h">
+        <h2 id="reset-cats-h" className="text-sm font-semibold text-slate-700">
+          Start categories over
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">Files every transaction again from what your bank says and the app’s guesses, replacing your own picks.</p>
+        <button
+          type="button"
+          onClick={() => setResetting(true)}
+          className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold"
+          style={{ backgroundColor: '#2563EB', color: '#fff' }}
+        >
+          Refresh categories from bank
+        </button>
+      </section>
+
+      {resetting && (
+        <ResetSheet
+          onClose={() => setResetting(false)}
+          onDone={(m) => {
+            setResetting(false)
+            onDeleted(m)
+          }}
+        />
+      )}
+
       {deleting && (
         <DeleteSheet
           category={deleting}
@@ -71,6 +98,76 @@ export default function CategoriesPage({
           }}
         />
       )}
+    </div>
+  )
+}
+
+/** The caution before "Refresh categories from bank": what it does, what stays, and that it can't be undone. */
+function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message: string) => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function reset() {
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await budgetEditApi.resetCategoriesFromBank()
+      const waiting = r.filed + r.guesses
+      onDone(
+        [
+          `Started over: ${waiting} ${waiting === 1 ? 'transaction has' : 'transactions have'} a new category to confirm in Review`,
+          r.stillUncategorized > 0 ? `, and ${r.stillUncategorized} need${r.stillUncategorized === 1 ? 's' : ''} one picked.` : '.',
+          ...r.bankNotes.map((n) => ` ${n}`),
+        ].join(''),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not refresh the categories.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/40" onClick={busy ? undefined : onClose}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="reset-h"
+        aria-describedby="reset-d"
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+      >
+        <p className="text-xs font-semibold tracking-wide uppercase" style={{ color: '#B45309' }}>
+          Caution
+        </p>
+        <h2 id="reset-h" className="mt-1 text-lg font-semibold">
+          Reset all categories?
+        </h2>
+        <div id="reset-d" className="mt-2 space-y-2 text-sm text-slate-600">
+          <p>
+            This clears the category on <strong>every</strong> transaction, including the ones you picked yourself, downloads what your bank says
+            about each one again, and files them all from the bank’s info and the app’s guesses.
+          </p>
+          <p>Everything it files waits in Review for you to confirm. Ones it can’t place wait there with no category.</p>
+          <p>Your merchant rules, transfers, and what you said about money from your partner stay as they are.</p>
+          <p className="font-semibold" style={{ color: '#DC2626' }}>
+            This can’t be undone.
+          </p>
+        </div>
+
+        {error && (
+          <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button type="button" disabled={busy} onClick={onClose} className="rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-700 disabled:opacity-40">
+            Cancel
+          </button>
+          <button type="button" disabled={busy} onClick={reset} className="rounded-xl py-3 text-sm font-semibold disabled:opacity-60" style={{ backgroundColor: '#DC2626', color: '#fff' }}>
+            {busy ? 'Refreshing…' : 'Yes, reset all'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

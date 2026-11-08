@@ -382,7 +382,6 @@ export const plaidApi = {
   removeItem: (id: string) => request<void>('DELETE', `/plaid/items/${id}`),
   reconnected: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/reconnected`),
   syncAll: () => request<SyncResult[]>('POST', '/sync'),
-  resync: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/resync`),
 }
 
 export interface PendingSweep {
@@ -477,6 +476,12 @@ export const budgetEditApi = {
       'DELETE',
       `/budget/categories/${id}${moveToId ? `?moveToId=${moveToId}` : ''}`,
     ),
+  /**
+   * Clear every category, yours too, re-download what the bank says, and file everything again from the bank and the
+   * app's guesses (DECISIONS.md 176). It can't be undone.
+   */
+  resetCategoriesFromBank: () =>
+    request<{ cleared: number; filed: number; guesses: number; stillUncategorized: number; bankNotes: string[] }>('POST', '/budget/categories/reset-from-bank'),
   hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
   setIncome: (incomeCents: number, partnerCents?: number, automatic = false) =>
     request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null, automatic }),

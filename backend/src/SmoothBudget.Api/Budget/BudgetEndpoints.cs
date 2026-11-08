@@ -165,6 +165,37 @@ public static class BudgetEndpoints
             return Results.Ok(result);
         });
 
+        // Budget → Categories → "Refresh categories from bank" (DECISIONS.md 176): re-download what the bank says about every
+        // transaction, clear every category (yours too), and file them all again from the bank and the app's guesses.
+        g.MapPost("/categories/reset-from-bank", async (HttpContext ctx, AppDbContext db, CategorizationService categorization, AutoBudgetService auto,
+            Plaid.PlaidOptions plaid, Plaid.PlaidSyncService sync, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var cleared = await categorization.ResetAsync(householdId, ct);
+            var banks = new List<string>();
+            if (plaid.IsConfigured)
+            {
+                var items = await db.PlaidItems.Where(i => i.HouseholdId == householdId && i.Status == PlaidItemStatus.Active).ToListAsync(ct);
+                foreach (var item in items)
+                {
+                    item.Cursor = null; // everything again, so the bank's labels are current
+                    await db.SaveChangesAsync(ct);
+                    try
+                    {
+                        var r = await sync.SyncAsync(item.Id, ct);
+                        if (!r.Ok) banks.Add($"{r.InstitutionName ?? "A bank"} couldn't be reached ({r.Error}), so its last labels were used.");
+                    }
+                    catch (Exception)
+                    {
+                        banks.Add($"{item.InstitutionName ?? "A bank"} couldn't be reached, so its last labels were used.");
+                    }
+                }
+            }
+            var result = await categorization.RunAsync(householdId, ct);
+            await auto.RefreshAsync(householdId, ct);
+            return Results.Ok(new ResetCategoriesResult(cleared, result.Filed, result.Guesses, result.StillUncategorized, banks));
+        });
+
         g.MapGet("/categories/discover",async (HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>
             await discovery.DiscoverAsync(ctx.User.HouseholdId(), ct));
 
