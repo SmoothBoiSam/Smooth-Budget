@@ -24,7 +24,7 @@ public static class FakeStubPdf
         double Width(string t)
         {
             var letters = page.MeasureText(t, size, new PdfPoint(0, 0), font);
-            return letters.Count == 0 ? 0 : letters.Max(l => l.GlyphRectangle.Right) - letters.Min(l => l.GlyphRectangle.Left);
+            return letters.Count == 0 ? 0 : letters.Max(l => l.BoundingBox.Right) - letters.Min(l => l.BoundingBox.Left);
         }
         double T(string t, double x, double y) { page.AddText(t, size, new PdfPoint(x, y), font); return x + Width(t); }
         void R(string t, double right, double y) => T(t, right - Width(t), y);

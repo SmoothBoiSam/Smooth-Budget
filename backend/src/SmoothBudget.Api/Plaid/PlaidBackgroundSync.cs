@@ -29,7 +29,37 @@ public class PlaidBackgroundSync(
             return Task.CompletedTask;
         }
         var interval = TimeSpan.FromHours(config.GetValue("Plaid:SweepHours", 6.0));
-        return Task.WhenAll(ProcessQueueAsync(stoppingToken), SweepAsync(interval, stoppingToken));
+        return Task.WhenAll(ProcessQueueAsync(stoppingToken), SweepAsync(interval, stoppingToken), PointWebhooksAsync(stoppingToken));
+    }
+
+    /// <summary>
+    /// When hosted (PLAID_WEBHOOK_URL set), tells Plaid where to send each item's webhooks at startup, so banks linked
+    /// before the app had a public address (or under an old one) still push updates.
+    /// </summary>
+    private async Task PointWebhooksAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(options.WebhookUrl)) return;
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var plaid = scope.ServiceProvider.GetRequiredService<PlaidClient>();
+            var secrets = scope.ServiceProvider.GetRequiredService<SmoothBudget.Core.Security.SecretBox>();
+            var items = await db.PlaidItems.Where(i => i.Status == PlaidItemStatus.Active).ToListAsync(ct);
+            foreach (var item in items)
+            {
+                try { await plaid.UpdateWebhookAsync(secrets.Decrypt(item.AccessTokenEncrypted), options.WebhookUrl!, ct); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    log.LogWarning("Couldn't point item {ItemId}'s webhook at this app: {Error}", item.Id, ex.GetType().Name);
+                }
+                queue.Enqueue(item.Id); // and catch up after a deploy
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log.LogWarning("Pointing webhooks at this app failed: {Error}", ex.GetType().Name);
+        }
     }
 
     private async Task ProcessQueueAsync(CancellationToken ct)

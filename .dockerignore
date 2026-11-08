@@ -1,0 +1,17 @@
+# Keep secrets, real data and build output out of the image's build context.
+.env
+.env.*
+private/
+data/
+*.csv
+*.pdf
+*.xlsx
+.git/
+.github/
+.claude/
+**/bin/
+**/obj/
+**/node_modules/
+frontend/dist/
+backend/tests/
+scripts/

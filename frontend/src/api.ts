@@ -88,6 +88,7 @@ export const api = {
   me: () => request<Me>('GET', '/auth/me'),
   login: (email: string, password: string) => request<Me>('POST', '/auth/login', { email, password }),
   register: (email: string, password: string) => request<Me>('POST', '/auth/register', { email, password }),
+  options: () => request<{ signUpOpen: boolean }>('GET', '/auth/options'),
   logout: () => request<void>('POST', '/auth/logout'),
   homeSummary: () => request<HomeSummary>('GET', '/home/summary'),
 }

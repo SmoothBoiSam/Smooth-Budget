@@ -141,6 +141,10 @@ public class PlaidClient(HttpClient http, PlaidOptions options)
     public Task RefreshTransactionsAsync(string accessToken, CancellationToken ct) =>
         PostAsync<JsonElement>("transactions/refresh", new { access_token = accessToken }, ct);
 
+    /// <summary>Points an existing item's webhooks at this app (items linked before it was hosted have none).</summary>
+    public Task UpdateWebhookAsync(string accessToken, string webhook, CancellationToken ct) =>
+        PostAsync<JsonElement>("item/webhook/update", new { access_token = accessToken, webhook }, ct);
+
     private async Task<T> PostAsync<T>(string path, object body, CancellationToken ct)
     {
         if (!options.IsConfigured)

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using SmoothBudget.Api.Data;
 
@@ -15,8 +16,14 @@ public static class AuthEndpoints
     {
         var auth = app.MapGroup("/api/auth");
 
-        auth.MapPost("/register", async (RegisterRequest req, UserManager<AppUser> users, SignInManager<AppUser> signIn, AppDbContext db, TimeProvider clock) =>
+        // Sign-up is closed in production once any account exists (the first one can still be created on a fresh database).
+        auth.MapGet("/options", async (AppDbContext db, IConfiguration config, IWebHostEnvironment env) =>
+            Results.Ok(new { signUpOpen = await SignUpOpenAsync(db, config, env) }));
+
+        auth.MapPost("/register", async (RegisterRequest req, UserManager<AppUser> users, SignInManager<AppUser> signIn, AppDbContext db, TimeProvider clock, IConfiguration config, IWebHostEnvironment env) =>
         {
+            if (!await SignUpOpenAsync(db, config, env))
+                return Results.Problem("Sign-up is closed on this app.", statusCode: StatusCodes.Status403Forbidden);
             await using var tx = await db.Database.BeginTransactionAsync();
             var household = new Household { Id = Guid.NewGuid(), Name = "My household", CreatedUtc = clock.GetUtcNow().UtcDateTime };
             db.Households.Add(household);
@@ -54,4 +61,8 @@ public static class AuthEndpoints
             Results.Ok(new MeResponse(ctx.User.Identity!.Name!, ctx.User.HouseholdId())))
             .RequireAuthorization();
     }
+
+    /// <summary>Auth:AllowSignUp (default: on everywhere except Production), or no account exists yet.</summary>
+    public static async Task<bool> SignUpOpenAsync(AppDbContext db, IConfiguration config, IWebHostEnvironment env) =>
+        config.GetValue("Auth:AllowSignUp", !env.IsProduction()) || !await db.Users.AnyAsync();
 }

@@ -51,3 +51,10 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  # The image Render builds from the Dockerfile: if it doesn't build here, it won't deploy.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t smoothbudget .

@@ -4,7 +4,10 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Budget;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using SmoothBudget.Api.Data;
+using SmoothBudget.Api.Hosting;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Import;
 using SmoothBudget.Api.Plaid;
@@ -19,9 +22,22 @@ DotNetEnv.Env.TraversePath().NoClobber().Load();
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
-var connectionString = config.GetConnectionString("Default")
-    ?? throw new InvalidOperationException("Set ConnectionStrings__Default (see .env.example).");
+var connectionString = SmoothBudget.Api.Hosting.HostingSetup.ConnectionString(config.GetConnectionString("Default")
+    ?? throw new InvalidOperationException("Set ConnectionStrings__Default (see .env.example)."));
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+
+// Login cookies are signed with keys kept in the database, so a redeploy doesn't sign you out.
+builder.Services.AddDataProtection().SetApplicationName("SmoothBudget").PersistKeysToDbContext<AppDbContext>();
+
+// Behind a host's TLS proxy (Render): trust its X-Forwarded-Proto/For so cookies are Secure and rate limits see your IP.
+var behindProxy = config.GetValue("Hosting:BehindProxy", false);
+if (behindProxy)
+    builder.Services.Configure<ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        o.KnownIPNetworks.Clear(); // the proxy's address isn't fixed; only its last hop is trusted (ForwardLimit 1)
+        o.KnownProxies.Clear();
+    });
 
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -125,12 +141,16 @@ if (config.GetValue("Database:MigrateOnStartup", app.Environment.IsDevelopment()
     await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.MigrateAsync();
 }
 
+if (behindProxy) app.UseForwardedHeaders();
 app.UseExceptionHandler();
+app.UseSecurityHeaders();
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
-    app.UseHttpsRedirection();
+    // Behind a proxy the host redirects HTTP to HTTPS itself, and its health checks arrive over plain HTTP.
+    if (!behindProxy) app.UseHttpsRedirection();
 }
+app.UseWebsite();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

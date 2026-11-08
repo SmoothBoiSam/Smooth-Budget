@@ -150,6 +150,7 @@ In Development, migrations apply automatically on startup.
 | POST | `/api/auth/login` | `{ email, password }`. Sets the auth cookie. |
 | POST | `/api/auth/logout` | |
 | GET | `/api/auth/me` | |
+| GET | `/api/auth/options` | `{ signUpOpen }`: closed in production once an account exists |
 | GET | `/api/home/summary` | Left to Spend, status, days left, safe per day, carried over, over-budget line, uncategorized count, sync health |
 | GET / POST | `/api/accounts` | List, or add `{ name, type: Checking\|Savings\|CreditCard, mask: "1234" }` |
 | POST | `/api/import/csv` | Multipart: `file` and `accountId`. Returns counts and any unreadable rows. |
@@ -187,6 +188,10 @@ In Development, migrations apply automatically on startup.
 | GET / PUT | `/api/payday/profile` | `{ yearsOfService, fullTime, holidayPay, flatNetPercent }` |
 | GET / PUT / DELETE | `/api/payday/rules` | The pay rules table; reset to the manual |
 | GET | `/api/health` | |
+
+## Hosting
+
+See [DEPLOY.md](DEPLOY.md): one Docker container on Render with a managed Postgres database, deployed on every push, and `scripts/move-data.ps1` to move your local data across.
 
 ## Data safety
 

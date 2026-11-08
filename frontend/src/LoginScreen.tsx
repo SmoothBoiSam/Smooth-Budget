@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { api, type Me } from './api'
 
 export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
@@ -7,6 +7,15 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [signUpOpen, setSignUpOpen] = useState(false)
+
+  // Sign-up is closed on the hosted app once your account exists; the link only shows when it's open.
+  useEffect(() => {
+    api
+      .options()
+      .then((o) => setSignUpOpen(o.signUpOpen))
+      .catch(() => setSignUpOpen(false))
+  }, [])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -67,16 +76,18 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
         </button>
       </form>
 
-      <button
-        type="button"
-        onClick={() => {
-          setMode(mode === 'login' ? 'register' : 'login')
-          setError(null)
-        }}
-        className="mt-4 text-sm text-slate-600 underline underline-offset-2"
-      >
-        {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}
-      </button>
+      {(signUpOpen || mode === 'register') && (
+        <button
+          type="button"
+          onClick={() => {
+            setMode(mode === 'login' ? 'register' : 'login')
+            setError(null)
+          }}
+          className="mt-4 text-sm text-slate-600 underline underline-offset-2"
+        >
+          {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}
+        </button>
+      )}
     </main>
   )
 }
