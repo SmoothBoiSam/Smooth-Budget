@@ -15,6 +15,7 @@ public sealed record FittedBudget(BudgetProposal Proposal, long ShortCents, long
 /// <item>discretionary spending (eating out, shopping, entertainment), in proportion to the room each has;</item>
 /// <item>everyday spending (groceries, gas…), never below <see cref="EssentialFloorPercent"/>% of its usual amount.</item>
 /// </list>
+/// Bill, card and savings lines are first raised to whatever was already paid on them this month.
 /// Nothing goes below what's already been spent this month, limits you set yourself are never touched, and bills,
 /// card minimums and debt payments aren't squeezed. Whatever is still missing is reported as a shortfall rather than
 /// hidden in impossible limits.
@@ -29,12 +30,26 @@ public static class BudgetFitter
     /// <param name="savingsFromGoals">True when the savings line comes from your goals plan (already 0 when there's no leftover).</param>
     public static FittedBudget Fit(BudgetProposal p, IReadOnlyDictionary<Guid, long> spentThisMonth, IReadOnlySet<Guid> locked, bool savingsFromGoals)
     {
+        long Spent(Guid id) => Math.Max(0, spentThisMonth.GetValueOrDefault(id));
+        // DECISIONS.md 173: money already paid this month toward a bill, a card or savings is gone, so its line is at least
+        // that much (a bill that went up, a yearly charge, an extra card payment). Spending lines don't need it: going over
+        // one already comes off Left to Spend.
+        var lines = p.Categories.Select(l => l.Type != CategoryType.Variable && !locked.Contains(l.CategoryId) && Spent(l.CategoryId) > l.ProposedCents
+            ? l with
+            {
+                ProposedCents = Spent(l.CategoryId),
+                Explanation = $"{l.Explanation} Raised to {Money(Spent(l.CategoryId))}, what's already been paid this month.",
+            }
+            : l).ToList();
+        if (!lines.SequenceEqual(p.Categories))
+        {
+            var raised = lines.Sum(l => l.ProposedCents);
+            p = p with { Categories = lines, AllocatedCents = raised, UnallocatedCents = p.IncomeCents + p.PartnerCents - raised, SpendsMoreThanIncome = raised > p.IncomeCents + p.PartnerCents };
+        }
+
         var available = p.IncomeCents + p.PartnerCents;
         var over = p.AllocatedCents - available;
         if (over <= 0) return new FittedBudget(p, 0, 0);
-
-        var lines = p.Categories.ToList();
-        long Spent(Guid id) => Math.Max(0, spentThisMonth.GetValueOrDefault(id));
         var stages = new (Func<ProposedLimit, bool> Pick, Func<ProposedLimit, long> Floor, string Reason)[]
         {
             (l => l.Type == CategoryType.SavingsTransfer && !savingsFromGoals, l => Spent(l.CategoryId), "Savings transfers are squeezed first"),

@@ -11,7 +11,6 @@ import {
   type ContributionStatus,
   type Health,
   type LastMonth,
-  type ReviewSummary,
   type RecurringItem,
   type SearchFilters,
   recurringApi,
@@ -28,7 +27,7 @@ import TransactionSheet from './TransactionSheet'
 // Sub-views of the Budget tab, from the URL hash:
 //   #/budget            categories overview
 //   (#/budget/inbox moved to the Review tab, #/review)
-//   #/budget/all        every transaction this month
+//   #/transactions      every transaction and search, opened from Home (DECISIONS.md 171; #/budget/all still works)
 //   #/budget/c/<id>     one category's transactions
 //   #/budget/plan       budget settings and the budget generator
 //   #/budget/categories add or delete categories
@@ -36,7 +35,7 @@ type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 
 
 function viewFromHash(): View {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
-  if (parts[1] === 'all') return { kind: 'all' }
+  if (parts[0] === 'transactions' || parts[1] === 'all') return { kind: 'all' }
   if (parts[1] === 'plan') return { kind: 'plan' }
   if (parts[1] === 'categories') return { kind: 'categories' }
   if (parts[1] === 'c' && parts[2]) return { kind: 'category', id: parts[2] }
@@ -54,8 +53,6 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [view, setView] = useState<View>(viewFromHash)
   const [summary, setSummary] = useState<BudgetSummary | null>(null)
   const [month, setMonth] = useState<Transaction[]>([])
-  const [inbox, setInbox] = useState<Transaction[]>([])
-  const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null)
   const [bills, setBills] = useState<RecurringItem[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [selected, setSelected] = useState<Transaction | null>(null)
@@ -76,18 +73,14 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   const load = useCallback(async () => {
     try {
-      const [s, m, i, c, rs, rec] = await Promise.all([
+      const [s, m, c, rec] = await Promise.all([
         budgetSummaryApi.get(),
         budgetApi.monthTransactions(),
-        budgetApi.inbox(),
         budgetApi.categories(),
-        budgetApi.reviewSummary(),
         recurringApi.summary().catch(() => null), // the bill list is extra: the budget still shows without it
       ])
       setSummary(s)
       setMonth(m.items)
-      setInbox(i)
-      setReviewSummary(rs)
       setBills(rec?.items ?? [])
       setCategories(c)
       setError(null)
@@ -148,8 +141,8 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         </header>
       ) : (
         <header>
-          <a href="#/budget" className="text-sm font-medium text-slate-500">
-            ‹ Budget
+          <a href={view.kind === 'all' ? '#/' : '#/budget'} className="text-sm font-medium text-slate-500">
+            {view.kind === 'all' ? '‹ Home' : '‹ Budget'}
           </a>
           <div className="mt-1 flex items-center justify-between gap-3">
             <h1 className="truncate text-2xl font-bold tracking-tight">
@@ -179,12 +172,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {!summary && !error && <Loading />}
 
       {summary && view.kind === 'overview' && (
-        <Overview
-          summary={summary}
-          bills={bills}
-          inboxCount={inbox.length}
-          guessCount={reviewSummary?.month.total ?? 0}
-        />
+        <Overview summary={summary} bills={bills} />
       )}
 
       {/* Budget settings (DECISIONS.md 168): one card for this month, then the planner. With the automatic budget off,
@@ -253,17 +241,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   )
 }
 
-function Overview({
-  summary: s,
-  bills,
-  inboxCount,
-  guessCount,
-}: {
-  summary: BudgetSummary
-  bills: RecurringItem[]
-  inboxCount: number
-  guessCount: number
-}) {
+function Overview({ summary: s, bills }: { summary: BudgetSummary; bills: RecurringItem[] }) {
   // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
   return (
     <>
@@ -280,30 +258,7 @@ function Overview({
         </a>
       )}
 
-      {inboxCount + guessCount > 0 && (
-        <a
-          href="#/review"
-          className="mt-3 flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200"
-        >
-          <span>
-            {guessCount > 0 && (
-              <>
-                <span className="font-semibold">{guessCount}</span> to confirm
-              </>
-            )}
-            {guessCount > 0 && inboxCount > 0 && ' · '}
-            {inboxCount > 0 && (
-              <>
-                <span className="font-semibold">{inboxCount}</span> {inboxCount === 1 ? 'needs' : 'need'} a category
-              </>
-            )}
-          </span>
-          <span aria-hidden className="font-semibold">
-            ›
-          </span>
-        </a>
-      )}
-
+      {/* What needs a category or a confirmation is on the Review tab's badge, not here (DECISIONS.md 171). */}
       {s.auto && !s.auto.on && <AutoBudgetOff />}
 
       {s.groups.map((g) => (
@@ -319,14 +274,6 @@ function Overview({
           Budget settings
         </a>
       </div>
-
-      <a
-        href="#/budget/all"
-        className="mt-8 flex items-center justify-between rounded-xl bg-white px-4 py-3 text-sm font-medium ring-1 ring-slate-200"
-      >
-        All transactions and search
-        <span aria-hidden>›</span>
-      </a>
     </>
   )
 }
@@ -747,7 +694,7 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   )
 }
 
-function TransactionList({ items, empty, onSelect }: { items: Transaction[]; empty: string; onSelect: (t: Transaction) => void }) {
+export function TransactionList({ items, empty, onSelect }: { items: Transaction[]; empty: string; onSelect: (t: Transaction) => void }) {
   if (items.length === 0)
     return <p className="mt-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">{empty}</p>
   return (

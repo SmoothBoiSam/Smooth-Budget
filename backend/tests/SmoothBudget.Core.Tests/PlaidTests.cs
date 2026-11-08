@@ -266,11 +266,10 @@ public class PlaidMappingTests
     public void Groceries_are_not_lumped_in_with_restaurants()
     {
         var ids = new Dictionary<string, Guid> { ["Groceries"] = Guid.NewGuid(), ["Eating out"] = Guid.NewGuid() };
-        var grocery = PlaidMapping.BankCategoryFor("FOOD_AND_DRINK", "FOOD_AND_DRINK_GROCERIES");
-        var restaurant = PlaidMapping.BankCategoryFor("FOOD_AND_DRINK", "FOOD_AND_DRINK_RESTAURANT");
+        CategoryGuess G(string merchant, string detailed) => AutoCategorizer.Guess(new CategorizationInput(merchant, detailed, "FOOD_AND_DRINK", "VERY_HIGH"), [], null, ids);
 
-        Assert.Equal(ids["Groceries"], Categorizer.Categorize("KING SOOPERS", grocery, [], ids).CategoryId);
-        Assert.Equal(ids["Eating out"], Categorizer.Categorize("TAQUERIA", restaurant, [], ids).CategoryId);
+        Assert.Equal(ids["Groceries"], G("KING SOOPERS", "FOOD_AND_DRINK_GROCERIES").CategoryId);
+        Assert.Equal(ids["Eating out"], G("TAQUERIA", "FOOD_AND_DRINK_RESTAURANT").CategoryId);
     }
 }
 

@@ -81,6 +81,10 @@ public static partial class TransactionEndpoints
             return Results.Ok(new TransactionListDto(from.Value, to.Value, items, label));
         });
 
+        // The newest few, any month, for Home (DECISIONS.md 171).
+        group.MapGet("/transactions/recent", async (int? count, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+            await Project(db.Transactions.Where(t => t.HouseholdId == ctx.User.HouseholdId())).Take(Math.Clamp(count ?? 5, 1, 20)).ToListAsync(ct));
+
         // Search every transaction (DECISIONS.md 150, 164). Every filter you set applies at once: words (store, description
         // or category; a number like "12.50" also finds that amount), one category, an amount range, and a date range.
         // Newest first, at most SearchLimit, with how many matched in all and what they add up to.

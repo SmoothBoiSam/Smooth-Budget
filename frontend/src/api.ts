@@ -198,6 +198,8 @@ export const budgetApi = {
   /** back = how many budget months before this one (0 = this month). */
   monthTransactions: (back = 0) =>
     request<{ from: string; to: string; items: Transaction[]; label: string | null }>('GET', back > 0 ? `/transactions?back=${back}` : '/transactions'),
+  /** The newest few transactions from any month, for Home (DECISIONS.md 171). */
+  recent: (count = 5) => request<Transaction[]>('GET', `/transactions/recent?count=${count}`),
   /** Every transaction matching all the filters set (DECISIONS.md 164); newest first, up to 200, with the full count and total. */
   search: (f: SearchFilters) => {
     const p = new URLSearchParams()

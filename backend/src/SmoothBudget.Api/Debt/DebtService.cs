@@ -219,17 +219,24 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
             : updated == 0 ? "Nothing new from your bank." : null);
     }
 
-    /// <summary>This month's limit for card payments (the first debt-payment category), the budget's plan for paying cards.</summary>
+    /// <summary>
+    /// This month's plan for paying cards: the limit of the first debt-payment category, plus the Card interest bill, since
+    /// the interest is charged on the cards and the minimums include it (DECISIONS.md 172).
+    /// </summary>
     private async Task<long> PlannedCardPaymentsAsync(Guid householdId, CancellationToken ct)
     {
-        var cat = await db.Categories.AsNoTracking()
-            .Where(c => c.HouseholdId == householdId && c.Type == CategoryType.DebtPayment && !c.IsHidden)
-            .OrderBy(c => c.SortOrder).ThenBy(c => c.Name).FirstOrDefaultAsync(ct);
+        var all = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && !c.IsHidden)
+            .OrderBy(c => c.SortOrder).ThenBy(c => c.Name).ToListAsync(ct);
+        var cat = all.FirstOrDefault(c => c.Type == CategoryType.DebtPayment);
         if (cat is null) return 0;
+        var interest = all.FirstOrDefault(c => Core.Transactions.CardInterest.IsInterestCategory(c.Name, c.Type));
         var current = await months.EnsureCurrentAsync(householdId, ct);
-        var over = await db.BudgetMonthCategories.AsNoTracking()
-            .Where(x => x.BudgetMonthId == current.Id && x.CategoryId == cat.Id).Select(x => x.LimitOverrideCents).FirstOrDefaultAsync(ct);
-        return over ?? cat.MonthlyLimitCents;
+        var ids = interest is null ? [cat.Id] : new[] { cat.Id, interest.Id };
+        var overrides = await db.BudgetMonthCategories.AsNoTracking()
+            .Where(x => x.BudgetMonthId == current.Id && ids.Contains(x.CategoryId) && x.LimitOverrideCents != null)
+            .ToDictionaryAsync(x => x.CategoryId, x => x.LimitOverrideCents!.Value, ct);
+        long Limit(Category c) => overrides.TryGetValue(c.Id, out var o) ? o : c.MonthlyLimitCents;
+        return Limit(cat) + (interest is null ? 0 : Limit(interest));
     }
 
     private static DebtInput Input(DebtAccount d) => new(d.Id, Label(d), d.BalanceCents, d.AprBps ?? 0, d.MinimumPaymentCents ?? 0);

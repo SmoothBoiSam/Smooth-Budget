@@ -67,6 +67,24 @@ public class BudgetFitterTests
     }
 
     [Fact]
+    public void Bills_and_card_payments_are_at_least_what_was_already_paid_this_month()
+    {
+        // DECISIONS.md 173: rent went up to $1,800 and $300 already went to the card; those are gone, so the plan holds
+        // them, and the $290 more comes off the savings habit ($100), then discretionary spending ($190).
+        // Overspending on groceries doesn't raise its line: it already comes off Left to Spend.
+        var spent = new Dictionary<Guid, long> { [Rent] = 1_800_00, [Card] = 300_00, [Groceries] = 450_00 };
+        var f = BudgetFitter.Fit(Plan(2_760_00), spent, new HashSet<Guid>(), savingsFromGoals: false);
+        Assert.Equal((1_800_00L, 300_00L, 400_00L), (Limit(f, Rent), Limit(f, Card), Limit(f, Groceries)));
+        Assert.Equal((0L, 110_00L), (Limit(f, Save), Limit(f, EatingOut) + Limit(f, Shopping)));
+        Assert.Equal((0L, 290_00L), (f.ShortCents, f.SqueezedCents));
+        Assert.EndsWith("Raised to $1,800.00, what's already been paid this month.", f.Proposal.Categories.Single(c => c.CategoryId == Rent).Explanation);
+
+        // A limit you set stays even when more was paid.
+        var mine = BudgetFitter.Fit(Plan(3_000_00), spent, new HashSet<Guid> { Rent }, savingsFromGoals: false);
+        Assert.Equal(1_650_00, Limit(mine, Rent));
+    }
+
+    [Fact]
     public void Savings_from_goals_are_left_to_the_generator()
     {
         // With a goals plan the generator only funds savings from a leftover, so the fitter doesn't touch that line.

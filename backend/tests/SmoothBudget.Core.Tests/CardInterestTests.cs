@@ -94,6 +94,26 @@ public class CardInterestTests
     }
 
     [Fact]
+    public void Interest_in_the_card_minimums_is_not_planned_twice()
+    {
+        // DECISIONS.md 172: the Visa's $60 minimum includes about $41.65 of interest, already on the Card interest line.
+        var card = Guid.NewGuid();
+        GeneratorCategory[] cats = [.. Cats, new(card, "Credit card payment", CategoryType.DebtPayment, false, 0)];
+        var p = BudgetGenerator.Propose(ThreeMonths, cats, History(), hasCardDebt: true, cardDebts: [Visa],
+            overrides: new BudgetOverrides(DebtExtraCents: 100_00));
+        var line = p.Categories.Single(c => c.CategoryId == card);
+        Assert.Equal(18_35 + 100_00, line.ProposedCents); // the $18.35 of the minimum that isn't interest, plus the extra
+        Assert.StartsWith("Your card minimums add up to $60.00. $41.65 of that is interest, already on the Card interest line, so $18.35 here, plus $100.00 extra", line.Explanation);
+        // Interest line + card line = the minimum + the extra.
+        Assert.Equal(60_00 + 100_00, line.ProposedCents + p.Categories.Single(c => c.CategoryId == Interest).ProposedCents);
+
+        // With no extra set, everything left over goes to the card and the plan uses exactly the month's money, not more.
+        var all = BudgetGenerator.Propose(ThreeMonths, cats, History(), hasCardDebt: true, cardDebts: [Visa]);
+        Assert.Equal((all.IncomeCents, 0L), (all.AllocatedCents, all.UnallocatedCents));
+        Assert.Equal(3_000_00 - 400_00 - 41_65, all.Categories.Single(c => c.CategoryId == card).ProposedCents);
+    }
+
+    [Fact]
     public void Interest_on_the_bill_line_never_counts_toward_left_to_spend()
     {
         var month = Cal.MonthOf(2026, 11);

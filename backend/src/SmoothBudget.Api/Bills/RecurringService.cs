@@ -64,11 +64,14 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
             .Select(i => new UpcomingBillDto(i.Dto.Name, i.Dto.AmountCents, i.Dto.NextExpected)).ToList();
     }
 
-    /// <summary>Current prices of the bills filed in bill categories, for the budget generator (milestone 6).</summary>
+    /// <summary>
+    /// Current prices of the bills filed in bill categories, for the budget generator (milestone 6). Stopped ones come too,
+    /// marked, so their category stops planning for them (DECISIONS.md 174).
+    /// </summary>
     public async Task<List<CurrentBill>> CurrentBillsAsync(Guid householdId, CancellationToken ct) =>
         (await ItemsAsync(householdId, ct))
-            .Where(i => !i.Dismissed && i.Dto.InBillCategory && i.Dto.CategoryId is not null && i.Dto.Status is not ("possiblyCanceled" or "canceled"))
-            .Select(i => new CurrentBill(i.Dto.CategoryId!.Value, i.Dto.Name, i.Dto.MonthlyCents)).ToList();
+            .Where(i => !i.Dismissed && i.Dto.InBillCategory && i.Dto.CategoryId is not null)
+            .Select(i => new CurrentBill(i.Dto.CategoryId!.Value, i.Dto.Name, i.Dto.MonthlyCents, i.Dto.Status is "possiblyCanceled" or "canceled")).ToList();
 
     public async Task<bool> UpdateAsync(Guid householdId, RecurringUpdateRequest req, CancellationToken ct)
     {

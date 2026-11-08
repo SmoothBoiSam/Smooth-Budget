@@ -222,6 +222,21 @@ public class BudgetGeneratorTests
         Assert.Equal("Current price: Maple Court $1,700.00 a month (your 3-month median was $1,650.00).", rent.Explanation);
     }
 
+    [Fact]
+    public void A_bill_that_stopped_is_no_longer_planned()
+    {
+        // DECISIONS.md 174: rent was $1,650 a month and that bill has stopped, so the line drops to what's left of the usual.
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: false, currentBills: [new CurrentBill(Rent, "Maple Court", 1_650_00, Stopped: true)]);
+        var rent = p.Categories.Single(c => c.CategoryId == Rent);
+        Assert.Equal(0, rent.ProposedCents);
+        Assert.Equal("Maple Court has stopped, so nothing is planned here.", rent.Explanation);
+
+        // A stopped bill next to one still running: only the running one counts.
+        var both = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: false,
+            currentBills: [new CurrentBill(Rent, "Maple Court", 1_650_00, Stopped: true), new CurrentBill(Rent, "Oak Street", 1_500_00)]);
+        Assert.Equal(1_500_00, both.Categories.Single(c => c.CategoryId == Rent).ProposedCents);
+    }
+
     // Milestone 8: what's left goes in your priority order. Everything else: groceries 438 + eating out 136 (trimmed)
     // + rent 1,650 = 2,224.00; income 3,360.86 − 2,224.00 − Visa minimum 60.00 = 1,076.86 left.
     private static readonly SmoothBudget.Core.Debt.DebtInput Visa = new(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);

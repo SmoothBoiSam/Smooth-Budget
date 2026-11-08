@@ -12,7 +12,8 @@ public sealed record ProposedLimit(
     string Explanation, IReadOnlyList<long> MonthlyCents, bool IsDiscretionary = false);
 
 /// <summary>A detected bill or subscription filed in a category, at its current price per month (milestone 6).</summary>
-public sealed record CurrentBill(Guid CategoryId, string Name, long MonthlyCents);
+/// <param name="Stopped">Canceled, or missed enough charges that it looks canceled: it no longer counts.</param>
+public sealed record CurrentBill(Guid CategoryId, string Name, long MonthlyCents, bool Stopped = false);
 
 /// <summary>
 /// What the automatic budget feeds the generator (DECISIONS.md 135): this month's income from the Payday forecast instead of
@@ -133,7 +134,16 @@ public static class BudgetGenerator
                     ? $"No spending here in the last {Months(n)}."
                     : $"Your {n}-month median is {Money(median)}" + (trim ? $", trimmed {DiscretionaryTrimPercent}% while you have card debt." : ".");
             }
-            else if (c.Type == CategoryType.FixedBill && (currentBills ?? []).Where(b => b.CategoryId == c.Id).ToList() is { Count: > 0 } bills)
+            else if (c.Type == CategoryType.FixedBill && (currentBills ?? []).Where(b => b.CategoryId == c.Id).ToList() is { Count: > 0 } found && found.All(b => b.Stopped))
+            {
+                // DECISIONS.md 174: every bill found here has stopped, so the usual amount no longer applies; what's left of
+                // it (charges that aren't those bills) still does.
+                var stopped = found.Sum(b => b.MonthlyCents);
+                proposed = RoundUpToDollar(Math.Max(0, median - stopped));
+                why = string.Join(" and ", found.Select(b => b.Name)) + (found.Count == 1 ? " has" : " have") + " stopped"
+                      + (proposed == 0 ? ", so nothing is planned here." : $", so {Money(proposed)} is planned: your usual {Money(median)} less {Money(stopped)} for {(found.Count == 1 ? "it" : "them")}.");
+            }
+            else if (c.Type == CategoryType.FixedBill && (currentBills ?? []).Where(b => b.CategoryId == c.Id && !b.Stopped).ToList() is { Count: > 0 } bills)
             {
                 // Milestone 6 (DECISIONS.md 95): the bill's current price, so a price increase is picked up right away.
                 proposed = bills.Sum(b => b.MonthlyCents);
@@ -163,7 +173,15 @@ public static class BudgetGenerator
         var debtStep = owed.Count > 0 && cardCategory is not null;
         if ((n > 0 || overrides?.IncomeCents is not null) && (debtStep || savingsCategory is not null))
         {
-            var minimums = debtStep ? owed.Sum(d => Math.Min(d.MinimumCents, d.BalanceCents)) : 0;
+            var allMinimums = debtStep ? owed.Sum(d => Math.Min(d.MinimumCents, d.BalanceCents)) : 0;
+            // DECISIONS.md 172: a card's minimum payment includes the month's interest, and that interest already has its own
+            // bill line (Card interest). Counting it in both would plan it twice, so the card-payment line is the minimums
+            // less the interest; the payday plan adds it back when it sends the payment to the card.
+            var interestLine = proposals.FirstOrDefault(p => CardInterest.IsInterestCategory(p.Name, p.Type));
+            var interestInMinimums = debtStep && interestLine is not null
+                ? Math.Min(allMinimums, Math.Min(interestLine.ProposedCents, CardInterest.Expected(owed).Sum(x => x.Cents)))
+                : 0;
+            var minimums = allMinimums - interestInMinimums;
             var others = proposals.Where(p => p != savingsCategory && (!debtStep || p != cardCategory)).Sum(p => p.ProposedCents);
             var left = Math.Max(0, income + partner - others - minimums);
             long toStarter = 0, toDebt = 0, toLarger = 0;
@@ -190,7 +208,9 @@ public static class BudgetGenerator
             if (debtStep)
             {
                 var target = Debt.DebtPayoff.Order(owed, owed.ToDictionary(d => d.Id, d => d.BalanceCents), Debt.DebtStrategy.Avalanche).First();
-                var why = $"Your card minimums add up to {Money(minimums)}"
+                var why = (interestInMinimums > 0
+                              ? $"Your card minimums add up to {Money(allMinimums)}. {Money(interestInMinimums)} of that is interest, already on the {interestLine!.Name} line, so {Money(minimums)} here"
+                              : $"Your card minimums add up to {Money(minimums)}")
                           + (toDebt > 0 && overrides?.DebtExtraCents is { } setExtra ? $", plus {Money(toDebt)} extra to {target.Name}" + (toDebt < setExtra ? $" (you set {Money(setExtra)} on the Debt tab; that's what's left this month)." : " (the extra you set on the Debt tab).")
                              : toDebt > 0 ? $", plus {Money(toDebt)} left over {(toStarter > 0 ? $"after your {savings!.StarterName.ToLowerInvariant()}" : "after everything else")}, as extra to {target.Name} ({target.AprBps / 100m:0.##}% APR, the highest)."
                              : toStarter > 0 ? $". What's left goes to your {savings!.StarterName.ToLowerInvariant()} first." : ". Nothing is left over for extra this month.");

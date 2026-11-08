@@ -4,10 +4,10 @@ import type { ReactNode } from 'react'
 
 import { icons } from './icons'
 
-export type Route = 'home' | 'budget' | 'review' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'more' | 'partner'
+export type Route = 'home' | 'transactions' | 'budget' | 'review' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'more' | 'partner'
 
 const tabs: { label: string; route: Route; icon: ReactNode; also: Route[] }[] = [
-  { label: 'Home', route: 'home', icon: icons.home, also: [] },
+  { label: 'Home', route: 'home', icon: icons.home, also: ['transactions'] },
   { label: 'Budget', route: 'budget', icon: icons.budget, also: [] },
   { label: 'Review', route: 'review', icon: icons.review, also: [] },
   // Payday setup, Debt and Savings live under Plan; Partner under More; Bills under Review.

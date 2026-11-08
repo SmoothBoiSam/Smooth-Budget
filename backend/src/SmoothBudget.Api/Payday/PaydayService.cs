@@ -254,10 +254,13 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var savingsAccount = accounts.Where(a => a.Type == AccountType.Savings).OrderBy(a => a.CreatedUtc).Select(Label).FirstOrDefault() ?? "savings";
         var cards = accounts.Where(a => a.Type == AccountType.CreditCard).SelectMany(a => new[] { a.Name, Label(a) }).ToHashSet();
         var categories = await db.Categories.AsNoTracking().Where(x => x.HouseholdId == householdId && !x.IsHidden).ToListAsync(ct);
-        var debtMonthly = categories.Where(x => x.Type == CategoryType.DebtPayment).Sum(x => x.MonthlyLimitCents);
+        var debts = await db.DebtAccounts.AsNoTracking().Include(d => d.Account).Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0).ToListAsync(ct);
+        // The card payment is the debt-payment line plus the Card interest bill: the interest is charged on the cards and the
+        // minimums include it, so the budget keeps it on its own line rather than counting it twice (DECISIONS.md 172).
+        var debtMonthly = categories.Where(x => x.Type == CategoryType.DebtPayment).Sum(x => x.MonthlyLimitCents)
+                          + (debts.Count > 0 ? categories.Where(x => CardInterest.IsInterestCategory(x.Name, x.Type)).Sum(x => x.MonthlyLimitCents) : 0);
         var savingsMonthly = categories.Where(x => x.Type == CategoryType.SavingsTransfer).Sum(x => x.MonthlyLimitCents);
         var savingsCategories = categories.Where(x => x.Type == CategoryType.SavingsTransfer).Select(x => x.Id).ToHashSet();
-        var debts = await db.DebtAccounts.AsNoTracking().Include(d => d.Account).Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0).ToListAsync(ct);
         var snowball = c.Household.DebtStrategy == DebtStrategy.Snowball;
         var targetDebt = (snowball
             ? debts.OrderBy(d => d.BalanceCents)

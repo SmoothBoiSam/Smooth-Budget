@@ -27,11 +27,4 @@ public static class PlaidMapping
             return accountIsCard ? TransactionKind.Refund : TransactionKind.Income;
         return TransactionKind.Purchase;
     }
-
-    /// <summary>
-    /// The label to feed the categorizer: the detailed category when the app knows it (so groceries
-    /// aren't lumped in with restaurants under FOOD_AND_DRINK), otherwise the primary one.
-    /// </summary>
-    public static string? BankCategoryFor(string? primary, string? detailed) =>
-        detailed is not null && Categorizer.DefaultBankCategoryMap.ContainsKey(detailed) ? detailed : primary;
 }

@@ -16,26 +16,32 @@ public class CategorizerTests
 
     private static readonly DateTime T0 = new(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc);
 
+    private static (Guid?, CategorySource) Guess(string merchant, string? bank, IReadOnlyCollection<MerchantRule>? rules = null)
+    {
+        var g = AutoCategorizer.Guess(new CategorizationInput(merchant, bank), rules ?? [], null, Categories);
+        return (g.CategoryId, g.Source);
+    }
+
     [Fact]
     public void Bank_category_maps_to_the_households_category()
     {
-        Assert.Equal((Groceries, CategorySource.Bank), Categorizer.Categorize("FRESH MARKET", "Grocery", [], Categories));
-        Assert.Equal((EatingOut, CategorySource.Bank), Categorizer.Categorize("TAQUERIA UNO", "Food & Drink", [], Categories));
-        Assert.Equal((Gas, CategorySource.Bank), Categorizer.Categorize("FUEL STOP", "gas", [], Categories)); // exact name, any case
+        Assert.Equal((Groceries, CategorySource.Bank), Guess("FRESH MARKET", "Grocery"));
+        Assert.Equal((EatingOut, CategorySource.Bank), Guess("TAQUERIA UNO", "Food & Drink"));
+        Assert.Equal((Gas, CategorySource.Bank), Guess("FUEL STOP", "gas")); // any case
     }
 
     [Fact]
     public void Unknown_or_missing_bank_category_leaves_it_uncategorized()
     {
-        Assert.Equal((null, CategorySource.None), Categorizer.Categorize("LAWYER", "Professional Services", [], Categories));
-        Assert.Equal((null, CategorySource.None), Categorizer.Categorize("KING SOOPERS DENVER CO", null, [], Categories));
+        Assert.Equal((null, CategorySource.None), Guess("LAWYER", "Professional Services"));
+        Assert.Equal((null, CategorySource.None), Guess("KING SOOPERS DENVER CO", null));
     }
 
     [Fact]
     public void A_merchant_rule_beats_the_bank_category()
     {
         var rules = new[] { new MerchantRule(Coffee, "BLUE DOOR", T0) };
-        Assert.Equal((Coffee, CategorySource.Rule), Categorizer.Categorize("BLUE DOOR COFFEE", "Food & Drink", rules, Categories));
+        Assert.Equal((Coffee, CategorySource.Rule), Guess("BLUE DOOR COFFEE", "Food & Drink", rules));
     }
 
     [Fact]
@@ -46,8 +52,8 @@ public class CategorizerTests
             new MerchantRule(Groceries, "KING SOOPERS", T0),
             new MerchantRule(Gas, "KING SOOPERS FUEL", T0),
         };
-        Assert.Equal(Gas, Categorizer.Categorize("King Soopers Fuel Center", null, rules, Categories).CategoryId);
-        Assert.Equal(Groceries, Categorizer.Categorize("KING SOOPERS DENVER CO", null, rules, Categories).CategoryId);
+        Assert.Equal(Gas, Categorizer.MatchRule("King Soopers Fuel Center", rules)!.CategoryId);
+        Assert.Equal(Groceries, Categorizer.MatchRule("KING SOOPERS DENVER CO", rules)!.CategoryId);
     }
 
     [Fact]

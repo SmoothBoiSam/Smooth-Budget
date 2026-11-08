@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, plaidApi, type HomeSummary, type Me, type Status } from './api'
+import { ApiError, api, budgetApi, plaidApi, type Category, type HomeSummary, type Me, type Status, type Transaction } from './api'
+import { TransactionList } from './BudgetScreen'
+import TransactionSheet from './TransactionSheet'
 import { formatCents, formatDay, formatTime } from './format'
 import { saved, useOnline } from './offline'
 import { Loading } from './ui'
@@ -148,6 +150,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
         )}
 
         {summary && <Summary summary={summary} />}
+        {summary && online && <RecentTransactions summary={summary} onChanged={() => void load()} />}
 
         {summary && (
           <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-400">
@@ -315,5 +318,64 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
       )}
 
     </>
+  )
+}
+
+/**
+ * The newest few transactions, any month, under the payday card (DECISIONS.md 171). Tap one to change it; "All
+ * transactions" opens the full list and search. Reloads whenever Home does, so a pull to refresh shows new ones.
+ */
+function RecentTransactions({ summary, onChanged }: { summary: HomeSummary; onChanged: () => void }) {
+  const [items, setItems] = useState<Transaction[] | null>(null)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [selected, setSelected] = useState<Transaction | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    Promise.all([budgetApi.recent(5), budgetApi.categories()])
+      .then(([r, c]) => {
+        if (!live) return
+        setItems(r)
+        setCategories(c)
+      })
+      .catch(() => live && setItems((x) => x ?? []))
+    return () => {
+      live = false
+    }
+  }, [summary])
+
+  return (
+    <section aria-labelledby="recent-h" className="mt-6">
+      <h2 id="recent-h" className="text-sm font-semibold text-slate-700">
+        Recent transactions
+      </h2>
+      {notice && (
+        <p role="status" className="mt-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {notice}
+        </p>
+      )}
+      {items === null ? (
+        <p className="mt-2 text-sm text-slate-400">Loading…</p>
+      ) : (
+        <TransactionList items={items} empty="No transactions yet." onSelect={setSelected} />
+      )}
+      <a href="#/transactions" className="mt-3 flex items-center justify-between rounded-xl bg-white px-4 py-3 text-sm font-medium ring-1 ring-slate-200">
+        All transactions and search
+        <span aria-hidden>›</span>
+      </a>
+      {selected && (
+        <TransactionSheet
+          transaction={selected}
+          categories={categories}
+          onClose={() => setSelected(null)}
+          onSaved={(m) => {
+            setSelected(null)
+            setNotice(m)
+            onChanged()
+          }}
+        />
+      )}
+    </section>
   )
 }
