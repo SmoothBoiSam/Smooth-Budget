@@ -231,6 +231,22 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
             <span className="font-semibold tabular-nums text-red-600">−{formatCents(s.carriedInDeficitCents)}</span>
           </li>
         )}
+        {s.unfiledSpendingCents > 0 && (
+          <li>
+            <a href="#/review" className="flex justify-between gap-3 rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
+              <span className="text-slate-600">Not filed in a category yet</span>
+              <span className="font-semibold tabular-nums text-red-600">−{formatCents(s.unfiledSpendingCents)} ›</span>
+            </a>
+          </li>
+        )}
+        {s.overplannedCents > 0 && (
+          <li>
+            <a href="#/budget/plan" className="flex justify-between gap-3 rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
+              <span className="text-slate-600">Planned beyond this month’s money</span>
+              <span className="font-semibold tabular-nums text-red-600">−{formatCents(s.overplannedCents)} ›</span>
+            </a>
+          </li>
+        )}
         {(s.cashWarnings ?? []).map((w) => (
           <li key={w.account}>
             <a href="#/payday" className="flex justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-red-800">

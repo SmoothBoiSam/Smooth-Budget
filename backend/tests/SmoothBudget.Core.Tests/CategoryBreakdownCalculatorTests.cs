@@ -119,7 +119,7 @@ public class CategoryBreakdownCalculatorTests
         var lts = LeftToSpendCalculator.Calculate(Nov, new DateOnly(2026, 11, 20), Categories, txns, carriedInDeficitCents: 42_50);
 
         var variableRemaining = lines.Where(l => l.Type == CategoryType.Variable).Sum(l => l.RemainingCents);
-        Assert.Equal(lts.LeftToSpendCents, variableRemaining - 42_50);
+        Assert.Equal(lts.LeftToSpendCents, variableRemaining - 42_50 - 15_00); // the $15 not filed yet counts too (DECISIONS.md 177)
         Assert.Equal(lts.TotalVariableSpentCents, lines.Where(l => l.Type == CategoryType.Variable).Sum(l => l.SpentCents));
     }
 

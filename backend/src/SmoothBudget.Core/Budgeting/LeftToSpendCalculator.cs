@@ -54,11 +54,19 @@ public sealed record LeftToSpendResult(
     int UncategorizedSpendingCount,
     IReadOnlyList<CategorySpend> Categories,
     // A late or short partner contribution (SPEC section 3): Left to Spend is recomputed without it.
-    long PartnerShortfallCents = 0);
+    long PartnerShortfallCents = 0,
+    // Spending that isn't filed in a category yet (and money sent to your partner waiting for a label): already spent,
+    // so it comes off Left to Spend until you file it (DECISIONS.md 177).
+    long UnfiledSpendingCents = 0,
+    // What the month's plan needs beyond the money coming in: bills, card and savings at least what's already paid,
+    // plus every spending limit, less expected income and partner money (DECISIONS.md 178).
+    long OverplannedCents = 0);
 
 /// <summary>
 /// Computes the headline number (SPEC section 3, "Left to Spend"):
-/// <code>Left to Spend = Σ over variable categories (limit − spent) − carried-in deficit</code>
+/// <code>Left to Spend = Σ over variable categories (limit − spent) − carried-in deficit − late partner money
+///                 − spending not filed yet − plan beyond the month's money</code>
+/// The last two (DECISIONS.md 177-178) keep it from ever showing money that's already gone or never coming.
 /// Rules applied:
 /// <list type="bullet">
 /// <item>Only transactions dated inside the budget month count.</item>
@@ -80,12 +88,17 @@ public static class LeftToSpendCalculator
         IEnumerable<BudgetCategory> categories,
         IEnumerable<BudgetTransaction> transactions,
         long carriedInDeficitCents,
-        long partnerShortfallCents = 0)
+        long partnerShortfallCents = 0,
+        long moneyInCents = 0)
     {
         ArgumentNullException.ThrowIfNull(month);
         ArgumentOutOfRangeException.ThrowIfNegative(partnerShortfallCents);
         ArgumentNullException.ThrowIfNull(categories);
         ArgumentNullException.ThrowIfNull(transactions);
+        var allCategories = categories.ToList();
+        var allTransactions = transactions.ToList();
+        categories = allCategories;
+        transactions = allTransactions;
         if (carriedInDeficitCents < 0)
             throw new ArgumentOutOfRangeException(nameof(carriedInDeficitCents), "A carried-in deficit is a positive amount of cents.");
 
@@ -121,7 +134,9 @@ public static class LeftToSpendCalculator
 
         var totalLimit = lines.Sum(l => l.LimitCents);
         var totalSpent = lines.Sum(l => l.SpentCents);
-        var leftToSpend = lines.Sum(l => l.RemainingCents) - carriedInDeficitCents - partnerShortfallCents;
+        var unfiled = UnfiledSpending(month, allCategories, allTransactions);
+        var overplanned = Overplanned(month, allCategories, allTransactions, moneyInCents);
+        var leftToSpend = lines.Sum(l => l.RemainingCents) - carriedInDeficitCents - partnerShortfallCents - unfiled - overplanned;
         var over = lines.Where(l => l.IsOver).ToList();
 
         return new LeftToSpendResult(
@@ -138,7 +153,39 @@ public static class LeftToSpendCalculator
             Status: StatusFor(leftToSpend, totalLimit),
             UncategorizedSpendingCount: uncategorized,
             Categories: lines,
-            PartnerShortfallCents: partnerShortfallCents);
+            PartnerShortfallCents: partnerShortfallCents,
+            UnfiledSpendingCents: unfiled,
+            OverplannedCents: overplanned);
+    }
+
+    /// <summary>
+    /// Spending this month with no category (or one that isn't in the budget, like a hidden one), plus money you sent your
+    /// partner that's waiting for a label (DECISIONS.md 177). It's gone either way, so it counts until it's filed; never
+    /// below zero, so an unfiled refund can't add money.
+    /// </summary>
+    public static long UnfiledSpending(BudgetMonthRange month, IReadOnlyCollection<BudgetCategory> categories, IEnumerable<BudgetTransaction> transactions)
+    {
+        var known = categories.Select(c => c.Id).ToHashSet();
+        var total = transactions
+            .Where(t => month.Contains(t.Date) && !t.IsTransfer && (t.CategoryId is null || !known.Contains(t.CategoryId.Value))
+                        && (TransactionRules.NeedsCategory(false, t.IsTransfer, t.Kind, t.AmountCents)
+                            || (t.Kind == TransactionKind.PartnerTransfer && t.AmountCents > 0)))
+            .Sum(OwnerShare);
+        return Math.Max(0, total);
+    }
+
+    /// <summary>
+    /// How far the month's plan goes beyond the money coming in (DECISIONS.md 178): every spending limit, plus each bill,
+    /// card and savings line at its limit or what's already been paid on it if more, less expected income and partner
+    /// money. Zero when the plan fits, or when no income is on record (<paramref name="moneyInCents"/> 0) to compare with.
+    /// </summary>
+    public static long Overplanned(BudgetMonthRange month, IReadOnlyCollection<BudgetCategory> categories, IEnumerable<BudgetTransaction> transactions, long moneyInCents)
+    {
+        if (moneyInCents <= 0)
+            return 0;
+        var planned = CategoryBreakdownCalculator.Calculate(month, categories, transactions)
+            .Sum(l => l.Type == CategoryType.Variable ? l.LimitCents : Math.Max(l.LimitCents, l.SpentCents));
+        return Math.Max(0, planned - moneyInCents);
     }
 
     /// <summary>

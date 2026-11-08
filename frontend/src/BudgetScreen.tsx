@@ -249,7 +249,13 @@ function Overview({ summary: s, bills }: { summary: BudgetSummary; bills: Recurr
         <span className={`font-semibold tabular-nums ${statusText[s.status]}`}>{formatCents(s.leftToSpendCents)}</span> left to spend ·{' '}
         {formatCents(s.totalVariableSpentCents)} of {formatCents(s.totalVariableLimitCents)} spent
         {s.carriedInDeficitCents > 0 && <> · {formatCents(s.carriedInDeficitCents)} carried over</>}
+        {s.unfiledSpendingCents > 0 && <> · {formatCents(s.unfiledSpendingCents)} not filed yet</>}
       </p>
+      {s.overplannedCents > 0 && (
+        <a href="#/budget/plan" role="alert" className="mt-3 block rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
+          The plan is {formatCents(s.overplannedCents)} more than this month’s money, so that much comes off Left to Spend. Budget settings ›
+        </a>
+      )}
 
       {s.lastMonth && <LastMonthCard last={s.lastMonth} />}
       {s.auto?.on && s.auto.shortCents > 0 && (
@@ -781,9 +787,29 @@ function LastMonthCard({ last }: { last: LastMonth }) {
       ) : (
         <p className="mt-1 text-sm">Ended exactly on budget.</p>
       )}
-      {last.carriedInDeficitCents > 0 && (
-        <p className="mt-1 text-xs text-slate-500">Includes {formatCents(last.carriedInDeficitCents)} carried in from the month before.</p>
-      )}
+      {/* How the end figure was reached, from the API's own numbers, so nothing in it is a mystery. */}
+      <dl className="mt-2 space-y-0.5 text-xs text-slate-500">
+        {(
+          [
+            ['Left in spending categories', last.totalUnspentCents, 1],
+            ['Over in spending categories', last.totalOverspentCents, -1],
+            ['Carried in from the month before', last.carriedInDeficitCents, -1],
+            ['Partner money that didn’t come', last.partnerShortfallCents ?? 0, -1],
+            ['Spending not filed in a category', last.unfiledSpendingCents ?? 0, -1],
+            ['Planned beyond the month’s money', last.overplannedCents ?? 0, -1],
+          ] as const
+        )
+          .filter(([, cents]) => cents > 0)
+          .map(([label, cents, sign]) => (
+            <div key={label} className="flex justify-between gap-3">
+              <dt>{label}</dt>
+              <dd className="tabular-nums">
+                {sign < 0 ? '−' : '+'}
+                {formatCents(cents)}
+              </dd>
+            </div>
+          ))}
+      </dl>
     </section>
   )
 }

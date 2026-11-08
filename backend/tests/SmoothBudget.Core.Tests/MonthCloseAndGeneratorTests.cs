@@ -53,6 +53,17 @@ public class MonthCloseCalculatorTests
     }
 
     [Fact]
+    public void The_sweep_never_sends_money_that_isnt_there()
+    {
+        // DECISIONS.md 177-178: 100 under, but $30 is still unfiled and rent came in 40 over a plan that used all
+        // 2,250 coming in. Only 30 is truly left over, and the close still equals the final Left to Spend.
+        BudgetTransaction[] txns = [T(Groceries, 400_00), T(EatingOut, 100_00), T(Rent, 1_690_00), new(null, new DateOnly(2026, 11, 12), 30_00)];
+        var r = MonthCloseCalculator.Close(Nov, Cats, txns, 0, moneyInCents: 2_250_00);
+        Assert.Equal((30_00L, 0L), (r.SurplusCents, r.DeficitCents));
+        Assert.Equal(LeftToSpendCalculator.Calculate(Nov, Nov.End, Cats, txns, 0, moneyInCents: 2_250_00).LeftToSpendCents, r.ClosingNetCents);
+    }
+
+    [Fact]
     public void Bills_debt_and_savings_never_affect_the_close()
     {
         var r = MonthCloseCalculator.Close(Nov, Cats, [T(Rent, 1_700_00)], 0);

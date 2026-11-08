@@ -25,6 +25,10 @@ export interface HomeSummary {
   /** The partner's fixed contributions this month (late / different amount flags). */
   contributions: ContributionStatus[] | null
   partnerShortfallCents: number
+  /** Spending not filed in a category yet (it still comes off Left to Spend). */
+  unfiledSpendingCents: number
+  /** How far the plan goes beyond the month's money (it comes off Left to Spend). */
+  overplannedCents: number
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */
@@ -299,6 +303,10 @@ export interface BudgetSummary {
   contributions: ContributionStatus[] | null
   /** What Left to Spend is missing because a contribution is late or short. */
   partnerShortfallCents: number
+  /** Spending not filed in a category yet (it still comes off Left to Spend). */
+  unfiledSpendingCents: number
+  /** How far the plan goes beyond the month's money (it comes off Left to Spend). */
+  overplannedCents: number
   /** The automatic budget: on or off, its last change, any shortfall, and the limits you set yourself. */
   auto: { on: boolean; note: string | null; noteUtc: string | null; shortCents: number; setByYou: string[]; incomeSetByYou: boolean } | null
 }
@@ -411,6 +419,9 @@ export interface LastMonth {
   surplusCents: number
   deficitCents: number
   sweeps: SweepItem[]
+  partnerShortfallCents: number
+  unfiledSpendingCents: number
+  overplannedCents: number
 }
 
 export interface ProposedLimit {
@@ -835,7 +846,7 @@ export interface PayAmount {
 }
 export interface PlanItem {
   key: string
-  kind: 'keep' | 'debt' | 'sweep' | 'savings'
+  kind: 'keep' | 'debt' | 'cardspend' | 'sweep' | 'savings'
   label: string
   cents: number
   destination: string

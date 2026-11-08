@@ -140,8 +140,11 @@ public class ImportApiTests(TestApp app) : IClassFixture<TestApp>
         // 18.45 + 44.10 + (36.99 - 12.00) + 91.45 + 14.00 + 32.10 = 225.09 of a 1,010.00 variable budget.
         var summary = (await s.Client.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!;
         Assert.Equal(225_09, summary.TotalVariableSpentCents);
-        Assert.Equal(1_010_00 - 225_09, summary.LeftToSpendCents);
         Assert.Equal(2, summary.UncategorizedCount); // the rent is recognized by its name
+        // The two without a category (the $20.00 mystery merchant and $64.30 at King Soopers) are already spent, so they
+        // come off Left to Spend until they're filed (DECISIONS.md 177).
+        Assert.Equal(84_30, summary.UnfiledSpendingCents);
+        Assert.Equal(1_010_00 - 225_09 - 84_30, summary.LeftToSpendCents);
     }
 
     [Fact]

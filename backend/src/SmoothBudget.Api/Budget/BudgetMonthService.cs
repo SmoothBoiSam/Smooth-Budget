@@ -20,7 +20,16 @@ public sealed record MonthData(
     IReadOnlyList<ContributionStatus>? Contributions = null, long PartnerShortfallCents = 0)
 {
     public MonthCloseResult Close() =>
-        MonthCloseCalculator.Close(Range, Categories.Select(c => c.ForCalculator), Transactions, CarriedInDeficitCents, PartnerShortfallCents);
+        MonthCloseCalculator.Close(Range, Categories.Select(c => c.ForCalculator), Transactions, CarriedInDeficitCents, PartnerShortfallCents, MoneyInCents);
+
+    /// <summary>
+    /// The money this month's plan has to work with (SPEC section 3): expected income plus partner money. With fixed
+    /// contributions set up, partner money is exactly those (DECISIONS.md 97).
+    /// </summary>
+    public long MoneyInCents => MoneyIn(Row, Contributions);
+
+    public static long MoneyIn(BudgetMonth row, IReadOnlyList<ContributionStatus>? contributions) =>
+        row.IncomeExpectedCents + (contributions is { Count: > 0 } cs ? cs.Sum(s => s.ExpectedCents) : row.PartnerExpectedCents);
 }
 
 /// <summary>An ended month's result: frozen if closed, otherwise worked out live (it may still change).</summary>

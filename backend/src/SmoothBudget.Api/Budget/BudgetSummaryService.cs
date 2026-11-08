@@ -52,7 +52,8 @@ public record LastMonthDto(
     BudgetMonthDto Month, bool Closed, DateOnly ClosesOn,
     long TotalUnspentCents, long TotalOverspentCents, long CarriedInDeficitCents,
     long ClosingNetCents, long SurplusCents, long DeficitCents,
-    IReadOnlyList<SweepItemDto> Sweeps);
+    IReadOnlyList<SweepItemDto> Sweeps,
+    long PartnerShortfallCents = 0, long UnfiledSpendingCents = 0, long OverplannedCents = 0);
 
 public record BudgetSummaryDto(
     BudgetMonthDto BudgetMonth,
@@ -83,7 +84,10 @@ public record BudgetSummaryDto(
     IReadOnlyList<ContributionStatusDto>? Contributions = null,
     long PartnerShortfallCents = 0,
     // The automatic budget (DECISIONS.md 135): on or off, its last change, any shortfall, and the limits you set yourself.
-    AutoBudgetDto? Auto = null);
+    AutoBudgetDto? Auto = null,
+    // What else comes off Left to Spend (DECISIONS.md 177-178): spending not filed yet, and a plan beyond the month's money.
+    long UnfiledSpendingCents = 0,
+    long OverplannedCents = 0);
 
 /// <param name="ShortCents">What this month still needs beyond its money after every squeeze.</param>
 /// <param name="SetByYou">Categories whose limit you set yourself (from now on, or this month only).</param>
@@ -131,8 +135,8 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             data.Transactions.Where(t => t.Kind == kind && !t.IsTransfer && t.AmountCents < 0).Sum(t => -t.AmountCents);
         var row = data.Row;
         // With fixed contributions set up, partner money is those contributions, counted once as offsets (DECISIONS.md 97).
-        var partnerExpected = data.Contributions is { Count: > 0 } cs ? cs.Sum(s => s.ExpectedCents) : row.PartnerExpectedCents;
-        var moneyIn = row.IncomeExpectedCents + partnerExpected;
+        var moneyIn = MonthData.MoneyIn(row, data.Contributions);
+        var partnerExpected = moneyIn - row.IncomeExpectedCents;
         var partnerName = db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).Single();
         var reviewCount = db.Transactions.Count(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null && !t.IsTransfer
                                                      && t.Date >= data.Month.Start && t.Date <= data.Month.End);
@@ -147,7 +151,8 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories), data.PartnerShortfallCents,
             new AutoBudgetDto(db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).Single(), row.AutoNote, row.AutoNoteUtc, row.AutoShortCents,
                 db.Categories.Where(c => c.HouseholdId == householdId && c.LimitSetByUser).Select(c => c.Id).AsEnumerable()
-                    .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser));
+                    .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser),
+            lts.UnfiledSpendingCents, lts.OverplannedCents);
     }
 
     private async Task<LastMonthDto?> LastMonthAsync(Guid householdId, Data.BudgetMonth current, CancellationToken ct)
@@ -173,7 +178,8 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
 
         var label = ended.Range.Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture);
         return new LastMonthDto(new BudgetMonthDto(ended.Range.Start, ended.Range.End, label), ended.Closed, ended.ClosesOn,
-            r.TotalUnspentCents, r.TotalOverspentCents, r.CarriedInDeficitCents, r.ClosingNetCents, r.SurplusCents, r.DeficitCents, sweeps);
+            r.TotalUnspentCents, r.TotalOverspentCents, r.CarriedInDeficitCents, r.ClosingNetCents, r.SurplusCents, r.DeficitCents, sweeps,
+            r.PartnerShortfallCents, r.UnfiledSpendingCents, r.OverplannedCents);
     }
 
     public static string HealthName(CategoryHealth h) => h switch

@@ -31,7 +31,8 @@ public class BudgetRefreshTracker
 /// (<see cref="BudgetFitter"/>), and applied to every limit you haven't set yourself.
 /// </summary>
 public class AutoBudgetService(AppDbContext db, BudgetMonthService months, BudgetGeneratorService generator, Payday.PaydayService payday,
-    BudgetRefreshTracker tracker, Bills.RecurringService recurring, Debt.CardInterestService interest, TimeProvider clock)
+    BudgetRefreshTracker tracker, Bills.RecurringService recurring, Debt.CardInterestService interest, Transactions.CategorizationService categorization,
+    TimeProvider clock)
 {
     private static readonly CultureInfo Us = CultureInfo.GetCultureInfo("en-US");
 
@@ -96,6 +97,8 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
     {
         await interest.EnsureAsync(householdId, ct); // card interest is a bill line, not spending (DECISIONS.md 159)
         await recurring.KeepBillsTogetherAsync(householdId, ct); // a bill's charges follow the one you filed (DECISIONS.md 158)
+        if (await categorization.ReleaseHiddenAsync(householdId, ct) > 0) // spending left in a hidden category (DECISIONS.md 177)
+            await categorization.RunAsync(householdId, ct);
         var household = await db.Households.SingleAsync(h => h.Id == householdId, ct);
         if (!household.AutoBudget) return;
         if (!await db.Categories.AnyAsync(c => c.HouseholdId == householdId && !c.IsHidden, ct)) return; // set up categories first

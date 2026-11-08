@@ -1,4 +1,5 @@
 using SmoothBudget.Core.Budgeting;
+using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Core.Tests;
 
@@ -195,16 +196,45 @@ public class LeftToSpendCalculatorTests
     }
 
     [Fact]
-    public void Uncategorized_purchases_are_counted_but_not_spent_so_they_are_never_silently_missing()
+    public void Spending_not_filed_yet_comes_off_left_to_spend_so_it_is_never_silently_missing()
     {
+        // DECISIONS.md 177: it's already spent, whatever category it ends up in.
         var r = Calc(
         [
             Spend(null, 15_00),                // uncategorized purchase
-            Spend(Guid.NewGuid(), 9_00),       // category we do not know about
+            Spend(Guid.NewGuid(), 9_00),       // a category not in the budget (hidden)
             Spend(null, -1_700_86),            // paycheck: money in, not an uncategorized purchase
+            new BudgetTransaction(null, new DateOnly(2026, 11, 10), 40_00, Kind: TransactionKind.PartnerTransfer),  // sent to her, waiting for a label
+            new BudgetTransaction(null, new DateOnly(2026, 11, 10), -25_00, Kind: TransactionKind.PartnerTransfer), // from her, waiting: never adds
         ]);
         Assert.Equal(2, r.UncategorizedSpendingCount);
-        Assert.Equal(760_00, r.LeftToSpendCents);
+        Assert.Equal(15_00 + 9_00 + 40_00, r.UnfiledSpendingCents);
+        Assert.Equal(760_00 - 64_00, r.LeftToSpendCents);
+    }
+
+    [Fact]
+    public void An_unfiled_refund_never_adds_money()
+    {
+        var r = Calc([new BudgetTransaction(null, new DateOnly(2026, 11, 10), -30_00, Kind: TransactionKind.Refund)]);
+        Assert.Equal((0L, 760_00L), (r.UnfiledSpendingCents, r.LeftToSpendCents));
+    }
+
+    [Fact]
+    public void A_plan_beyond_the_months_money_comes_off_left_to_spend()
+    {
+        // DECISIONS.md 178. Limits: spending 760 + bill 1,000 = 1,760, with only 1,700 coming in: 60 short.
+        var bill = Guid.NewGuid();
+        BudgetCategory[] cats = [.. Categories.Where(c => c.Type == CategoryType.Variable), new BudgetCategory(bill, CategoryType.FixedBill, 1_000_00)];
+        var r = LeftToSpendCalculator.Calculate(Nov, Today, cats, [], 0, moneyInCents: 1_700_00);
+        Assert.Equal((60_00L, 700_00L), (r.OverplannedCents, r.LeftToSpendCents));
+
+        // The bill came in at 1,090: what's already paid counts, so 150 short.
+        var paid = LeftToSpendCalculator.Calculate(Nov, Today, cats, [new BudgetTransaction(bill, new DateOnly(2026, 11, 8), 1_090_00)], 0, moneyInCents: 1_700_00);
+        Assert.Equal((150_00L, 610_00L), (paid.OverplannedCents, paid.LeftToSpendCents));
+
+        // Enough coming in: nothing. No income on record: nothing to compare with.
+        Assert.Equal(0, LeftToSpendCalculator.Calculate(Nov, Today, cats, [], 0, moneyInCents: 2_000_00).OverplannedCents);
+        Assert.Equal(0, LeftToSpendCalculator.Calculate(Nov, Today, cats, [], 0).OverplannedCents);
     }
 
     [Theory]

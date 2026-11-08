@@ -1,6 +1,7 @@
 namespace SmoothBudget.Core.Budgeting;
 
-/// <param name="ClosingNetCents">The month's final Left to Spend: unspent minus overspent across spending categories, minus any deficit carried in.</param>
+/// <param name="ClosingNetCents">The month's final Left to Spend: unspent minus overspent across spending categories, minus any deficit carried in,
+/// a partner shortfall, spending not filed and a plan beyond the month's money (the last three are kept for showing why).</param>
 /// <param name="SurplusCents">What's left over, to sweep toward debt or savings. Zero when there's a deficit.</param>
 /// <param name="DeficitCents">What carries into next month as "Carried over". Zero when there's a surplus.</param>
 public sealed record MonthCloseResult(
@@ -11,7 +12,10 @@ public sealed record MonthCloseResult(
     long ClosingNetCents,
     long SurplusCents,
     long DeficitCents,
-    IReadOnlyList<CategoryStatus> Categories);
+    IReadOnlyList<CategoryStatus> Categories,
+    long PartnerShortfallCents = 0,
+    long UnfiledSpendingCents = 0,
+    long OverplannedCents = 0);
 
 /// <summary>
 /// Closes a budget month (SPEC section 3, "Rollover and carry-forward"): nets the variance across all
@@ -30,27 +34,34 @@ public static class MonthCloseCalculator
         IEnumerable<BudgetCategory> categories,
         IEnumerable<BudgetTransaction> transactions,
         long carriedInDeficitCents,
-        long partnerShortfallCents = 0)
+        long partnerShortfallCents = 0,
+        long moneyInCents = 0)
     {
         if (carriedInDeficitCents < 0)
             throw new ArgumentOutOfRangeException(nameof(carriedInDeficitCents), "A carried-in deficit is a positive amount of cents.");
         ArgumentOutOfRangeException.ThrowIfNegative(partnerShortfallCents);
 
         var cats = categories.ToList();
-        var lines = CategoryBreakdownCalculator.Calculate(month, cats, transactions);
+        var txns = transactions.ToList();
+        var lines = CategoryBreakdownCalculator.Calculate(month, cats, txns);
         var spending = lines.Where(l => l.Type == CategoryType.Variable).ToList();
 
         var unspent = spending.Where(l => l.RemainingCents > 0).Sum(l => l.RemainingCents);
         var overspent = spending.Where(l => l.RemainingCents < 0).Sum(l => -l.RemainingCents);
         // A partner contribution that never came (or came short) is missing money, like a deficit (SPEC section 3).
-        var net = unspent - overspent - carriedInDeficitCents - partnerShortfallCents;
+        // So is spending still not filed when the month closes, and a plan that went beyond the month's money
+        // (DECISIONS.md 177-178): the sweep must never send money that isn't there.
+        var unfiled = LeftToSpendCalculator.UnfiledSpending(month, cats, txns);
+        var overplanned = LeftToSpendCalculator.Overplanned(month, cats, txns, moneyInCents);
+        var net = unspent - overspent - carriedInDeficitCents - partnerShortfallCents - unfiled - overplanned;
 
         return new MonthCloseResult(month, unspent, overspent, carriedInDeficitCents, net,
             SurplusCents: Math.Max(0, net),
             DeficitCents: Math.Max(0, -net),
-            lines);
+            lines, partnerShortfallCents, unfiled, overplanned);
     }
 }
+
 
 public enum SweepTarget { Debt = 0, Savings = 1, Split = 2 }
 

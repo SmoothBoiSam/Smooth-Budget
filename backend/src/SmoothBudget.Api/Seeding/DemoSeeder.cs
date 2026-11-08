@@ -172,7 +172,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             var m = calendar.MonthOf(label.Year, label.Month);
             var scale = back switch { 3 => 92, 2 => 104, _ => 100 };
             var monthPlan = back == 1
-                ? plan.Append((Day: 6, Account: mastercard, Category: (Category?)entertainment, Merchant: "Concert Tickets", Cents: 1_010_00 - 890_97 + DemoCarriedInDeficitCents, Transfer: false)) // 161.53: variable limits minus the plan's spending, plus the deficit
+                ? plan.Append((Day: 6, Account: mastercard, Category: (Category?)entertainment, Merchant: "Concert Tickets", Cents: 1_010_00 - 890_97 + DemoCarriedInDeficitCents - 15_00, Transfer: false)) // 146.53: variable limits minus the plan's spending, plus the deficit, less the $15 left unfiled (it counts too, DECISIONS.md 177)
                 : plan.AsEnumerable();
 
             foreach (var p in monthPlan)
@@ -259,7 +259,9 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             New("Car insurance", CategoryType.FixedBill, 120_00),
             New("Utilities & internet", CategoryType.FixedBill, 140_00),
             New("Subscriptions", CategoryType.FixedBill, 35_00),
-            New("Credit card payment", CategoryType.DebtPayment, 300_00),
+            // What's left of the month's $3,260.86 after everything else, so the plan uses exactly the money coming in
+            // (a plan beyond it comes off Left to Spend, DECISIONS.md 178).
+            New("Credit card payment", CategoryType.DebtPayment, 140_86),
             New("Rainy-day fund", CategoryType.SavingsTransfer, 100_00),
             New("Groceries", CategoryType.Variable, 450_00),
             New("Eating out", CategoryType.Variable, 150_00, discretionary: true),

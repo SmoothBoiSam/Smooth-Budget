@@ -381,6 +381,9 @@ function planText(i: PlanItem) {
   switch (i.kind) {
     case 'keep':
       return `Keep ${amount} in ${i.destination} for ${i.label}`
+    case 'cardspend':
+      // What you charged to a card: paid from the spending money left in checking, not from this check.
+      return `Pay ${amount} to ${i.destination} for what you charged${i.label === 'Charged so far' ? ' so far' : ''}`
     default:
       return `Send ${amount} to ${i.destination} (${i.label.toLowerCase()})`
   }

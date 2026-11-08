@@ -201,8 +201,26 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
     private static string Money(long cents) => (cents / 100m).ToString("C", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
 
     /// <summary>Re-runs automatic categorization over all of the household's transactions.</summary>
+    /// <summary>
+    /// Spending in a category you've hidden is out of the budget, so in months not closed yet it goes back to be filed
+    /// again (the app's guess, or Review) instead of silently counting nowhere (DECISIONS.md 177). Returns how many.
+    /// </summary>
+    public async Task<int> ReleaseHiddenAsync(Guid householdId, CancellationToken ct)
+    {
+        var openFrom = await db.BudgetMonths.Where(m => m.HouseholdId == householdId && m.ClosedUtc == null).MinAsync(m => (DateOnly?)m.StartDate, ct);
+        if (openFrom is not { } from)
+            return 0;
+        return await db.Transactions
+            .Where(t => t.HouseholdId == householdId && !t.IsTransfer && t.Date >= from && t.CategoryId != null && t.Category!.IsHidden)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.CategoryId, (Guid?)null).SetProperty(t => t.CategorySource, CategorySource.None)
+                .SetProperty(t => t.NeedsReview, false).SetProperty(t => t.CategoryUnsure, false)
+                .SetProperty(t => t.CategoryReason, "Its category is hidden, so it needs another."), ct);
+    }
+
     public async Task<AutoCategorizeResult> RunAsync(Guid householdId, CancellationToken ct)
     {
+        await ReleaseHiddenAsync(householdId, ct);
         var ctx = await ContextAsync(householdId, ct);
         var rows = await db.Transactions.Where(t => t.HouseholdId == householdId).ToListAsync(ct);
         foreach (var t in rows)

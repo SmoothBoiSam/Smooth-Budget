@@ -226,12 +226,39 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Hiding_a_category_never_hides_this_months_spending_in_it()
+    {
+        var (client, household, card) = await NewHouseholdAsync();
+        await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 75_00, false), Json);
+        var pets = Cat(await Budget(client), "Pets");
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, AccountId = card, Date = new DateOnly(2026, 10, 15), AmountCents = 30_00,
+                Merchant = "TEST ODD SHOP", Description = "TEST ODD SHOP", Kind = SmoothBudget.Core.Transactions.TransactionKind.Purchase,
+                CategoryId = pets.Id, CategorySource = SmoothBudget.Core.Transactions.CategorySource.User,
+                Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(1_085_00 - 30_00, (await Home(client)).LeftToSpendCents);
+
+        // Hidden: Pets' limit leaves the budget, and the $30 waits in Review instead of disappearing (DECISIONS.md 177).
+        await client.PutAsJsonAsync($"/api/budget/categories/{pets.Id}", new CategoryUpdate("Pets", CategoryType.Variable, 75_00, false, true, "permanent"), Json);
+        var home = await Home(client);
+        Assert.Equal((30_00L, 1, 1_010_00L - 30_00), (home.UnfiledSpendingCents, home.UncategorizedCount, home.LeftToSpendCents));
+        Assert.Equal(home.LeftToSpendCents, (await Budget(client)).LeftToSpendCents);
+    }
+
+    [Fact]
     public async Task Income_versus_planned_shows_an_explicit_remainder()
     {
         var (client, _, _) = await NewHouseholdAsync();
         await client.PutAsJsonAsync("/api/budget/months/current/income", new IncomeRequest(3_332_86), Json);
         var b = await Budget(client);
-        var planned = 1_650_00 + 65_00 + 120_00 + 140_00 + 35_00 + 300_00 + 100_00 + 1_010_00;
+        var planned = 1_650_00 + 65_00 + 120_00 + 140_00 + 35_00 + 140_86 + 100_00 + 1_010_00;
         Assert.Equal((3_332_86L, (long)planned, 3_332_86L - planned), (b.IncomeExpectedCents, b.PlannedCents, b.UnallocatedCents));
 
         await At(client, 2026, 11, 20); // next month starts with the same expected income

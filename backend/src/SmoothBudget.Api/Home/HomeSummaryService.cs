@@ -35,7 +35,10 @@ public record HomeSummaryDto(
     // The next paycheck (SPEC 4.2, 6.3), once a schedule or pay stub is in. Null before that.
     NextPaydayDto? NextPayday = null,
     // An account that won't cover the bills due before the next payday (DECISIONS.md 148).
-    IReadOnlyList<CashWarningDto>? CashWarnings = null);
+    IReadOnlyList<CashWarningDto>? CashWarnings = null,
+    // What else comes off Left to Spend (DECISIONS.md 177-178): spending not filed yet, and a plan beyond the month's money.
+    long UnfiledSpendingCents = 0,
+    long OverplannedCents = 0);
 
 /// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
 public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
@@ -64,7 +67,8 @@ public sealed record CurrentMonthData(
     public IReadOnlyList<BudgetCategory> CalculatorCategories => Categories.Select(c => c.ForCalculator).ToList();
 
     public LeftToSpendResult LeftToSpend() =>
-        LeftToSpendCalculator.Calculate(Month, Today, CalculatorCategories, Transactions, CarriedInDeficitCents, PartnerShortfallCents);
+        LeftToSpendCalculator.Calculate(Month, Today, CalculatorCategories, Transactions, CarriedInDeficitCents, PartnerShortfallCents,
+            MonthData.MoneyIn(Row, Contributions));
 
     public BudgetMonthDto MonthDto => new(Month.Start, Month.End, Month.Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture));
 
@@ -150,7 +154,9 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             NextPayday: await payday.NextAsync(householdId, ct) is { } n
                 ? new NextPaydayDto(n.Period.PayDate, n.HasSchedule, n.NetCents, n.LowNetCents, n.HighNetCents, n.LowConfidence)
                 : null,
-            CashWarnings: await CashWarningsAsync(householdId, ct));
+            CashWarnings: await CashWarningsAsync(householdId, ct),
+            UnfiledSpendingCents: r.UnfiledSpendingCents,
+            OverplannedCents: r.OverplannedCents);
     }
 
     /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>

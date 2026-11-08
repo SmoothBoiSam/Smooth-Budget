@@ -225,6 +225,49 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         var debtLines = (await Payday(c)).Checks[0].Plan!.Items.Where(i => i.Kind == "debt").ToList();
         Assert.Equal([("Test Visa", 185_00L, "Minimum + extra"), ("Test Store Card", 15_00L, "Minimum payment")], debtLines.Select(i => (i.Destination, i.Cents, i.Label)));
 
+        // Purchases on a credit card count in their categories, so the plan pays them off too or the card would grow
+        // (DECISIONS.md 179). The check you're on (Feb 22) covers Feb 8-21; the next one shows what's charged since so far.
+        var shortBefore = (await Payday(c)).Checks[0].Plan!.ShortCents;
+        Guid cardId;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var card = new Account { Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = "Test Card", Mask = "3333", Type = AccountType.CreditCard, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+            cardId = card.Id;
+            db.Accounts.Add(card);
+            Transaction OnCard(DateOnly d, long cents, TransactionKind kind = TransactionKind.Purchase, bool transfer = false) => new()
+            {
+                Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, AccountId = card.Id, Date = d, AmountCents = cents, Merchant = "TEST SHOP", Description = "TEST",
+                Kind = kind, IsTransfer = transfer, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            };
+            db.Transactions.AddRange(
+                OnCard(new DateOnly(2027, 2, 5), 99_00),   // before the last payday: an earlier check's
+                OnCard(new DateOnly(2027, 2, 10), 40_00),
+                OnCard(new DateOnly(2027, 2, 20), 35_00),
+                OnCard(new DateOnly(2027, 2, 21), -5_00, TransactionKind.Refund),
+                OnCard(new DateOnly(2027, 2, 23), 25_00)); // after payday: the next check's
+            await db.SaveChangesAsync();
+        }
+        var withCard = await Payday(c);
+        var spend = withCard.Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend");
+        Assert.Equal(("Pay off what you charged", 70_00L, "Test Card ••3333", false), (spend.Label, spend.Cents, spend.Destination, spend.Done));
+        Assert.Equal(shortBefore, withCard.Checks[0].Plan!.ShortCents); // it comes from spending money already in checking, not this check
+        var soFar = withCard.Checks[1].Plan!.Items.Single(i => i.Kind == "cardspend");
+        Assert.Equal(("Charged so far", 25_00L), (soFar.Label, soFar.Cents));
+
+        // The card's own account shows the payment: that line is done.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, AccountId = cardId, Date = new DateOnly(2027, 2, 23), AmountCents = -70_00, Merchant = "PAYMENT THANK YOU",
+                Description = "TEST", Kind = TransactionKind.CardPayment, IsTransfer = true, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        Assert.True((await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend").Done);
+
         // The next checks keep their plans for reference, without statuses.
         Assert.All((await Payday(c)).Checks.Skip(1).Where(x => x.Plan is not null).SelectMany(x => x.Plan!.Items), i => Assert.Null(i.Status));
     }

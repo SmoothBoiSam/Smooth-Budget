@@ -275,6 +275,16 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             .OrderByDescending(s => s.BudgetMonth.StartDate).ToListAsync(ct);
         var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId).ToListAsync(ct);
         var done = await db.PaydayChecklistItems.AsNoTracking().Where(x => x.HouseholdId == householdId).Select(x => new { x.PayDate, x.Key }).ToListAsync(ct);
+        // What you put on each card lately (purchases less refunds, not payments): it already counts in its spending or bill
+        // category, so the plan pays it off from the spending money left in checking, or the card would grow (DECISIONS.md 179).
+        var cardAccounts = accounts.Where(a => a.Type == AccountType.CreditCard).ToList();
+        var cardIds = cardAccounts.Select(a => a.Id).ToList();
+        var since = c.Today.AddDays(-62);
+        var charged = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && t.Date >= since && !t.IsTransfer && t.Kind != TransactionKind.CardPayment)
+            .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
+        DateOnly PaydayBefore(DateOnly pay) =>
+            PayCalendar.From(pay.AddDays(-45), c.Rules).TakeWhile(p => p.PayDate < pay).Select(p => p.PayDate).LastOrDefault(pay.AddDays(-14));
 
         var result = new List<PlanDto?>();
         for (var i = 0; i < checks.Count; i++)
@@ -327,6 +337,26 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             else
                 transfers.Add(new("debt", "Card payment", debtShare, target,
                     inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(debtMonthly)} card payment in your budget." : $"Your budget's {PayEngine.Dollars(debtMonthly)} card payment."));
+
+            // The check you're on pays off what you charged between the last payday and this one. The next check shows
+            // what you've charged since this payday so far. It comes from the spending money still in checking (you spent
+            // it on the card instead), so it isn't taken out of the check itself.
+            var nextUp = !current && (i == 0 || checks[i - 1].Period.PayDate <= c.Today);
+            if (current || nextUp)
+            {
+                var (spendFrom, spendTo) = current ? (PaydayBefore(pay), pay.AddDays(-1)) : (PaydayBefore(pay), c.Today);
+                foreach (var card in cardAccounts)
+                {
+                    var cents = charged.Where(t => t.AccountId == card.Id && t.Date >= spendFrom && t.Date <= spendTo).Sum(t => t.AmountCents);
+                    if (cents <= 0) continue;
+                    transfers.Add(new PlanTransfer($"cardspend:{card.Id}", current ? "Pay off what you charged" : "Charged so far", cents, Label(card),
+                        (current
+                            ? $"What you put on this card from {spendFrom:MMM d} to {spendTo:MMM d}."
+                            : $"What you've put on this card since {spendFrom:MMM d}; it'll be more by payday.")
+                        + " It already counts in your spending, so pay it from the spending money you didn't use from checking. Paying it keeps the card from growing.",
+                        FromEarlierCents: cents));
+                }
+            }
             if (i == 0)
                 transfers.AddRange(sweeps.Where(s => s.DoneUtc == null || (current && s.DoneUtc >= pay.ToDateTime(TimeOnly.MinValue)))
                     .Select(s => new PlanTransfer($"sweep:{s.Id}", "Last month's leftover", s.AmountCents, s.Destination, "The rollover sweep from your last closed month.")));
@@ -382,6 +412,19 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                         return x.Cents <= 0 ? (true, null)
                             : cardPaid >= x.Cents ? (true, $"Sent {PayEngine.Dollars(cardPaid)} since payday.")
                             : (false, cardPaid > 0 ? $"Sent {PayEngine.Dollars(cardPaid)} of {PayEngine.Dollars(x.Cents)} so far." : "No card payment seen since payday yet.");
+                    case "cardspend":
+                    {
+                        // Done once the card got this plus its payment line (everything the plan sends to it).
+                        var owed = plan.Items.Where(y => (y.Kind is "debt" or "cardspend") && y.Destination == x.Destination).Sum(y => y.Cents);
+                        if (cardSideSeen && Guid.TryParse(x.Key["cardspend:".Length..], out var spentOn))
+                        {
+                            var paid = PaidTo(spentOn);
+                            return paid >= owed ? (true, $"Paid {PayEngine.Dollars(paid)} to this card since payday.")
+                                : (false, paid > 0 ? $"Paid {PayEngine.Dollars(paid)} of {PayEngine.Dollars(owed)} to this card so far, counting its payment above." : null);
+                        }
+                        var allCards = plan.Items.Where(y => y.Kind is "debt" or "cardspend").Sum(y => y.Cents);
+                        return cardPaid >= allCards ? (true, $"Sent {PayEngine.Dollars(cardPaid)} to your cards since payday.") : (false, null);
+                    }
                     case "savings":
                         return x.Cents <= 0 ? (true, null)
                             : intoSavings >= x.Cents ? (true, $"Moved {PayEngine.Dollars(intoSavings)} to savings since payday.")
