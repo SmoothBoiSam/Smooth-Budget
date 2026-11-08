@@ -12,7 +12,9 @@ public record PlaidAccountProposal(
     // An existing account of the same type and last-4 that this probably is (e.g. one you imported CSVs into).
     Guid? SuggestedAccountId);
 
-public record LinkResultDto(Guid ItemId, string? InstitutionName, IReadOnlyList<PlaidAccountProposal> Accounts, IReadOnlyList<AccountDto> ExistingAccounts);
+/// <param name="DuplicateOfItemId">This bank is already connected through that connection: add accounts there instead.</param>
+public record LinkResultDto(Guid ItemId, string? InstitutionName, IReadOnlyList<PlaidAccountProposal> Accounts, IReadOnlyList<AccountDto> ExistingAccounts,
+    Guid? DuplicateOfItemId = null);
 
 /// <param name="Action">"new" (create an account), "existing" (link to <paramref name="AccountId"/>) or "skip".</param>
 public record AccountMappingRequest(string PlaidAccountId, string Action, Guid? AccountId);
@@ -56,6 +58,24 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
         item.InstitutionName = institutionName;
         await db.SaveChangesAsync(ct);
 
+        // Signing in to a bank that's already connected makes a second connection. Adding an account (a new savings)
+        // belongs on the first one instead (DECISIONS.md 157), so say so before anything is set up twice.
+        var twin = item.InstitutionId is null ? null : await db.PlaidItems.AsNoTracking()
+            .Where(i => i.HouseholdId == householdId && i.Id != item.Id && i.InstitutionId == item.InstitutionId && i.Status != PlaidItemStatus.PendingSetup)
+            .OrderBy(i => i.CreatedUtc).FirstOrDefaultAsync(ct);
+        return await ProposalsAsync(householdId, item, accounts, ct) with { DuplicateOfItemId = twin?.Id };
+    }
+
+    /// <summary>The accounts at an existing connection, after adding accounts to it through Plaid (DECISIONS.md 157).</summary>
+    public async Task<LinkResultDto> AccountsAsync(Guid householdId, Guid itemId, CancellationToken ct)
+    {
+        var item = await db.PlaidItems.SingleOrDefaultAsync(i => i.Id == itemId && i.HouseholdId == householdId, ct)
+            ?? throw new PlaidSetupException("Bank connection not found.");
+        return await ProposalsAsync(householdId, item, await plaid.GetAccountsAsync(secrets.Decrypt(item.AccessTokenEncrypted), ct), ct);
+    }
+
+    private async Task<LinkResultDto> ProposalsAsync(Guid householdId, PlaidItem item, AccountsGetResponse accounts, CancellationToken ct)
+    {
         var existing = await db.Accounts.Where(a => a.HouseholdId == householdId).OrderBy(a => a.Name).ToListAsync(ct);
         var proposals = accounts.Accounts.Select(pa =>
         {
@@ -95,7 +115,8 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
                 if (account.Type != type)
                     throw new PlaidSetupException($"\"{account.Name}\" is a {account.Type} account but \"{pa.Name}\" is {type}.");
                 if (account.PlaidAccountId is not null && account.PlaidAccountId != pa.AccountId)
-                    throw new PlaidSetupException($"\"{account.Name}\" is already linked to another bank account.");
+                    throw new PlaidSetupException($"\"{account.Name}\" already syncs through your other {item.InstitutionName ?? "bank"} connection. "
+                        + "To add an account there, tap Add accounts on that connection, then disconnect this one.");
             }
             else if (m.Action == "new")
             {

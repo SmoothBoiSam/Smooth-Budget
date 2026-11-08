@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, plaidApi, type HomeSummary, type Me, type Status } from './api'
 import { formatCents, formatDay, formatTime } from './format'
-import { saved } from './offline'
+import { saved, useOnline } from './offline'
 import { Loading } from './ui'
 
 /** Your status cats (DECISIONS.md 139): plenty left, running low, over budget. */
@@ -23,6 +23,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
   const [savedAt, setSavedAt] = useState<string | null>(null) // set while showing a saved summary because the server can't be reached
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const online = useOnline()
 
   const load = useCallback(async () => {
     try {
@@ -76,11 +77,6 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
     startY.current = null
   }
 
-  async function signOut() {
-    await api.logout().catch(() => undefined)
-    onSignedOut()
-  }
-
   return (
     <div
       className="mx-auto flex min-h-screen max-w-md flex-col bg-slate-50"
@@ -103,25 +99,17 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
           <span className="pb-1">{loading ? 'Syncing…' : pull >= PULL_TRIGGER ? 'Release to sync' : 'Pull to sync'}</span>
         </div>
       )}
-      <header className="flex items-center justify-between px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            {summary ? summary.budgetMonth.label : 'This month'}
+      {/* Sign out lives in More → Settings only (DECISIONS.md 160). */}
+      <header className="px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          {summary ? summary.budgetMonth.label : 'This month'}
+        </p>
+        {summary && (
+          <p className="text-xs text-slate-400">
+            {formatDay(summary.budgetMonth.start)} – {formatDay(summary.budgetMonth.end)}
+            {savedAt && !online && ` · as of ${formatTime(savedAt)}`}
           </p>
-          {summary && (
-            <p className="text-xs text-slate-400">
-              {formatDay(summary.budgetMonth.start)} – {formatDay(summary.budgetMonth.end)}
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={signOut}
-          title={`Signed in as ${me.email}`}
-          className="rounded-full px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200"
-        >
-          Sign out
-        </button>
+        )}
       </header>
 
       <main className="flex-1 px-5 pb-28">
@@ -137,7 +125,8 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
 
         {!summary && !error && <Loading label="Loading Left to Spend" />}
 
-        {savedAt && (
+        {/* With the phone offline, the bar at the top already says so: one message, not two (DECISIONS.md 160). This card is for a server that can't be reached. */}
+        {savedAt && online && (
           <div role="alert" className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <span className="font-semibold">Offline: last known numbers. </span>
             This is your Left to Spend as of {formatTime(savedAt)}. It may have changed since; it updates when you’re back online.

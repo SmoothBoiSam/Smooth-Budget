@@ -416,13 +416,14 @@ function ReviewCard({
         return onDone(`Counted as money from ${first}.`)
       }
       if (!categoryId) return
-      await budgetApi.updateTransaction(t.id, categoryId, false, rule && !t.isPartnerTransfer ? t.merchant : null)
+      const r = await budgetApi.updateTransaction(t.id, categoryId, false, rule && !t.isPartnerTransfer ? t.merchant : null)
+      const moved = r.billChargesMoved > 0 ? ` ${r.billChargesMoved} earlier ${r.billChargesMoved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
       onDone(
         partnerIn
           ? `Counted as paying you back for ${selected?.name}: it comes off that category.`
           : partnerOut
             ? `Counted as your share of ${selected?.name}.`
-            : `${selected?.name ?? 'Saved'}${rule ? `. Future ${titleCase(t.merchant)} purchases go there too, for you to confirm` : ''}.`,
+            : `${selected?.name ?? 'Saved'}${rule ? `. Future ${titleCase(t.merchant)} purchases go there too, for you to confirm` : ''}.${moved}`,
       )
     } catch (e) {
       onError(e)

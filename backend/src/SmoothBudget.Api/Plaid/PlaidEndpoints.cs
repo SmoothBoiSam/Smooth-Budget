@@ -7,7 +7,8 @@ using SmoothBudget.Core.Security;
 
 namespace SmoothBudget.Api.Plaid;
 
-public record LinkTokenRequest(Guid? ItemId);
+/// <param name="AddAccounts">With <paramref name="ItemId"/>: let you pick more accounts at that bank (a new savings account), not just sign in again.</param>
+public record LinkTokenRequest(Guid? ItemId, bool AddAccounts = false);
 public record ExchangeRequest(string PublicToken);
 public record ConfirmAccountsRequest(List<AccountMappingRequest> Mappings);
 public record SandboxLinkRequest(bool Dynamic);
@@ -41,7 +42,7 @@ public static class PlaidEndpoints
                     updateToken = secrets.Decrypt(item.AccessTokenEncrypted);
                 }
                 // The user's id (a random GUID), never an email, identifies the user to Plaid.
-                var token = await plaid.CreateLinkTokenAsync(ctx.User.FindFirstValue(ClaimTypes.NameIdentifier)!, updateToken, ct);
+                var token = await plaid.CreateLinkTokenAsync(ctx.User.FindFirstValue(ClaimTypes.NameIdentifier)!, updateToken, ct, accountSelection: req.AddAccounts && updateToken is not null);
                 return Results.Ok(new { linkToken = token });
             }));
 
@@ -76,6 +77,9 @@ public static class PlaidEndpoints
         plaidGroup.MapPost("/items/{id:guid}/accounts", async (Guid id, ConfirmAccountsRequest req, HttpContext ctx, PlaidLinkService link, CancellationToken ct) =>
             await Guard(async () => Results.Ok(await link.ConfirmAccountsAsync(ctx.User.HouseholdId(), id, req.Mappings, ct))));
 
+        // After adding accounts to a connection through Plaid: its accounts, to choose what to import (DECISIONS.md 157).
+        plaidGroup.MapGet("/items/{id:guid}/accounts", async (Guid id, HttpContext ctx, PlaidLinkService link, CancellationToken ct) =>
+            await Guard(async () => Results.Ok(await link.AccountsAsync(ctx.User.HouseholdId(), id, ct))));
         plaidGroup.MapGet("/items", async (HttpContext ctx, PlaidLinkService link, CancellationToken ct) =>
             await link.ListAsync(ctx.User.HouseholdId(), ct));
 

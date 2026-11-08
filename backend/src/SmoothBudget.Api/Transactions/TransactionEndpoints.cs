@@ -39,7 +39,8 @@ public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<Trans
 /// back for something, send the category instead (DECISIONS.md 100).</param>
 public record UpdateTransactionRequest(Guid? CategoryId, bool IsTransfer, string? RulePattern, string? PartnerPurpose = null);
 
-public record UpdateTransactionResult(TransactionDto Transaction, int RuleAppliedTo);
+/// <param name="BillChargesMoved">Filed under a bill: that bill's other charges that moved there too (DECISIONS.md 158).</param>
+public record UpdateTransactionResult(TransactionDto Transaction, int RuleAppliedTo, int BillChargesMoved = 0);
 
 public record CategoryDto(Guid Id, string Name, string Type, long MonthlyLimitCents, bool IsDiscretionary, int SortOrder);
 public record RuleDto(Guid Id, string Pattern, Guid CategoryId, string CategoryName, DateTime CreatedUtc);
@@ -190,7 +191,8 @@ public static partial class TransactionEndpoints
         group.MapGet("/transactions/suggested-categories", async (HttpContext ctx, CategorizationService svc, CancellationToken ct) =>
             await svc.SuggestionsAsync(ctx.User.HouseholdId(), ct));
 
-        group.MapPatch("/transactions/{id:guid}", async (Guid id, UpdateTransactionRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
+        group.MapPatch("/transactions/{id:guid}", async (Guid id, UpdateTransactionRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock,
+            Bills.RecurringService recurring, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             var t = await db.Transactions.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
@@ -263,8 +265,13 @@ public static partial class TransactionEndpoints
             }
             await db.SaveChangesAsync(ct);
 
+            // Filed under a bill: the bill's other charges go there too, so its budget line sees the whole bill (DECISIONS.md 158).
+            var moved = req.CategoryId is { } billId && !req.IsTransfer
+                        && await db.Categories.AnyAsync(c => c.Id == billId && c.Type == CategoryType.FixedBill, ct)
+                ? await recurring.KeepBillsTogetherAsync(householdId, ct, t.Id) : 0;
+
             var dto = await Project(db.Transactions.Where(x => x.Id == t.Id)).SingleAsync(ct);
-            return Results.Ok(new UpdateTransactionResult(dto, applied));
+            return Results.Ok(new UpdateTransactionResult(dto, applied, moved));
         });
 
         group.MapGet("/budget/categories", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>

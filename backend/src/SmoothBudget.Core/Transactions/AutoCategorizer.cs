@@ -46,6 +46,7 @@ public static partial class AutoCategorizer
     public sealed record BankMapping(string? Name, bool Sure, SuggestedCategory? Suggestion = null);
 
     private static SuggestedCategory Spend(string name, bool discretionary = false) => new(name, Budgeting.CategoryType.Variable, discretionary);
+    private static readonly SuggestedCategory CardInterestBill = new(CardInterest.CategoryName, Budgeting.CategoryType.FixedBill, false);
 
     /// <summary>
     /// Bank labels (Plaid personal-finance categories, detailed and primary, and Chase/Apple CSV categories)
@@ -54,6 +55,7 @@ public static partial class AutoCategorizer
     public static readonly IReadOnlyDictionary<string, BankMapping> BankMap = new Dictionary<string, BankMapping>(StringComparer.OrdinalIgnoreCase)
     {
         // Plaid detailed
+        ["BANK_FEES_INTEREST_CHARGE"] = new(CardInterest.CategoryName, true, CardInterestBill),
         ["FOOD_AND_DRINK_GROCERIES"] = new("Groceries", true),
         ["FOOD_AND_DRINK_RESTAURANT"] = new("Eating out", true),
         ["FOOD_AND_DRINK_FAST_FOOD"] = new("Eating out", true),
@@ -137,7 +139,7 @@ public static partial class AutoCategorizer
         ["Travel"] = new(null, false, Spend("Travel", discretionary: true)),
         ["Airlines"] = new(null, false, Spend("Travel", discretionary: true)),
         ["Hotels"] = new(null, false, Spend("Travel", discretionary: true)),
-        ["Interest"] = new(null, false, Spend("Fees & interest")),
+        ["Interest"] = new(CardInterest.CategoryName, true, CardInterestBill),
         ["Fees & Adjustments"] = new(null, false, Spend("Fees & interest")),
     };
 

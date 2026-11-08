@@ -26,6 +26,9 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
   const [items, setItems] = useState<PlaidItem[]>([])
   const [linkToken, setLinkToken] = useState<string | null>(null)
   const [updateItemId, setUpdateItemId] = useState<string | null>(null)
+  // What an update-mode Link is for: signing in again, or adding accounts (DECISIONS.md 157).
+  const [updateFor, setUpdateFor] = useState<'reconnect' | 'add'>('reconnect')
+  const [keepBoth, setKeepBoth] = useState(false)
   const [setup, setSetup] = useState<LinkResult | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -66,10 +69,14 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
       setLinkToken(null)
       setUpdateItemId(null)
       void run('Finishing…', async () => {
-        if (itemId) {
+        if (itemId && updateFor === 'add') {
+          setKeepBoth(false)
+          setSetup(await plaidApi.itemAccounts(itemId))
+        } else if (itemId) {
           setMessage(describe(await plaidApi.reconnected(itemId)))
           onChanged()
         } else if (publicToken) {
+          setKeepBoth(false)
           setSetup(await plaidApi.exchange(publicToken))
         }
         await load()
@@ -86,12 +93,21 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
     if (linkToken && ready) open()
   }, [linkToken, ready, open])
 
-  async function connect(itemId?: string) {
-    const r = await run('Opening Plaid…', () => plaidApi.linkToken(itemId))
+  async function connect(itemId?: string, addAccounts = false) {
+    const r = await run('Opening Plaid…', () => plaidApi.linkToken(itemId, addAccounts))
     if (r) {
       setUpdateItemId(itemId ?? null)
+      setUpdateFor(addAccounts ? 'add' : 'reconnect')
       setLinkToken(r.linkToken)
     }
+  }
+
+  /** The bank was connected a second time: drop the new connection and add the account to the first one instead. */
+  async function addToExisting(duplicateId: string, existingId: string) {
+    setSetup(null)
+    await run('Removing the extra connection…', () => plaidApi.removeItem(duplicateId))
+    await load()
+    await connect(existingId, true)
   }
 
   async function sandbox() {
@@ -172,6 +188,11 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                       </button>
                     )}
                     {i.status === 'Active' && (
+                      <button type="button" disabled={busy !== null} onClick={() => connect(i.id, true)} className="text-slate-900 underline">
+                        Add accounts
+                      </button>
+                    )}
+                    {i.status === 'Active' && (
                       <button type="button" disabled={busy !== null} onClick={() => resync(i)} className="text-slate-600">
                         Refresh categories from bank
                       </button>
@@ -225,7 +246,14 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
         </p>
       )}
 
-      {setup && (
+      {setup && setup.duplicateOfItemId && !keepBoth && (
+        <DuplicateBank
+          name={setup.institutionName ?? 'This bank'}
+          onAddThere={() => void addToExisting(setup.itemId, setup.duplicateOfItemId!)}
+          onKeepBoth={() => setKeepBoth(true)}
+        />
+      )}
+      {setup && (!setup.duplicateOfItemId || keepBoth) && (
         <AccountSetup
           setup={setup}
           onDone={async (result) => {
@@ -239,6 +267,29 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
         />
       )}
     </section>
+  )
+}
+
+/** Connecting a bank that's already connected (to add a new savings, say): point to Add accounts instead. */
+function DuplicateBank({ name, onAddThere, onKeepBoth }: { name: string; onAddThere: () => void; onKeepBoth: () => void }) {
+  return (
+    <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/40">
+      <div role="dialog" aria-modal="true" aria-labelledby="dup-h" className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <h2 id="dup-h" className="text-lg font-semibold">
+          {name} is already connected
+        </h2>
+        <p className="mt-1 text-sm text-slate-600">
+          To add an account there, like a new savings account, add it to your existing {name} connection. This extra connection will be removed, and
+          Plaid will open so you can tick the new account.
+        </p>
+        <button type="button" onClick={onAddThere} className="mt-4 w-full rounded-xl bg-slate-900 py-3 font-semibold text-white">
+          Add accounts to my {name} connection
+        </button>
+        <button type="button" onClick={onKeepBoth} className="mt-2 w-full rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-700">
+          This is a different login (keep both)
+        </button>
+      </div>
+    </div>
   )
 }
 

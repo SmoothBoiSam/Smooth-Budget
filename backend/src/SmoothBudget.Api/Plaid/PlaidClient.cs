@@ -71,7 +71,7 @@ public class PlaidClient(HttpClient http, PlaidOptions options)
         PropertyNameCaseInsensitive = true,
     };
 
-    public async Task<string> CreateLinkTokenAsync(string clientUserId, string? accessTokenForUpdate, CancellationToken ct)
+    public async Task<string> CreateLinkTokenAsync(string clientUserId, string? accessTokenForUpdate, CancellationToken ct, bool accountSelection = false)
     {
         var body = new Dictionary<string, object?>
         {
@@ -89,6 +89,8 @@ public class PlaidClient(HttpClient http, PlaidOptions options)
         else
         {
             body["access_token"] = accessTokenForUpdate; // update mode: re-authenticate an existing item
+            // ...and, to add accounts opened since (or skipped at first), choose which of the bank's accounts to share.
+            if (accountSelection) body["update"] = new { account_selection_enabled = true };
         }
         var r = await PostAsync<JsonElement>("link/token/create", body, ct);
         return r.GetProperty("link_token").GetString()!;

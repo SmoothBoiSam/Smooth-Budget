@@ -164,7 +164,7 @@ public static class CategoryDiscovery
 
     private static CategoryType StandardType(string name) => name switch
     {
-        "Rent" or "Phone" or "Utilities & internet" or "Car insurance" or "Subscriptions" => CategoryType.FixedBill,
+        "Rent" or "Phone" or "Utilities & internet" or "Car insurance" or "Subscriptions" or CardInterest.CategoryName => CategoryType.FixedBill,
         _ => CategoryType.Variable,
     };
 

@@ -65,7 +65,7 @@ public static class RecurringDetector
         foreach (var merchant in transactions.Where(t => t.AmountCents > 0).GroupBy(t => CategoryDiscovery.MerchantKey(t.Merchant)))
         {
             // Card interest and bank fees repeat monthly but aren't bills; they belong to the debt.
-            if (SpendingThemes.Match(merchant.First().Merchant)?.Name == "Fees & interest")
+            if (SpendingThemes.Match(merchant.First().Merchant)?.Name is "Fees & interest" or CardInterest.CategoryName)
                 continue;
             var all = merchant.OrderBy(t => t.Date).ThenBy(t => t.Id).ToList();
             if (Series(merchant.Key, merchant.Key, all, today) is { } whole)

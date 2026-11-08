@@ -35,10 +35,11 @@ export default function TransactionSheet({
     try {
       const rule = makeRule && !isTransfer && categoryId ? pattern : null
       const r = await budgetApi.updateTransaction(t.id, categoryId || null, isTransfer, rule)
+      const moved = r.billChargesMoved > 0 ? ` ${r.billChargesMoved} earlier ${r.billChargesMoved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
       onSaved(
-        rule
+        (rule
           ? `Saved. Rule created for "${rule.toUpperCase()}"${r.ruleAppliedTo > 0 ? ` and applied to ${r.ruleAppliedTo} more` : ''}.`
-          : 'Saved.',
+          : 'Saved.') + moved,
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.')

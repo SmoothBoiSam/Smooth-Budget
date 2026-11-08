@@ -431,4 +431,35 @@ public class PlaidApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(HttpStatusCode.Unauthorized, (await PostWebhook(payload, b => app.WebhookKeys.Sign(b, app.Clock.GetUtcNow(), alg: "none"))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await PostWebhook(payload)).StatusCode); // correctly signed, unknown item: acknowledged
     }
+
+    [Fact]
+    public async Task Connecting_the_same_bank_again_points_to_adding_accounts_on_the_first_connection()
+    {
+        var (client, household) = await RegisterAsync();
+        var first = await LinkAsync(client, household);
+
+        // A second login to the same bank (to share a new savings account) is a second connection with new account ids.
+        var again = (await (await client.PostAsJsonAsync("/api/plaid/exchange", new ExchangeRequest(app.Plaid.NewLogin(Checking, Card)), Json))
+            .Content.ReadFromJsonAsync<LinkResultDto>(Json))!;
+        Assert.Equal(first.ItemId, again.DuplicateOfItemId);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/plaid/items/{again.ItemId}")).StatusCode);
+
+        // Add accounts opens Link in update mode with account selection on the first connection.
+        Assert.True((await client.PostAsJsonAsync("/api/plaid/link-token", new LinkTokenRequest(first.ItemId, AddAccounts: true), Json)).IsSuccessStatusCode);
+        Assert.Contains(app.Plaid.Requests, r => r.Path == "link/token/create" && r.Body.Contains("account_selection_enabled"));
+        app.Plaid.AddAccount(first.AccessToken, new FakePlaid.Account("acc-sav", "Fake Savings", "2222", "depository", "savings", 50m));
+
+        var setup = (await client.GetFromJsonAsync<LinkResultDto>($"/api/plaid/items/{first.ItemId}/accounts", Json))!;
+        Assert.Equal(3, setup.Accounts.Count);
+        Assert.Null(setup.DuplicateOfItemId);
+        var map = setup.Accounts.Select(a => a.SuggestedAccountId is { } id
+            ? new AccountMappingRequest(a.PlaidAccountId, "existing", id) : new AccountMappingRequest(a.PlaidAccountId, "new", null)).ToList();
+        Assert.Equal(2, map.Count(m => m.Action == "existing")); // the accounts already syncing stay as they are
+        var confirm = await client.PostAsJsonAsync($"/api/plaid/items/{first.ItemId}/accounts", new ConfirmAccountsRequest(map), Json);
+        Assert.True(confirm.IsSuccessStatusCode, await confirm.Content.ReadAsStringAsync());
+
+        var accounts = (await client.GetFromJsonAsync<List<AccountDto>>("/api/accounts", Json))!;
+        Assert.Equal(["Fake Checking", "Fake Rewards Card", "Fake Savings"], accounts.Select(a => a.Name).Order().ToList());
+        Assert.Equal("Savings", accounts.Single(a => a.Name == "Fake Savings").Type);
+    }
 }

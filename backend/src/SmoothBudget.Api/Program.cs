@@ -90,6 +90,7 @@ builder.Services.AddScoped<ImportService>();
 builder.Services.AddScoped<CategorizationService>();
 builder.Services.AddScoped<CategoryDiscoveryService>();
 builder.Services.AddScoped<SmoothBudget.Api.Debt.DebtService>();
+builder.Services.AddScoped<SmoothBudget.Api.Debt.CardInterestService>();
 builder.Services.AddScoped<SmoothBudget.Api.Bills.RecurringService>();
 builder.Services.AddScoped<SmoothBudget.Api.Savings.SavingsService>();
 builder.Services.AddScoped<SmoothBudget.Api.Payday.PaydayService>();

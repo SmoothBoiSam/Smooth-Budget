@@ -59,7 +59,9 @@ public static class BudgetEndpoints
             var c = new Category
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = req.Type, MonthlyLimitCents = req.LimitCents,
-                IsDiscretionary = req.IsDiscretionary, SortOrder = order + 1, LimitSetByUser = true, // you typed it
+                IsDiscretionary = req.IsDiscretionary, SortOrder = order + 1,
+                // A limit you typed is yours; one added with no amount (from Review) is the automatic budget's to set (DECISIONS.md 158).
+                LimitSetByUser = req.LimitCents > 0,
             };
             db.Categories.Add(c);
             await db.SaveChangesAsync(ct);

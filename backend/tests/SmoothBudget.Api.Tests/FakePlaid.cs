@@ -45,6 +45,10 @@ public sealed class FakePlaid : HttpMessageHandler
 
     public string AccessTokenFor(string publicToken) => _publicTokens[publicToken];
 
+    /// <summary>Shares one more account on an existing login, as Link's update mode with account selection does.</summary>
+    public void AddAccount(string accessToken, Account account) =>
+        _accounts[accessToken] = [.. _accounts[accessToken], account with { Id = Id(accessToken, account.Id) }];
+
     /// <summary>Changes an account's balance, as the bank would report it on the next sync.</summary>
     public void SetBalance(string accessToken, string shortName, decimal balance) =>
         _accounts[accessToken] = [.. _accounts[accessToken].Select(a => a.Id == Id(accessToken, shortName) ? a with { Balance = balance } : a)];

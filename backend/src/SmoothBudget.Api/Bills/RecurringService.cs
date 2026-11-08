@@ -138,7 +138,56 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         return (cat.Id, cat.Name);
     }
 
-    private async Task FileUnderAsync(Guid householdId, Item item, Guid categoryId, string reason, CancellationToken ct)
+    /// <summary>
+    /// A bill's charges stay together (DECISIONS.md 158): once one of a bill's charges is filed under a bill category by
+    /// you, its other charges follow (and a merchant rule sends future ones), so that bill line's budget sees the whole
+    /// bill. With <paramref name="filedId"/> (the charge you just filed) every other charge of that bill follows, and if
+    /// it isn't part of a detected bill yet, earlier charges from the same merchant for the same amount do. Without it
+    /// (the regular check), only charges you haven't filed yourself move.
+    /// </summary>
+    /// <returns>How many charges moved.</returns>
+    public async Task<int> KeepBillsTogetherAsync(Guid householdId, CancellationToken ct, Guid? filedId = null)
+    {
+        var items = (await ItemsAsync(householdId, ct)).Where(i => !i.Dismissed).ToList();
+        if (filedId is { } only)
+            items = items.Where(i => i.Series.TransactionIds.Contains(only)).ToList();
+        var ids = items.SelectMany(i => i.Series.TransactionIds).Append(filedId ?? Guid.Empty).Distinct().ToList();
+        var rows = await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && ids.Contains(t.Id))
+            .Select(t => new BillCharge(t.Id, t.Date, t.AmountCents, t.Merchant, t.CategoryId, t.CategorySource,
+                t.Category != null && t.Category.Type == CategoryType.FixedBill, t.Category != null ? t.Category.Name : null))
+            .ToDictionaryAsync(t => t.Id, ct);
+
+        var moved = 0;
+        foreach (var item in items)
+        {
+            var charges = item.Series.TransactionIds.Select(rows.GetValueOrDefault).OfType<BillCharge>().ToList();
+            var anchor = filedId is { } f
+                ? charges.FirstOrDefault(c => c.Id == f)
+                : charges.Where(c => c.Source == CategorySource.User && c.InBill).MaxBy(c => c.Date);
+            if (anchor is not { InBill: true, CategoryId: { } categoryId }) continue;
+            var move = charges.Where(c => c.CategoryId != categoryId && (filedId is not null || c.Source != CategorySource.User)).Select(c => c.Id).ToList();
+            if (move.Count == 0) continue;
+            await FileUnderAsync(householdId, item, categoryId, $"Same bill as the one you filed under {anchor.CategoryName}.", ct, move);
+            moved += move.Count;
+        }
+
+        // Not a detected bill yet (too few charges, or irregular dates): earlier charges from that merchant for the same amount.
+        if (filedId is { } id && items.Count == 0 && rows.GetValueOrDefault(id) is { InBill: true, CategoryId: { } cat, AmountCents: > 0 } filed)
+        {
+            moved += await db.Transactions
+                .Where(t => t.HouseholdId == householdId && t.Id != id && t.Merchant == filed.Merchant && t.AmountCents == filed.AmountCents
+                            && !t.IsTransfer && t.CategorySource != CategorySource.User && t.CategoryId != cat)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(t => t.CategoryId, cat).SetProperty(t => t.CategorySource, CategorySource.User)
+                    .SetProperty(t => t.NeedsReview, false).SetProperty(t => t.CategoryUnsure, false)
+                    .SetProperty(t => t.CategoryReason, $"Same bill as the one you filed under {filed.CategoryName}."), ct);
+        }
+        return moved;
+    }
+
+    private sealed record BillCharge(Guid Id, DateOnly Date, long AmountCents, string Merchant, Guid? CategoryId, CategorySource Source, bool InBill, string? CategoryName);
+
+    private async Task FileUnderAsync(Guid householdId, Item item, Guid categoryId, string reason, CancellationToken ct, IReadOnlyList<Guid>? only = null)
     {
         var s = item.Series;
         var key = item.Dto.Key;
@@ -149,7 +198,7 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
                 db.CategoryRules.Add(rule = new CategoryRule { Id = Guid.NewGuid(), HouseholdId = householdId, Pattern = s.MerchantKey, CreatedUtc = clock.GetUtcNow().UtcDateTime });
             rule.CategoryId = categoryId;
         }
-        var ids = s.TransactionIds.ToList();
+        var ids = (only ?? s.TransactionIds).ToList();
         await db.Transactions.Where(t => t.HouseholdId == householdId && ids.Contains(t.Id))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(t => t.CategoryId, categoryId).SetProperty(t => t.CategorySource, CategorySource.User)

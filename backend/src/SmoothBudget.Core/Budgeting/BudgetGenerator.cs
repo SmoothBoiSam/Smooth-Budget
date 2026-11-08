@@ -104,6 +104,21 @@ public static class BudgetGenerator
                 proposed = mine;
                 why = "You set this limit, so it stays as you set it.";
             }
+            else if (CardInterest.IsInterestCategory(c.Name, c.Type) && (cardDebts is { Count: > 0 } || !hasCardDebt))
+            {
+                // DECISIONS.md 159: interest is a bill planned from what you owe now, not from what you spent.
+                var expected = CardInterest.Expected(cardDebts ?? []);
+                proposed = expected.Sum(x => x.Cents);
+                why = proposed == 0
+                    ? "None of your cards carries a balance at interest, so no interest is expected."
+                    : "Expected from what you owe now: " + string.Join(" + ", expected.Where(x => x.Cents > 0)
+                        .Select(x => $"{x.Card.Name} {Money(x.Card.BalanceCents)} at {x.Card.AprBps / 100m:0.##}% ≈ {Money(x.Cents)}")) + ".";
+            }
+            else if (CardInterest.IsInterestCategory(c.Name, c.Type) && n > 0)
+            {
+                proposed = median;
+                why = $"Usually {Money(median)} a month (median of {Months(n)}). Add your cards' APRs on the Debt tab to plan it from your balances instead.";
+            }
             else if (n == 0)
             {
                 proposed = c.CurrentLimitCents;

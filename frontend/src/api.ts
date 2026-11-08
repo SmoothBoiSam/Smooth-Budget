@@ -219,7 +219,7 @@ export const budgetApi = {
     rulePattern: string | null,
     extra: { partnerPurpose?: PartnerPurpose } = {},
   ) =>
-    request<{ transaction: Transaction; ruleAppliedTo: number }>('PATCH', `/transactions/${id}`, {
+    request<{ transaction: Transaction; ruleAppliedTo: number; billChargesMoved: number }>('PATCH', `/transactions/${id}`, {
       categoryId,
       isTransfer,
       rulePattern,
@@ -324,6 +324,8 @@ export interface LinkResult {
   institutionName: string | null
   accounts: PlaidAccountProposal[]
   existingAccounts: Account[]
+  /** This bank is already connected through that connection: add accounts there instead (DECISIONS.md 157). */
+  duplicateOfItemId?: string | null
 }
 
 export interface AccountMapping {
@@ -356,7 +358,10 @@ export interface PlaidItem {
 
 export const plaidApi = {
   config: () => request<PlaidConfig>('GET', '/plaid/config'),
-  linkToken: (itemId?: string) => request<{ linkToken: string }>('POST', '/plaid/link-token', { itemId: itemId ?? null }),
+  /** With an item: sign in again, or (addAccounts) choose more of that bank's accounts to share. */
+  linkToken: (itemId?: string, addAccounts = false) =>
+    request<{ linkToken: string }>('POST', '/plaid/link-token', { itemId: itemId ?? null, addAccounts }),
+  itemAccounts: (id: string) => request<LinkResult>('GET', `/plaid/items/${id}/accounts`),
   exchange: (publicToken: string) => request<LinkResult>('POST', '/plaid/exchange', { publicToken }),
   sandboxLink: (dynamic: boolean) => request<LinkResult>('POST', '/plaid/sandbox/link', { dynamic }),
   sandboxRefresh: (itemId: string) => request<void>('POST', `/plaid/sandbox/items/${itemId}/refresh`),

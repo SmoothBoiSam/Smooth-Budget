@@ -43,8 +43,11 @@ public static partial class SpendingThemes
             ["GYM", "FITNESS", "PLANET FITNESS", "CLIMBING", "YOGA", "CROSSFIT", "PELOTON", "BOULDERING"]),
         new("Transit & rideshare", CategoryType.Variable, false, 3, true,
             ["RTD", "LYFT", "UBER", "PARKING", "PARKMOBILE", "TOLL", "TRANSIT", "METRO", "AMTRAK"], Exclude: ["UBER EATS"]),
+        // Interest is a bill planned from your card balances, kept out of Left to Spend (DECISIONS.md 159).
+        new(CardInterest.CategoryName, CategoryType.FixedBill, false, 1, true,
+            ["INTEREST CHARGE", "INTEREST CHARGES", "INTEREST CHARGED", "PURCHASE INTEREST", "CASH ADVANCE INTEREST", "FINANCE CHARGE"]),
         new("Fees & interest", CategoryType.Variable, false, 2, true,
-            ["INTEREST CHARGE", "LATE FEE", "OVERDRAFT", "SERVICE FEE", "ATM FEE", "FOREIGN TRANSACTION FEE", "ANNUAL FEE", "MONTHLY FEE"]),
+            ["LATE FEE", "OVERDRAFT", "SERVICE FEE", "ATM FEE", "FOREIGN TRANSACTION FEE", "ANNUAL FEE", "MONTHLY FEE"]),
     ];
 
     private static readonly Dictionary<string, Regex> Patterns = All.ToDictionary(t => t.Name, t => Build(t.Keywords));
