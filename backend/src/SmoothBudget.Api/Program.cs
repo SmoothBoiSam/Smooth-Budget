@@ -93,6 +93,8 @@ builder.Services.AddScoped<SmoothBudget.Api.Debt.DebtService>();
 builder.Services.AddScoped<SmoothBudget.Api.Bills.RecurringService>();
 builder.Services.AddScoped<SmoothBudget.Api.Savings.SavingsService>();
 builder.Services.AddScoped<SmoothBudget.Api.Payday.PaydayService>();
+builder.Services.AddSingleton<BudgetRefreshTracker>();
+builder.Services.AddScoped<AutoBudgetService>();
 
 // Plaid (milestone 3). Credentials and the token-encryption key come only from environment variables.
 var plaidOptions = new PlaidOptions
@@ -154,6 +156,7 @@ app.UseWebsite();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseBudgetChangeTracking(); // any change you make refreshes the automatic budget
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();

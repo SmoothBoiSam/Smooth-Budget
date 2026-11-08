@@ -72,8 +72,9 @@ public static class PayForecast
 public record PlanBill(string Key, string Name, long Cents, DateOnly Due, string Account, string? Note = null);
 public record PlanTransfer(string Key, string Label, long Cents, string Destination, string Why);
 
-/// <param name="Kind">"bill", "debt", "sweep", "savings" or "spending".</param>
-public record PlanItem(string Key, string Kind, string Label, long Cents, string Destination, string Why);
+/// <param name="Kind">"keep" (bills to leave in an account), "debt", "sweep", "savings" or "spending".</param>
+/// <param name="Bills">For "keep": the bills it covers.</param>
+public record PlanItem(string Key, string Kind, string Label, long Cents, string Destination, string Why, IReadOnlyList<PlanBill>? Bills = null);
 
 public record PaydayPlanResult(IReadOnlyList<PlanItem> Items, long ShortCents);
 
@@ -85,7 +86,14 @@ public static class PaydayPlan
 {
     public static PaydayPlanResult Build(long netCents, IReadOnlyList<PlanBill> bills, IReadOnlyList<PlanTransfer> transfers, string spendingAccount)
     {
-        var items = bills.OrderBy(b => b.Due).Select(b => new PlanItem(b.Key, "bill", b.Name, b.Cents, b.Account, $"Due {b.Due:MMM d}, before your next payday.{(b.Note is null ? "" : " " + b.Note)}")).ToList();
+        // One "keep" line per account for every bill due from it before the next payday (DECISIONS.md 138).
+        var items = bills.GroupBy(b => b.Account).Select(g =>
+        {
+            var list = g.OrderBy(b => b.Due).ToList();
+            var when = list.Count == 1 ? $"due {list[0].Due:MMM d}" : $"due {list[0].Due:MMM d} to {list[^1].Due:MMM d}";
+            return new PlanItem($"keep:{g.Key}", "keep", $"{list.Count} bill{(list.Count == 1 ? "" : "s")} {when}", list.Sum(b => b.Cents), g.Key,
+                "Bills paid from this account before your next payday." + string.Concat(list.Where(b => b.Note is not null).Select(b => " " + b.Note)), list);
+        }).ToList();
         items.AddRange(transfers.Where(t => t.Cents > 0).Select(t => new PlanItem(t.Key, t.Key.Split(':')[0], t.Label, t.Cents, t.Destination, t.Why)));
         var used = items.Sum(i => i.Cents);
         var spending = netCents - used;

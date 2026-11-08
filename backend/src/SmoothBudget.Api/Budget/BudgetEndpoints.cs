@@ -9,13 +9,16 @@ namespace SmoothBudget.Api.Budget;
 public record CategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary);
 
 /// <param name="ApplyTo">"permanent" changes the usual limit from now on; "month" changes only the current budget month.</param>
-public record UpdateCategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, bool IsHidden, string ApplyTo);
+/// <param name="Automatic">Hand the limit back to the automatic budget (it stops being yours).</param>
+public record UpdateCategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, bool IsHidden, string ApplyTo, bool Automatic = false);
 
 public record ReorderRequest(List<Guid> Ids);
-public record IncomeRequest(long IncomeCents, long? PartnerCents = null);
+/// <param name="Automatic">Go back to income from the Payday forecast.</param>
+public record IncomeRequest(long IncomeCents, long? PartnerCents = null, bool Automatic = false);
 public record GeneratorLimit(Guid CategoryId, long LimitCents);
 public record ApplyBudgetRequest(long IncomeCents, List<GeneratorLimit> Limits, long PartnerCents = 0);
-public record BudgetSettingsDto(SweepTarget SweepTarget, int SweepSavingsPercent);
+/// <param name="AutoBudget">The automatic budget on or off (null leaves it as it is).</param>
+public record BudgetSettingsDto(SweepTarget SweepTarget, int SweepSavingsPercent, bool? AutoBudget = null);
 
 public record GeneratorDto(
     int MonthsUsed, IReadOnlyList<BudgetMonthDtoLite> Months, long IncomeCents, string IncomeExplanation,
@@ -25,7 +28,9 @@ public record GeneratorDto(
     // True when there are no categories yet: set them up from your transactions first (/api/budget/categories/discover).
     bool NeedsCategorySetup,
     // Partner money is her fixed contributions (milestone 7) rather than a median of what she sent.
-    bool PartnerFromArrangements = false);
+    bool PartnerFromArrangements = false,
+    // The automatic budget: this is what it applies (nothing to confirm), and what the month still needs after squeezing.
+    bool Automatic = false, long ShortCents = 0);
 
 public record BudgetMonthDtoLite(DateOnly Start, DateOnly End);
 
@@ -35,7 +40,11 @@ public static class BudgetEndpoints
     {
         var g = app.MapGroup("/api/budget").RequireAuthorization();
 
-        g.MapGet("/summary", (HttpContext ctx, BudgetSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct));
+        g.MapGet("/summary", async (HttpContext ctx, BudgetSummaryService svc, AutoBudgetService auto, CancellationToken ct) =>
+        {
+            await auto.EnsureFreshAsync(ctx.User.HouseholdId(), ct);
+            return await svc.GetAsync(ctx.User.HouseholdId(), ct);
+        });
 
         // ---- Categories (SPEC 4.3: add, edit, hide, reorder; a limit change can be this month only or permanent)
 
@@ -50,7 +59,7 @@ public static class BudgetEndpoints
             var c = new Category
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = req.Type, MonthlyLimitCents = req.LimitCents,
-                IsDiscretionary = req.IsDiscretionary, SortOrder = order + 1,
+                IsDiscretionary = req.IsDiscretionary, SortOrder = order + 1, LimitSetByUser = true, // you typed it
             };
             db.Categories.Add(c);
             await db.SaveChangesAsync(ct);
@@ -75,7 +84,12 @@ public static class BudgetEndpoints
 
             var current = await months.EnsureCurrentAsync(householdId, ct);
             var mc = await db.BudgetMonthCategories.SingleOrDefaultAsync(x => x.BudgetMonthId == current.Id && x.CategoryId == id, ct);
-            if (req.ApplyTo == "month")
+            if (req.Automatic)
+            {
+                c.LimitSetByUser = false; // the automatic budget sets it again on the next refresh
+                if (mc is not null) mc.LimitOverrideCents = null;
+            }
+            else if (req.ApplyTo == "month")
             {
                 if (mc is null)
                     db.BudgetMonthCategories.Add(mc = new BudgetMonthCategory { Id = Guid.NewGuid(), BudgetMonthId = current.Id, CategoryId = id });
@@ -83,6 +97,7 @@ public static class BudgetEndpoints
             }
             else if (req.ApplyTo == "permanent")
             {
+                if (c.MonthlyLimitCents != req.LimitCents) c.LimitSetByUser = true; // yours from now on: the automatic budget leaves it alone
                 c.MonthlyLimitCents = req.LimitCents;
                 if (mc is not null) mc.LimitOverrideCents = null; // the new usual limit applies this month too
             }
@@ -130,6 +145,7 @@ public static class BudgetEndpoints
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["incomeCents"] = ["Income can't be negative."] });
             var row = await months.EnsureCurrentAsync(ctx.User.HouseholdId(), ct);
             row.IncomeExpectedCents = req.IncomeCents;
+            row.IncomeSetByUser = !req.Automatic;
             if (req.PartnerCents is { } p)
             {
                 if (p < 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerCents"] = ["Can't be negative."] });
@@ -164,8 +180,16 @@ public static class BudgetEndpoints
 
         // ---- Budget generator (SPEC 6.1)
 
-        g.MapGet("/generator", async (HttpContext ctx, BudgetGeneratorService gen, CancellationToken ct) =>
-            await gen.ProposeAsync(ctx.User.HouseholdId(), ct));
+        // With the automatic budget on, this is how this month's budget is built (what it applies); off, a proposal to apply.
+        g.MapGet("/generator", async (HttpContext ctx, BudgetGeneratorService gen, AutoBudgetService auto, AppDbContext db, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var on = await db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).SingleAsync(ct);
+            if (!on || !await db.Categories.AnyAsync(c => c.HouseholdId == householdId && !c.IsHidden, ct))
+                return await gen.ProposeAsync(householdId, ct);
+            var (fitted, dto, _) = await auto.PlanAsync(householdId, ct);
+            return dto with { Automatic = true, ShortCents = fitted.ShortCents };
+        });
 
         g.MapPost("/generator/apply", async (ApplyBudgetRequest req, HttpContext ctx, BudgetGeneratorService gen, CancellationToken ct) =>
         {
@@ -180,7 +204,7 @@ public static class BudgetEndpoints
         app.MapGet("/api/settings/budget", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
         {
             var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
-            return new BudgetSettingsDto(h.SweepTarget, h.SweepSavingsPercent);
+            return new BudgetSettingsDto(h.SweepTarget, h.SweepSavingsPercent, h.AutoBudget);
         }).RequireAuthorization();
 
         app.MapPut("/api/settings/budget", async (BudgetSettingsDto req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
@@ -190,6 +214,7 @@ public static class BudgetEndpoints
             var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
             h.SweepTarget = req.SweepTarget;
             h.SweepSavingsPercent = req.SweepSavingsPercent;
+            if (req.AutoBudget is { } auto) h.AutoBudget = auto;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization();
@@ -217,14 +242,20 @@ public static class BudgetEndpoints
 /// <summary>Runs <see cref="BudgetGenerator"/> on the household's last complete budget months and applies the result.</summary>
 public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, CategorizationService categorization, Debt.DebtService debts, Bills.RecurringService recurring, Savings.SavingsService savings)
 {
-    public async Task<GeneratorDto> ProposeAsync(Guid householdId, CancellationToken ct)
+    public async Task<GeneratorDto> ProposeAsync(Guid householdId, CancellationToken ct) => (await BuildAsync(householdId, null, true, ct)).Dto;
+
+    /// <summary>
+    /// Builds the proposal. The automatic budget passes its overrides (Payday income, your own limits) and skips re-filing
+    /// transactions, which every import and sync already does.
+    /// </summary>
+    public async Task<(BudgetProposal Proposal, GeneratorDto Dto, bool SavingsFromGoals)> BuildAsync(Guid householdId, BudgetOverrides? overrides, bool runCategorization, CancellationToken ct)
     {
         // No premade categories: a household without any sets them up from its own transactions first.
         var needsSetup = !await db.Categories.AnyAsync(c => c.HouseholdId == householdId && !c.IsHidden, ct);
 
         // File everything that fits first: transactions synced before the categories existed (or before a
         // category was added) would otherwise count as $0 in every category.
-        var filed = await categorization.RunAsync(householdId, ct);
+        var filed = runCategorization ? await categorization.RunAsync(householdId, ct) : new AutoCategorizeResult(0, 0, 0, 0);
 
         var current = await months.EnsureCurrentAsync(householdId, ct);
         var (_, _, calendar) = await months.ContextAsync(householdId, ct);
@@ -261,11 +292,11 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
         var amounts = await db.PartnerArrangements.Where(a => a.HouseholdId == householdId).Select(a => a.AmountCents).ToListAsync(ct);
         long? contributions = amounts.Count > 0 ? amounts.Sum() : null; // none set up: the median of what she sent
         var plan = await savings.PlanAsync(householdId, ct); // milestone 8: leftover in your priority order
-        var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills, contributions, plan);
+        var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills, contributions, plan, overrides);
         var partnerName = await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct);
-        return new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),
+        return (p, new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),
             p.IncomeCents, p.IncomeExplanation, p.PartnerCents, partnerName, filed, p.Categories, p.AllocatedCents, p.UnallocatedCents, p.SpendsMoreThanIncome,
-            p.UncategorizedCount, hasCardDebt, needsSetup, contributions is not null);
+            p.UncategorizedCount, hasCardDebt, needsSetup, contributions is not null), plan is not null);
     }
 
     /// <summary>Confirming the proposal sets the usual limits and this month's expected income.</summary>

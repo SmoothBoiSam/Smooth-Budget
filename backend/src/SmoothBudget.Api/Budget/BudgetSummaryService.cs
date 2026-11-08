@@ -81,7 +81,14 @@ public record BudgetSummaryDto(
     IReadOnlyList<PendingSweepDto> PendingSweeps,
     // The partner's fixed contributions this month (milestone 7), and what Left to Spend is missing from late or short ones.
     IReadOnlyList<ContributionStatusDto>? Contributions = null,
-    long PartnerShortfallCents = 0);
+    long PartnerShortfallCents = 0,
+    // The automatic budget (DECISIONS.md 135): on or off, its last change, any shortfall, and the limits you set yourself.
+    AutoBudgetDto? Auto = null);
+
+/// <param name="ShortCents">What this month still needs beyond its money after every squeeze.</param>
+/// <param name="SetByYou">Categories whose limit you set yourself (from now on, or this month only).</param>
+/// <param name="IncomeSetByYou">You typed this month's income, so it isn't the Payday forecast.</param>
+public record AutoBudgetDto(bool On, string? Note, DateTime? NoteUtc, long ShortCents, IReadOnlyList<Guid> SetByYou, bool IncomeSetByYou = false);
 
 /// <summary>The Budget screen (SPEC section 4.3): every category with its limit, spent and remaining, grouped by type.</summary>
 public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService months, Data.AppDbContext db)
@@ -137,7 +144,10 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             row.IncomeExpectedCents, planned, moneyIn - planned,
             Received(Core.Transactions.TransactionKind.Income), partnerExpected, Received(Core.Transactions.TransactionKind.PartnerContribution),
             partnerName, reviewCount,
-            groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories), data.PartnerShortfallCents);
+            groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories), data.PartnerShortfallCents,
+            new AutoBudgetDto(db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).Single(), row.AutoNote, row.AutoNoteUtc, row.AutoShortCents,
+                db.Categories.Where(c => c.HouseholdId == householdId && c.LimitSetByUser).Select(c => c.Id).AsEnumerable()
+                    .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser));
     }
 
     private async Task<LastMonthDto?> LastMonthAsync(Guid householdId, Data.BudgetMonth current, CancellationToken ct)

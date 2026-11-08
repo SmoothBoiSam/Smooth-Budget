@@ -282,6 +282,8 @@ export interface BudgetSummary {
   contributions: ContributionStatus[] | null
   /** What Left to Spend is missing because a contribution is late or short. */
   partnerShortfallCents: number
+  /** The automatic budget: on or off, its last change, any shortfall, and the limits you set yourself. */
+  auto: { on: boolean; note: string | null; noteUtc: string | null; shortCents: number; setByYou: string[]; incomeSetByYou: boolean } | null
 }
 
 export const budgetSummaryApi = {
@@ -419,6 +421,10 @@ export interface GeneratorProposal {
   needsCategorySetup: boolean
   /** Partner money is her fixed contributions, not a median of what she sent. */
   partnerFromArrangements: boolean
+  /** The automatic budget: this is what it applies, with nothing to confirm. */
+  automatic: boolean
+  /** What the month still needs after every squeeze. */
+  shortCents: number
 }
 
 export type SweepTarget = 'Debt' | 'Savings' | 'Split'
@@ -435,12 +441,14 @@ export const budgetEditApi = {
       isDiscretionary: boolean
       isHidden: boolean
       applyTo: 'month' | 'permanent'
+      /** Hand the limit back to the automatic budget. */
+      automatic?: boolean
     },
   ) => request<void>('PUT', `/budget/categories/${id}`, body),
   reorder: (ids: string[]) => request<void>('POST', '/budget/categories/order', { ids }),
   hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
-  setIncome: (incomeCents: number, partnerCents?: number) =>
-    request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null }),
+  setIncome: (incomeCents: number, partnerCents?: number, automatic = false) =>
+    request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null, automatic }),
   closeMonth: (start: string) => request<void>('POST', `/budget/months/${start}/close`),
   sweepDone: (id: string) => request<void>('POST', `/budget/sweeps/${id}/done`),
   sweepUndo: (id: string) => request<void>('DELETE', `/budget/sweeps/${id}/done`),
@@ -453,9 +461,9 @@ export const budgetEditApi = {
     request<AutoCategorizeResult>('POST', '/budget/categories/discover/apply', { create, hideIds }),
   applyGenerator: (incomeCents: number, partnerCents: number, limits: { categoryId: string; limitCents: number }[]) =>
     request<void>('POST', '/budget/generator/apply', { incomeCents, partnerCents, limits }),
-  settings: () => request<{ sweepTarget: SweepTarget; sweepSavingsPercent: number }>('GET', '/settings/budget'),
-  saveSettings: (sweepTarget: SweepTarget, sweepSavingsPercent: number) =>
-    request<void>('PUT', '/settings/budget', { sweepTarget, sweepSavingsPercent }),
+  settings: () => request<{ sweepTarget: SweepTarget; sweepSavingsPercent: number; autoBudget: boolean }>('GET', '/settings/budget'),
+  saveSettings: (sweepTarget: SweepTarget, sweepSavingsPercent: number, autoBudget?: boolean) =>
+    request<void>('PUT', '/settings/budget', { sweepTarget, sweepSavingsPercent, autoBudget: autoBudget ?? null }),
 }
 
 export interface AutoCategorizeResult {
@@ -768,12 +776,18 @@ export interface PayAmount {
 }
 export interface PlanItem {
   key: string
-  kind: 'bill' | 'debt' | 'sweep' | 'savings' | 'spending'
+  kind: 'keep' | 'debt' | 'sweep' | 'savings' | 'spending'
   label: string
   cents: number
   destination: string
   why: string
+  /** Checked off by you, or done according to your accounts (auto). */
   done: boolean
+  auto: boolean
+  /** For the check you're on now: what the app sees. */
+  status: string | null
+  /** For "keep": the bills it covers. */
+  bills: { name: string; cents: number; due: string }[] | null
 }
 export interface PayCheck {
   payDate: string
@@ -792,6 +806,10 @@ export interface PayCheck {
   taxes: PayAmount[]
   deductions: PayAmount[]
   plan: { items: PlanItem[]; shortCents: number } | null
+  /** The check you're living on now (paid most recently). */
+  isCurrent: boolean
+  /** What actually landed for it. */
+  landedNetCents: number | null
 }
 export interface PayHistory {
   payDate: string

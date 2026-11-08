@@ -19,9 +19,12 @@ export default function CategoryEditSheet({
   onClose,
   onSaved,
   onMove,
+  auto,
 }: {
   line: BudgetCategoryLine | null // null = new category
   usualLimitCents?: number
+  /** With the automatic budget on: whether this limit is yours (set by you) or the budget's. */
+  auto?: { on: boolean; setByYou: boolean }
   onClose: () => void
   onSaved: (message: string) => void
   onMove?: (direction: -1 | 1) => Promise<void>
@@ -37,6 +40,21 @@ export default function CategoryEditSheet({
 
   const limitCents = parseDollars(limit)
   const limitChanged = !isNew && limitCents !== null && limitCents !== line.limitCents
+
+  async function backToAutomatic() {
+    if (!line) return
+    setBusy(true)
+    setError(null)
+    try {
+      await budgetEditApi.updateCategory(line.id, {
+        name: line.name, type: line.type, limitCents: line.limitCents, isDiscretionary: line.isDiscretionary, isHidden: false, applyTo: 'permanent', automatic: true,
+      })
+      onSaved(`${line.name} is automatic again.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save.')
+      setBusy(false)
+    }
+  }
 
   async function save(e: FormEvent, hide = false) {
     e.preventDefault()
@@ -121,6 +139,21 @@ export default function CategoryEditSheet({
             <span className="mt-1 block text-xs text-slate-500">This month only. Usually ${centsToInput(usualLimitCents)}.</span>
           )}
         </label>
+
+        {!isNew && auto?.on && (
+          <p className="mt-2 text-xs text-slate-500">
+            {auto.setByYou ? (
+              <>
+                You set this limit, so the automatic budget leaves it alone.{' '}
+                <button type="button" disabled={busy} onClick={() => void backToAutomatic()} className="font-medium text-sky-700 underline">
+                  Back to automatic
+                </button>
+              </>
+            ) : (
+              'Set by the automatic budget. Change it and it becomes yours: the budget works around it.'
+            )}
+          </p>
+        )}
 
         {!isNew && (
           <fieldset className="mt-3">

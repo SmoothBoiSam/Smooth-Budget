@@ -112,10 +112,11 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
     }
 }
 
-public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, Bills.RecurringService recurring, Payday.PaydayService payday)
+public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, Bills.RecurringService recurring, Payday.PaydayService payday, Budget.AutoBudgetService autoBudget)
 {
     public async Task<HomeSummaryDto> GetAsync(Guid householdId, CancellationToken ct = default)
     {
+        await autoBudget.EnsureFreshAsync(householdId, ct); // Left to Spend uses this month's limits
         var data = await loader.LoadAsync(householdId, ct);
         var (today, lastUpdated) = (data.Today, data.LastUpdatedUtc);
         var r = data.LeftToSpend();

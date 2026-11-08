@@ -255,7 +255,11 @@ public class PayEngineTests
             [new("bill:rent", "Rent", 850_00, new(2027, 3, 1), "Checking"), new("bill:phone", "Phone", 60_00, new(2027, 2, 25), "Checking")],
             [new("debt", "Card payment", 200_00, "Test Visa", "Half the month's card payment."), new("savings", "Savings", 100_00, "Test Savings", "Half the month's savings."), new("sweep:x", "Sweep", 0, "Test Visa", "")],
             "Checking");
-        Assert.Equal(["bill:phone", "bill:rent", "debt", "savings", "spending"], plan.Items.Select(i => i.Key));
+        // The bills become one "keep" line for the account they're paid from, listing each.
+        Assert.Equal(["keep:Checking", "debt", "savings", "spending"], plan.Items.Select(i => i.Key));
+        var keep = plan.Items[0];
+        Assert.Equal(("2 bills due Feb 25 to Mar 1", 910_00L, "Checking"), (keep.Label, keep.Cents, keep.Destination));
+        Assert.Equal(["Phone", "Rent"], keep.Bills!.Select(b => b.Name));
         Assert.Equal(290_00, plan.Items[^1].Cents);
         Assert.Equal(0, plan.ShortCents);
 

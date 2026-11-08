@@ -45,6 +45,8 @@ public class Household
     public long? ExtraDebtPaymentCents { get; set; }
     /// <summary>Where money left over in the budget goes, in order (SPEC 4.5): "StarterFund,Debt,Savings" by default.</summary>
     public string SavingsPriority { get; set; } = "StarterFund,Debt,Savings";
+    /// <summary>The budget updates itself whenever anything it depends on changes (DECISIONS.md 135).</summary>
+    public bool AutoBudget { get; set; } = true;
 
     public DateTime CreatedUtc { get; set; }
 
@@ -119,6 +121,8 @@ public class Category
     public required string Name { get; set; }
     public CategoryType Type { get; set; }
     public long MonthlyLimitCents { get; set; }
+    /// <summary>You set this limit yourself, so the automatic budget leaves it alone (until you put it back to automatic).</summary>
+    public bool LimitSetByUser { get; set; }
 
     /// <summary>Eating out, shopping, entertainment: trimmed first when income falls short (SPEC section 3).</summary>
     public bool IsDiscretionary { get; set; }
@@ -234,6 +238,13 @@ public class BudgetMonth
 
     /// <summary>Expected partner contributions this month.</summary>
     public long PartnerExpectedCents { get; set; }
+    /// <summary>You typed this month's income yourself, so the automatic budget doesn't replace it with the Payday forecast.</summary>
+    public bool IncomeSetByUser { get; set; }
+    /// <summary>What the plan still needs beyond the month's money after the automatic budget squeezed everything it can.</summary>
+    public long AutoShortCents { get; set; }
+    /// <summary>The automatic budget's last change, in plain words, and when.</summary>
+    public string? AutoNote { get; set; }
+    public DateTime? AutoNoteUtc { get; set; }
 
     /// <summary>
     /// Net overspend carried in, as a positive number of cents. For the first month on record this is the

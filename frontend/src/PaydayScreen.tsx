@@ -138,12 +138,15 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
   return (
     <article className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="font-semibold">{weekday(c.payDate)}</h2>
+        <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
+          {c.isCurrent ? `Paid ${weekday(c.payDate)}` : weekday(c.payDate)}
+          {c.isCurrent && <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">You're on this check</span>}
+        </h2>
         <span className="text-xs text-slate-500">
           Covers {formatDay(c.periodStart)}–{formatDay(c.periodEnd)}
         </span>
       </div>
-      {!c.hasSchedule ? (
+      {!c.hasSchedule && c.landedNetCents === null ? (
         <p className="mt-2 text-sm text-slate-600">
           Import your {monthName(c.periodStart)} schedule to forecast this check.{' '}
           <a href="#/payday/setup" className="font-medium text-sky-700">
@@ -152,11 +155,13 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
         </p>
       ) : (
         <>
-          <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{formatCents(c.netCents)}</p>
+          <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{formatCents(c.landedNetCents ?? c.netCents)}</p>
           <p className="text-sm text-slate-500">
-            Likely take-home · range {formatCents(c.lowNetCents)}–{formatCents(c.highNetCents)} · gross {formatCents(c.grossCents)}
+            {c.landedNetCents !== null
+              ? `Landed${c.hasSchedule ? ` · forecast was ${formatCents(c.netCents)}` : ''}`
+              : `Likely take-home · range ${formatCents(c.lowNetCents)}–${formatCents(c.highNetCents)} · gross ${formatCents(c.grossCents)}`}
           </p>
-          {c.lowConfidence && (
+          {c.lowConfidence && c.landedNetCents === null && (
             <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
               <span className="font-semibold">Low confidence.</span> {c.reasons.join(' ')}
             </p>
@@ -166,9 +171,11 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
               {n}
             </p>
           ))}
+          {c.hasSchedule && (
           <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 text-xs font-medium text-sky-700">
             {open ? 'Hide' : 'How this is figured'}
           </button>
+          )}
           {open && (
             <dl className="mt-2 space-y-1 text-sm">
               {c.lines.map((l) => (
@@ -190,7 +197,7 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
               <button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex w-full items-center justify-between text-sm font-semibold">
                 Payday plan
                 <span className="text-xs font-normal text-slate-500">
-                  {c.plan.items.filter((i) => i.done).length} of {c.plan.items.length} done
+                  {c.plan.items.filter((i) => i.kind !== 'spending' && i.done).length} of {c.plan.items.filter((i) => i.kind !== 'spending').length} done
                 </span>
               </button>
               {planOpen && (
@@ -203,13 +210,7 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
                   <ul className="mt-2 space-y-1">
                     {c.plan.items.map((item) => (
                       <li key={item.key}>
-                        <label className="flex cursor-pointer items-start gap-3 rounded-lg px-1 py-1.5">
-                          <input type="checkbox" checked={item.done} onChange={() => onToggle(item)} className="mt-1 size-4 accent-slate-900" />
-                          <span className="min-w-0 flex-1">
-                            <span className={`block text-sm ${item.done ? 'text-slate-400 line-through' : ''}`}>{planText(item)}</span>
-                            <span className="block text-xs text-slate-500">{item.why}</span>
-                          </span>
-                        </label>
+                        <PlanRow item={item} onToggle={() => onToggle(item)} />
                       </li>
                     ))}
                   </ul>
@@ -223,11 +224,65 @@ function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onTogg
   )
 }
 
+/** One part of the payday plan. Spending money is just a number; the rest can be checked off, or are done on their own. */
+function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
+  const [billsOpen, setBillsOpen] = useState(false)
+  const body = (
+    <span className="min-w-0 flex-1">
+      <span className={`block text-sm ${item.done ? 'text-slate-400 line-through' : ''}`}>{planText(item)}</span>
+      {item.status && <span className={`block text-xs ${item.done ? 'text-emerald-700' : 'text-amber-700'}`}>{item.status}</span>}
+      <span className="block text-xs text-slate-500">{item.why}</span>
+    </span>
+  )
+  if (item.kind === 'spending')
+    return (
+      <div className="flex items-start gap-3 px-1 py-1.5">
+        <span aria-hidden className="mt-1.5 size-4 shrink-0 text-center text-slate-400">·</span>
+        {body}
+      </div>
+    )
+  return (
+    <div className="px-1 py-1.5">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          checked={item.done}
+          disabled={item.auto}
+          onChange={onToggle}
+          aria-label={item.auto ? `${planText(item)}: done, from your accounts` : planText(item)}
+          className="mt-1 size-4 shrink-0 accent-emerald-600"
+        />
+        {body}
+      </label>
+      {item.bills && item.bills.length > 0 && (
+        <div className="ml-7">
+          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-sky-700">
+            <Caret open={billsOpen} />
+            {billsOpen ? 'Hide the bills' : 'Show the bills'}
+          </button>
+          {billsOpen && (
+            <ul className="mt-1 divide-y divide-slate-100 text-xs">
+              {item.bills.map((b) => (
+                <li key={b.name + b.due} className="flex justify-between gap-3 py-1">
+                  <span>
+                    {b.name} <span className="text-slate-400">· {formatDay(b.due)}</span>
+                  </span>
+                  <span className="tabular-nums">{formatCents(b.cents)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function planText(i: PlanItem) {
   const amount = formatCents(i.cents)
   switch (i.kind) {
-    case 'bill':
-      return `${i.destination.replace(/^Keep in /, 'Keep ' + amount + ' in ')} for ${i.label}`
+    case 'keep':
+      return `Keep ${amount} in ${i.destination} for ${i.label}`
     case 'spending':
       return `Keep ${amount} in ${i.destination} for spending`
     default:

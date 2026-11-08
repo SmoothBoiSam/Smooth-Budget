@@ -64,9 +64,10 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
 
         Assert.Equal(HttpStatusCode.OK, (await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true)).StatusCode);
         var p = await Payday(c);
-        Assert.Equal([new DateOnly(2027, 2, 8), new DateOnly(2027, 2, 22), new DateOnly(2027, 3, 8)], p.Checks.Select(x => x.PayDate));
-        Assert.False(p.Checks[0].HasSchedule); // January isn't imported
-        var feb22 = p.Checks[1];
+        Assert.Equal((new DateOnly(2027, 1, 22), true), (p.Checks[0].PayDate, p.Checks[0].IsCurrent)); // the check you're living on now
+        Assert.Equal([new DateOnly(2027, 2, 8), new DateOnly(2027, 2, 22), new DateOnly(2027, 3, 8)], p.Checks.Skip(1).Select(x => x.PayDate));
+        Assert.False(p.Checks[1].HasSchedule); // January isn't imported
+        var feb22 = p.Checks[2];
         Assert.Equal([("Regular", 799_44L), ("Boarding Pay", 83_38L), ("NonTax Per Diem", 239_85L)], feb22.Lines.Select(l => (l.Name, l.Cents)));
         Assert.True(feb22.LowConfidence); // no stubs yet: a flat 80% of gross
         Assert.Equal((long)Math.Round(feb22.GrossCents * 0.8m), feb22.NetCents);
@@ -74,7 +75,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
 
         // Overtime on the first trip adds the extra half on the check that covers it; a re-import keeps the choice.
         await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, ["T1001 02/04"], []), Json);
-        Assert.Equal(feb22.GrossCents + 272_37, (await Payday(c)).Checks[1].GrossCents);
+        Assert.Equal(feb22.GrossCents + 272_37, (await Payday(c)).Checks[2].GrossCents);
         await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
         Assert.True((await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0].Trips[0].Overtime);
 
@@ -82,7 +83,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, [], [], ["T1001 02/04"]), Json);
         var dropped = (await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0];
         Assert.Equal((true, 756), (dropped.Trips[0].Dropped, dropped.CreditMinutes));
-        Assert.Equal(Hm.Pay(504, 30_32), (await Payday(c)).Checks[1].Lines.Single(l => l.Name == "Regular").Cents);
+        Assert.Equal(Hm.Pay(504, 30_32), (await Payday(c)).Checks[2].Lines.Single(l => l.Name == "Regular").Cents);
         await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
         Assert.True((await c.GetFromJsonAsync<List<ScheduleMonthDto>>("/api/payday/schedule", Json))![0].Trips[0].Dropped);
         await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, ["T1001 02/04"], []), Json);
@@ -125,7 +126,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         var nov = PayFixtures.Csv.Replace("/2027", "/2026").Replace(",02/", ",11/");
         Assert.Equal(HttpStatusCode.OK, (await Schedule(c, nov, "schedule.csv", confirm: true)).StatusCode);
         var p = await Payday(c);
-        var check = p.Checks[0];
+        var check = p.Checks.First(x => !x.IsCurrent);
         Assert.Equal((new DateOnly(2026, 11, 23), true), (check.PayDate, check.HasSchedule));
         Assert.Contains(check.Lines, l => l.Name == "Uni Allowance");
         Assert.DoesNotContain(check.Lines, l => l.Name == "Commuter Subsid"); // only on the check paid on the 7th
@@ -163,6 +164,51 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         var next = after.Checks[0];
         await c.PutAsJsonAsync($"/api/payday/plan/{next.PayDate:yyyy-MM-dd}/spending", new ChecklistRequest(true), Json);
         Assert.True((await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Key == "spending").Done);
+    }
+
+    [Fact]
+    public async Task The_plan_for_the_check_you_are_on_fills_itself_in_from_your_accounts()
+    {
+        // Feb 24, 2027: living on the Feb 22 check (Feb 1-15, from the February schedule) until Mar 8.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var me = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var h = me.HouseholdId;
+            var checking = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = "test-chk", CurrentBalanceCents = 2_000_00, CreatedUtc = DateTime.UtcNow };
+            var savings = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Savings", Mask = "2222", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+            var power = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Utilities", Type = SmoothBudget.Core.Budgeting.CategoryType.FixedBill, MonthlyLimitCents = 90_00 };
+            var cards = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Credit card payment", Type = SmoothBudget.Core.Budgeting.CategoryType.DebtPayment, MonthlyLimitCents = 400_00 };
+            var save = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 };
+            db.AddRange(checking, savings, power, cards, save);
+            Transaction T(Account a, DateOnly d, long cents, TransactionKind kind, Guid? cat = null, bool transfer = false, string merchant = "TEST POWER CO") => new()
+            {
+                Id = Guid.NewGuid(), HouseholdId = h, AccountId = a.Id, Date = d, AmountCents = cents, Merchant = merchant, Description = "TEST",
+                Kind = kind, CategoryId = cat, IsTransfer = transfer, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            };
+            foreach (var d in new[] { new DateOnly(2026, 11, 25), new DateOnly(2026, 12, 25), new DateOnly(2027, 1, 25) })
+                db.Transactions.Add(T(checking, d, 90_00, TransactionKind.Purchase, power.Id)); // a monthly bill, next due Feb 25
+            db.Transactions.Add(T(checking, new DateOnly(2027, 2, 23), 120_00, TransactionKind.CardPayment, cards.Id, transfer: true, merchant: "PAYMENT TO TEST CARD"));
+            db.Transactions.Add(T(savings, new DateOnly(2027, 2, 23), -50_00, TransactionKind.Transfer, transfer: true, merchant: "TRANSFER FROM CHECKING"));
+            await db.SaveChangesAsync();
+        }
+
+        var now = (await Payday(c)).Checks[0];
+        Assert.Equal((new DateOnly(2027, 2, 22), true), (now.PayDate, now.IsCurrent));
+        var items = now.Plan!.Items.ToDictionary(i => i.Kind);
+        // One "keep" line for the bills paid from checking before Mar 8, done because the balance covers them.
+        Assert.Equal(("1 bill due Feb 25", 90_00L, "Test Checking ••1111", true, true), (items["keep"].Label, items["keep"].Cents, items["keep"].Destination, items["keep"].Done, items["keep"].Auto));
+        Assert.Equal("Test Checking has $2,000.00, enough for these.", items["keep"].Status);
+        // Half the month's $400 card payment; $120 sent so far.
+        Assert.Equal((200_00L, false, "Sent $120.00 of $200.00 so far."), (items["debt"].Cents, items["debt"].Done, items["debt"].Status));
+        // Half the month's $100 savings: the $50 transfer covers it.
+        Assert.Equal((50_00L, true, true), (items["savings"].Cents, items["savings"].Done, items["savings"].Auto));
+        Assert.Null(items["spending"].Status);
+
+        // The next checks keep their plans for reference, without statuses.
+        Assert.All((await Payday(c)).Checks.Skip(1).Where(x => x.Plan is not null).SelectMany(x => x.Plan!.Items), i => Assert.Null(i.Status));
     }
 
     [Fact]

@@ -26,7 +26,7 @@ public class PlaidItemLocks
 /// </summary>
 public class PlaidSyncService(CategorizationService categorization,
     AppDbContext db, PlaidClient plaid, SecretBox secrets, TransferDetectionService transfers,
-    PlaidItemLocks locks, TimeProvider clock, ILogger<PlaidSyncService> log)
+    PlaidItemLocks locks, TimeProvider clock, ILogger<PlaidSyncService> log, Budget.BudgetRefreshTracker budgetTracker)
 {
     public async Task<SyncResultDto> SyncAsync(Guid itemId, CancellationToken ct = default)
     {
@@ -194,6 +194,7 @@ public class PlaidSyncService(CategorizationService categorization,
 
         log.LogInformation("Plaid sync for item {ItemId}: {Inserted} new, {Updated} updated ({Posted} posted), {Deleted} removed, {Adopted} matched to CSV, {Skipped} skipped",
             item.Id, inserted, plan.Updates.Count, posted, plan.Deletes.Count, adopted, skipped);
+        budgetTracker.MarkChanged(item.HouseholdId); // new transactions: the automatic budget refreshes
         return new SyncResultDto(item.Id, item.InstitutionName, true, inserted, plan.Updates.Count, plan.Deletes.Count, posted, adopted, skipped, null);
     }
 

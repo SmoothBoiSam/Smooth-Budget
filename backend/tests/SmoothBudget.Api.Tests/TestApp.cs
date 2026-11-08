@@ -49,6 +49,8 @@ public class TestApp : WebApplicationFactory<Program>
         builder.UseEnvironment("Development"); // migrates the test database on startup
         builder.UseSetting("ConnectionStrings:Default", ConnectionString);
         builder.UseSetting("RateLimits:AuthPermitPerMinute", "1000");
+        // Existing tests set limits by hand; the automatic budget has its own tests, which switch it on.
+        builder.UseSetting("Budget:AutoForNewHouseholds", "false");
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<TimeProvider>();

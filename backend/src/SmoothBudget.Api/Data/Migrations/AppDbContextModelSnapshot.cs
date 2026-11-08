@@ -303,6 +303,15 @@ namespace SmoothBudget.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AutoNote")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("AutoNoteUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("AutoShortCents")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("CarriedInDeficitCents")
                         .HasColumnType("bigint");
 
@@ -320,6 +329,9 @@ namespace SmoothBudget.Api.Data.Migrations
 
                     b.Property<long>("IncomeExpectedCents")
                         .HasColumnType("bigint");
+
+                    b.Property<bool>("IncomeSetByUser")
+                        .HasColumnType("boolean");
 
                     b.Property<long>("PartnerExpectedCents")
                         .HasColumnType("bigint");
@@ -382,6 +394,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsSplit")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("LimitSetByUser")
                         .HasColumnType("boolean");
 
                     b.Property<long>("MonthlyLimitCents")
@@ -502,6 +517,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("AutoBudget")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("BudgetMonthStartDay")
                         .HasColumnType("integer");

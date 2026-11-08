@@ -9,10 +9,16 @@ public sealed record GeneratorCategory(Guid Id, string Name, CategoryType Type, 
 /// <param name="Explanation">Why this number, in plain words (SPEC 6.1 step 7: every suggestion is explainable).</param>
 public sealed record ProposedLimit(
     Guid CategoryId, string Name, CategoryType Type, long CurrentLimitCents, long MedianCents, long ProposedCents,
-    string Explanation, IReadOnlyList<long> MonthlyCents);
+    string Explanation, IReadOnlyList<long> MonthlyCents, bool IsDiscretionary = false);
 
 /// <summary>A detected bill or subscription filed in a category, at its current price per month (milestone 6).</summary>
 public sealed record CurrentBill(Guid CategoryId, string Name, long MonthlyCents);
+
+/// <summary>
+/// What the automatic budget feeds the generator (DECISIONS.md 135): this month's income from the Payday forecast instead of
+/// a median, and limits you set yourself, which it never changes.
+/// </summary>
+public sealed record BudgetOverrides(long? IncomeCents = null, string? IncomeExplanation = null, IReadOnlyDictionary<Guid, long>? LockedLimits = null);
 
 public sealed record BudgetProposal(
     int MonthsUsed,
@@ -63,8 +69,10 @@ public static class BudgetGenerator
         IReadOnlyList<Debt.DebtInput>? cardDebts = null,
         IReadOnlyList<CurrentBill>? currentBills = null,
         long? fixedPartnerCents = null,
-        SavingsPlan? savings = null)
+        SavingsPlan? savings = null,
+        BudgetOverrides? overrides = null)
     {
+        var locked = overrides?.LockedLimits ?? new Dictionary<Guid, long>();
         var months = history.OrderBy(m => m.Start).TakeLast(MaxMonths).ToList();
         var n = months.Count;
         var calcCategories = categories.Select(c => new BudgetCategory(c.Id, c.Type, 0)).ToList();
@@ -75,7 +83,7 @@ public static class BudgetGenerator
         var incomeByMonth = months.Select(m => transactions
             .Where(t => m.Contains(t.Date) && !t.IsTransfer && t.Kind == TransactionKind.Income && t.AmountCents < 0)
             .Sum(t => -t.AmountCents)).ToList();
-        var income = Median(incomeByMonth);
+        var income = overrides?.IncomeCents ?? Median(incomeByMonth);
 
         // Partner money is tracked on its own, not as the owner's income.
         var partnerByMonth = months.Select(m => transactions
@@ -90,7 +98,12 @@ public static class BudgetGenerator
             var median = Median(monthly);
             long proposed;
             string why;
-            if (n == 0)
+            if (locked.TryGetValue(c.Id, out var mine))
+            {
+                proposed = mine;
+                why = "You set this limit, so it stays as you set it.";
+            }
+            else if (n == 0)
             {
                 proposed = c.CurrentLimitCents;
                 why = "No complete months of history yet; keeping the current limit.";
@@ -121,7 +134,7 @@ public static class BudgetGenerator
                     _ => median == 0 ? $"No transfers to savings in the last {Months(n)}." : $"You moved a median of {Money(median)} a month to savings.",
                 };
             }
-            return new ProposedLimit(c.Id, c.Name, c.Type, c.CurrentLimitCents, median, proposed, why, monthly);
+            return new ProposedLimit(c.Id, c.Name, c.Type, c.CurrentLimitCents, median, proposed, why, monthly, c.IsDiscretionary);
         }).ToList();
 
         // Milestone 5 (DECISIONS.md 89): with your cards' minimums known, the card-payment category is the sum of the
@@ -129,10 +142,10 @@ public static class BudgetGenerator
         // Milestone 8 (DECISIONS.md 103): with savings goals, what's left goes in your priority order (default: starter fund,
         // then high-APR debt, then larger savings), and the savings line comes from the goals instead of a median.
         var owed = (cardDebts ?? []).Where(d => d.BalanceCents > 0).ToList();
-        var cardCategory = proposals.FirstOrDefault(p => p.Type == CategoryType.DebtPayment);
-        var savingsCategory = savings is not null ? proposals.FirstOrDefault(p => p.Type == CategoryType.SavingsTransfer) : null;
+        var cardCategory = proposals.FirstOrDefault(p => p.Type == CategoryType.DebtPayment && !locked.ContainsKey(p.CategoryId));
+        var savingsCategory = savings is not null ? proposals.FirstOrDefault(p => p.Type == CategoryType.SavingsTransfer && !locked.ContainsKey(p.CategoryId)) : null;
         var debtStep = owed.Count > 0 && cardCategory is not null;
-        if (n > 0 && (debtStep || savingsCategory is not null))
+        if ((n > 0 || overrides?.IncomeCents is not null) && (debtStep || savingsCategory is not null))
         {
             var minimums = debtStep ? owed.Sum(d => Math.Min(d.MinimumCents, d.BalanceCents)) : 0;
             var others = proposals.Where(p => p != savingsCategory && (!debtStep || p != cardCategory)).Sum(p => p.ProposedCents);
@@ -187,7 +200,7 @@ public static class BudgetGenerator
 
         return new BudgetProposal(
             n, income,
-            n == 0 ? "No complete months of history yet." : $"Your median monthly income over {Months(n)}: paychecks and other deposits.",
+            overrides?.IncomeExplanation ?? (n == 0 ? "No complete months of history yet." : $"Your median monthly income over {Months(n)}: paychecks and other deposits."),
             incomeByMonth, proposals, allocated, income + partner - allocated, allocated > income + partner, uncategorized,
             partner, partnerByMonth);
     }

@@ -39,7 +39,11 @@ public static class PaydayEndpoints
     {
         var g = app.MapGroup("/api/payday").RequireAuthorization();
 
-        g.MapGet("", (HttpContext ctx, PaydayService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct));
+        g.MapGet("", async (HttpContext ctx, PaydayService svc, Budget.AutoBudgetService auto, CancellationToken ct) =>
+        {
+            await auto.EnsureFreshAsync(ctx.User.HouseholdId(), ct); // the plan splits this month's budget across checks
+            return await svc.GetAsync(ctx.User.HouseholdId(), ct);
+        });
 
         g.MapPut("/plan/{payDate}/{key}", async (DateOnly payDate, string key, ChecklistRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
@@ -49,6 +53,10 @@ public static class PaydayEndpoints
                 db.PaydayChecklistItems.Add(new PaydayChecklistItem { Id = Guid.NewGuid(), HouseholdId = householdId, PayDate = payDate, Key = key[..Math.Min(key.Length, 200)], CreatedUtc = clock.GetUtcNow().UtcDateTime });
             else if (!req.Done && row is not null)
                 db.PaydayChecklistItems.Remove(row);
+            // The leftover sweep is the same thing as the "send $X to …" item on Home: checking one marks the other.
+            if (key.StartsWith("sweep:", StringComparison.Ordinal) && Guid.TryParse(key[6..], out var sweepId)
+                && await db.SweepTasks.SingleOrDefaultAsync(s => s.Id == sweepId && s.HouseholdId == householdId, ct) is { } sweep)
+                sweep.DoneUtc = req.Done ? clock.GetUtcNow().UtcDateTime : null;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });

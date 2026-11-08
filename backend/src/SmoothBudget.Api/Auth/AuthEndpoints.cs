@@ -25,7 +25,11 @@ public static class AuthEndpoints
             if (!await SignUpOpenAsync(db, config, env))
                 return Results.Problem("Sign-up is closed on this app.", statusCode: StatusCodes.Status403Forbidden);
             await using var tx = await db.Database.BeginTransactionAsync();
-            var household = new Household { Id = Guid.NewGuid(), Name = "My household", CreatedUtc = clock.GetUtcNow().UtcDateTime };
+            var household = new Household
+            {
+                Id = Guid.NewGuid(), Name = "My household", CreatedUtc = clock.GetUtcNow().UtcDateTime,
+                AutoBudget = config.GetValue("Budget:AutoForNewHouseholds", true),
+            };
             db.Households.Add(household);
             await db.SaveChangesAsync();
 
