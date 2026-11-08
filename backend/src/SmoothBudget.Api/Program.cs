@@ -120,6 +120,16 @@ builder.Services.AddScoped<PlaidLinkService>();
 builder.Services.AddScoped<IPlaidWebhookKeySource, PlaidApiKeySource>();
 builder.Services.AddScoped<PlaidWebhookVerifier>();
 builder.Services.AddHostedService<PlaidBackgroundSync>();
+// Phone notifications (DECISIONS.md 151). Off until the VAPID keys are set.
+builder.Services.AddSingleton(new SmoothBudget.Api.Notifications.PushOptions
+{
+    PublicKey = config["VAPID_PUBLIC_KEY"],
+    PrivateKey = config["VAPID_PRIVATE_KEY"],
+    Subject = config["VAPID_SUBJECT"] is { Length: > 0 } subject ? subject : "https://smoothbudget.onrender.com",
+});
+builder.Services.AddHttpClient<SmoothBudget.Api.Notifications.IPushSender, SmoothBudget.Api.Notifications.WebPushSender>(http => http.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<SmoothBudget.Api.Notifications.NotificationService>();
+builder.Services.AddHostedService<SmoothBudget.Api.Notifications.NotificationBackground>();
 // Leave headroom over the 5 MB CSV limit for multipart framing.
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = ImportService.MaxFileBytes + 64 * 1024);
 
@@ -169,6 +179,7 @@ SmoothBudget.Api.Debt.DebtEndpoints.MapDebtEndpoints(app);
 SmoothBudget.Api.Bills.RecurringEndpoints.MapRecurringEndpoints(app);
 SmoothBudget.Api.Savings.SavingsEndpoints.MapSavingsEndpoints(app);
 SmoothBudget.Api.Payday.PaydayEndpoints.MapPaydayEndpoints(app);
+SmoothBudget.Api.Notifications.NotificationEndpoints.MapNotificationEndpoints(app);
 app.MapGet("/api/home/summary", (HttpContext ctx, HomeSummaryService svc, CancellationToken ct) => svc.GetAsync(ctx.User.HouseholdId(), ct))
     .RequireAuthorization();
 

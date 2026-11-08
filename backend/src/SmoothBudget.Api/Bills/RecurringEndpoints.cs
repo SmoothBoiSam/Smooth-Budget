@@ -27,5 +27,11 @@ public static class RecurringEndpoints
             await svc.TrackAsBillAsync(ctx.User.HouseholdId(), req.Key, ct) is { } r
                 ? Results.Ok(new { r.CategoryId, r.Name })
                 : Results.NotFound());
+
+        // File a bill under a different category (DECISIONS.md 146).
+        g.MapPost("/category", async (MoveBillRequest req, HttpContext ctx, RecurringService svc, CancellationToken ct) =>
+            await svc.MoveToCategoryAsync(ctx.User.HouseholdId(), req.Key ?? "", req.CategoryId, ct) is { } r
+                ? Results.Ok(new { r.CategoryId, r.Name })
+                : Results.NotFound());
     }
 }

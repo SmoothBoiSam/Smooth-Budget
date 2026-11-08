@@ -1,7 +1,7 @@
 // Smooth Budget's service worker (milestone 10): makes the app installable and lets it open without a connection.
 // It caches only the app itself (HTML, scripts, styles, icons). API responses are never cached here; the last
 // Home summary is kept by the app (src/offline.ts) so it can say how old it is.
-const CACHE = 'smoothbudget-shell-v2'
+const CACHE = 'smoothbudget-shell-v3'
 const SHELL = [
   '/', '/manifest.webmanifest', '/favicon.png', '/icon-192.png', '/icon-512.png',
   '/brand/logo.png', '/brand/cat-plenty.png', '/brand/cat-low.png', '/brand/cat-over.png', '/brand/cat-tabby.png',
@@ -60,3 +60,36 @@ async function prune(cache, html) {
     if (path.startsWith('/assets/') && !html.includes(path)) await cache.delete(key)
   }
 }
+
+// Phone notifications (DECISIONS.md 151): the server sends { title, body, url, tag }.
+self.addEventListener('push', (event) => {
+  let msg = {}
+  try {
+    msg = event.data ? event.data.json() : {}
+  } catch {
+    msg = { body: event.data ? event.data.text() : '' }
+  }
+  event.waitUntil(
+    self.registration.showNotification(msg.title || 'Smooth Budget', {
+      body: msg.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: msg.tag || undefined,
+      data: { url: msg.url || '#/' },
+    }),
+  )
+})
+
+// Tapping one opens the app (or brings it forward) on the screen it's about.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const hash = String(event.notification.data?.url || '#/')
+  const target = new URL('/' + (hash.startsWith('#') ? hash : '#/'), self.location.origin).href
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => new URL(c.url).origin === self.location.origin)
+      if (open) return open.navigate(target).then((c) => (c || open).focus())
+      return self.clients.openWindow(target)
+    }),
+  )
+})

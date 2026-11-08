@@ -29,6 +29,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<PayStub> PayStubs => Set<PayStub>();
     public DbSet<PayPeriodForecast> PayPeriodForecasts => Set<PayPeriodForecast>();
     public DbSet<PaydayChecklistItem> PaydayChecklistItems => Set<PaydayChecklistItem>();
+    public DbSet<PushDevice> PushDevices => Set<PushDevice>();
+    public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -144,6 +146,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(x => x.Key).HasMaxLength(200);
             e.HasIndex(x => new { x.HouseholdId, x.PayDate, x.Key }).IsUnique();
+        });
+
+        b.Entity<PushDevice>(e =>
+        {
+            e.Property(x => x.Endpoint).HasMaxLength(1000);
+            e.Property(x => x.P256dh).HasMaxLength(200);
+            e.Property(x => x.Auth).HasMaxLength(100);
+            e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.Endpoint).IsUnique();
+        });
+        b.Entity<NotificationLog>(e =>
+        {
+            e.Property(x => x.Key).HasMaxLength(200);
+            e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.HouseholdId, x.Key }).IsUnique();
         });
 
         b.Entity<SavingsGoal>(e =>

@@ -65,7 +65,10 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <h1 className="text-2xl font-bold tracking-tight">Savings</h1>
+      <a href="#/payday" className="text-sm font-medium text-slate-500">
+        ‹ Plan
+      </a>
+      <h1 className="mt-1 text-2xl font-bold tracking-tight">Savings</h1>
       {notice && (
         <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           {notice}

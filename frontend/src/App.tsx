@@ -22,7 +22,7 @@ function currentRoute(): Route {
     window.history.replaceState(null, '', '#/review')
     return 'review'
   }
-  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash === 'payday/setup' ? 'paysetup' : hash === 'bills' ? 'bills' : hash === 'partner' ? 'partner' : hash === 'more' ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'review' ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash === 'payday/setup' ? 'paysetup' : hash === 'bills' || hash.startsWith('bills/') ? 'bills' : hash === 'partner' ? 'partner' : hash === 'more' ? 'more' : 'home'
 }
 
 export default function App() {
@@ -60,6 +60,9 @@ export default function App() {
     if (me) refreshInbox()
   }, [me, route, refreshInbox])
 
+  // Review passes the count it already has, so the badge doesn't ask the server again.
+  const reviewChanged = useCallback((known?: number) => (typeof known === 'number' ? setInboxCount(known) : refreshInbox()), [refreshInbox])
+
   const online = useOnline()
   const signedOut = useCallback(() => {
     saved.clear()
@@ -85,7 +88,7 @@ export default function App() {
       {!online && <OfflineBar />}
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
       {route === 'budget' && <BudgetScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
-      {route === 'review' && <ReviewScreen onChanged={refreshInbox} onSignedOut={signedOut} />}
+      {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} />}

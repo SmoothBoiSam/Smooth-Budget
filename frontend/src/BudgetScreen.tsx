@@ -59,6 +59,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
   const [merging, setMerging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const searchFailed = useCallback((e: unknown) => setError(e instanceof Error ? e.message : 'Search failed.'), [])
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
@@ -151,7 +152,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           </a>
           <div className="mt-1 flex items-center justify-between gap-3">
             <h1 className="truncate text-2xl font-bold tracking-tight">
-              {view.kind === 'all' ? 'All transactions' : view.kind === 'plan' ? 'Build your budget' : (line?.name ?? 'Category')}
+              {view.kind === 'all' ? 'Transactions' : view.kind === 'plan' ? 'Build your budget' : (line?.name ?? 'Category')}
             </h1>
             {view.kind === 'category' && line && (
               <button type="button" onClick={() => setEditing(line)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-slate-200">
@@ -178,14 +179,21 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           guessCount={reviewSummary?.month.total ?? 0}
           onAdd={() => setEditing(null)}
           onMerge={() => setMerging(true)}
-          onCloseMonth={(start) => act(() => budgetEditApi.closeMonth(start), 'Month closed.')}
-          onSweep={(id, done) => act(() => (done ? budgetEditApi.sweepDone(id) : budgetEditApi.sweepUndo(id)), done ? 'Marked as sent.' : 'Marked as not sent.')}
-          onIncome={(income, partner, automatic) =>
-            act(() => budgetEditApi.setIncome(income, partner, automatic), automatic ? 'Income follows your Payday forecast again.' : 'Expected income updated.')
-          }
         />
       )}
 
+      {/* How the budget is built: the automatic budget's last change and the money coming in, then the planner (DECISIONS.md 149). */}
+      {view.kind === 'plan' && summary && (
+        <>
+          <AutoBudgetCard s={summary} inPlan />
+          <IncomeCard
+            summary={summary}
+            onIncome={(income, partner, automatic) =>
+              act(() => budgetEditApi.setIncome(income, partner, automatic), automatic ? 'Income follows your paycheck forecast again.' : 'Expected income updated.')
+            }
+          />
+        </>
+      )}
       {view.kind === 'plan' && (
         <BudgetPlanner
           onApplied={(message) => {
@@ -210,7 +218,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
 
       {summary && view.kind === 'all' && (
-        <TransactionList items={month} empty="No transactions this month yet. Import a CSV from More." onSelect={setSelected} />
+        <SearchableList month={month} onSelect={setSelected} onError={searchFailed} />
       )}
 
       {selected && (
@@ -243,9 +251,6 @@ function Overview({
   guessCount,
   onAdd,
   onMerge,
-  onCloseMonth,
-  onSweep,
-  onIncome,
 }: {
   summary: BudgetSummary
   bills: RecurringItem[]
@@ -253,37 +258,22 @@ function Overview({
   guessCount: number
   onAdd: () => void
   onMerge: () => void
-  onCloseMonth: (start: string) => void
-  onSweep: (id: string, done: boolean) => void
-  onIncome: (income: number, partner: number, automatic?: boolean) => void
 }) {
-  const lastMonthSweepIds = new Set(s.lastMonth?.sweeps.map((x) => x.id) ?? [])
-  const olderSweeps = s.pendingSweeps.filter((p) => !lastMonthSweepIds.has(p.id))
+  // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
   return (
     <>
-      {s.lastMonth && <LastMonthCard last={s.lastMonth} onClose={onCloseMonth} onSweep={onSweep} />}
-      {olderSweeps.map((p) => (
-        <div key={p.id} className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
-          <span>
-            From {p.fromMonth}: send <span className="font-semibold tabular-nums">{formatCents(p.amountCents)}</span> to {p.destination}
-          </span>
-          <button type="button" onClick={() => onSweep(p.id, true)} className="shrink-0 font-medium text-slate-700 underline">
-            Mark sent
-          </button>
-        </div>
-      ))}
+      <p className="mt-3 text-sm text-slate-600">
+        <span className={`font-semibold tabular-nums ${statusText[s.status]}`}>{formatCents(s.leftToSpendCents)}</span> left to spend ·{' '}
+        {formatCents(s.totalVariableSpentCents)} of {formatCents(s.totalVariableLimitCents)} spent
+        {s.carriedInDeficitCents > 0 && <> · {formatCents(s.carriedInDeficitCents)} carried over</>}
+      </p>
 
-      <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-medium text-slate-500">Left to Spend</h2>
-          <p className={`text-2xl font-bold tabular-nums ${statusText[s.status]}`}>{formatCents(s.leftToSpendCents)}</p>
-        </div>
-        <p className="mt-1 text-xs text-slate-500">
-          {formatCents(s.totalVariableSpentCents)} spent of {formatCents(s.totalVariableLimitCents)} in spending categories
-          {s.carriedInDeficitCents > 0 && <> · {formatCents(s.carriedInDeficitCents)} carried over</>} · {s.daysRemaining}{' '}
-          {s.daysRemaining === 1 ? 'day' : 'days'} left
-        </p>
-      </section>
+      {s.lastMonth && <LastMonthCard last={s.lastMonth} />}
+      {s.auto?.on && s.auto.shortCents > 0 && (
+        <a href="#/budget/plan" role="alert" className="mt-3 block rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
+          This month is {formatCents(s.auto.shortCents)} short even with spending squeezed as far as it sensibly goes. How it’s built ›
+        </a>
+      )}
 
       {inboxCount + guessCount > 0 && (
         <a
@@ -309,8 +299,7 @@ function Overview({
         </a>
       )}
 
-      <AutoBudgetCard s={s} />
-      <IncomeCard summary={s} onIncome={onIncome} />
+      {s.auto && !s.auto.on && <AutoBudgetCard s={s} />}
 
       {s.groups.map((g) => (
         <Group key={g.type} group={g} bills={g.type === 'FixedBill' ? bills : []} month={s.budgetMonth} today={s.today} />
@@ -332,7 +321,7 @@ function Overview({
         href="#/budget/all"
         className="mt-8 flex items-center justify-between rounded-xl bg-white px-4 py-3 text-sm font-medium ring-1 ring-slate-200"
       >
-        All transactions this month
+        All transactions and search
         <span aria-hidden>›</span>
       </a>
     </>
@@ -448,7 +437,7 @@ function BillItemRow({ b, month, today, showCategory }: { b: RecurringItem; mont
             : [`Next ${formatDay(b.nextExpected)}`, 'text-slate-400']
   return (
     <li>
-      <a href="#/bills" className="flex items-baseline justify-between gap-3 py-2 text-sm">
+      <a href={`#/bills/${encodeURIComponent(b.key)}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
         <span className="min-w-0">
           <span className="block truncate">{b.name}</span>
           <span className={`block text-xs ${cls}`}>
@@ -519,6 +508,53 @@ function CategoryHeader({ line: c }: { line: BudgetCategoryLine }) {
   )
 }
 
+/** This month's transactions, or a search across all of them (DECISIONS.md 150) once you type two letters. */
+function SearchableList({ month, onSelect, onError }: { month: Transaction[]; onSelect: (t: Transaction) => void; onError: (e: unknown) => void }) {
+  const [q, setQ] = useState('')
+  const [found, setFound] = useState<{ q: string; items: Transaction[] } | null>(null)
+  const query = q.trim()
+
+  useEffect(() => {
+    if (query.length < 2) return
+    const run = { live: true }
+    // Wait for a pause in typing before asking the server.
+    const timer = window.setTimeout(() => {
+      budgetApi
+        .search(query)
+        .then((items) => run.live && setFound({ q: query, items }))
+        .catch((e) => run.live && onError(e))
+    }, 250)
+    return () => {
+      run.live = false
+      window.clearTimeout(timer)
+    }
+  }, [query, onError])
+
+  const searching = query.length >= 2
+  const results = searching && found?.q === query ? found.items : null
+  return (
+    <>
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search a store, category or amount"
+        aria-label="Search transactions"
+        className="mt-4 block w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-base"
+      />
+      {!searching && <p className="mt-2 text-xs text-slate-500">This month. Search looks through every month.</p>}
+      {searching && results === null && <Loading label="Searching" />}
+      {searching && results && (
+        <p className="mt-2 text-xs text-slate-500">
+          {results.length === 100 ? 'The newest 100 matches' : `${results.length} ${results.length === 1 ? 'match' : 'matches'}`} in every month
+        </p>
+      )}
+      {!searching && <TransactionList items={month} empty="No transactions this month yet. Import a CSV from More." onSelect={onSelect} />}
+      {searching && results && <TransactionList items={results} empty={`Nothing matches “${query}”.`} onSelect={onSelect} />}
+    </>
+  )
+}
+
 function TransactionList({ items, empty, onSelect }: { items: Transaction[]; empty: string; onSelect: (t: Transaction) => void }) {
   if (items.length === 0)
     return <p className="mt-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">{empty}</p>
@@ -573,15 +609,16 @@ function Tag({ t }: { t: Transaction }) {
  * into this month as "Carried over". Until it closes (a few days after it ends, or "Close now"),
  * late transactions can still change it.
  */
-function LastMonthCard({ last, onClose, onSweep }: { last: LastMonth; onClose: (start: string) => void; onSweep: (id: string, done: boolean) => void }) {
-  const name = last.month.label.split(' ')[0]
+function LastMonthCard({ last }: { last: LastMonth }) {
+  const pending = last.sweeps.filter((s) => !s.done)
   return (
     <section aria-labelledby="last-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="last-h" className="text-sm font-semibold">
           {last.month.label}
         </h2>
-        <span className="text-xs text-slate-500">{last.closed ? 'Closed' : `Closes ${formatDay(last.closesOn)}`}</span>
+        {/* It closes on its own after a few days, so late transactions still count (DECISIONS.md 149). */}
+        <span className="text-xs text-slate-500">{last.closed ? 'Closed' : `Closes on its own ${formatDay(last.closesOn)}`}</span>
       </div>
 
       {last.deficitCents > 0 ? (
@@ -592,42 +629,21 @@ function LastMonthCard({ last, onClose, onSweep }: { last: LastMonth; onClose: (
       ) : last.surplusCents > 0 ? (
         <p className="mt-1 text-sm">
           Ended <span className="font-semibold tabular-nums text-emerald-700">{formatCents(last.surplusCents)} under</span>. Leftover money
-          isn't added to this month; {last.closed ? 'send it here:' : 'once it closes, send it here:'}
+          isn't added to this month.
+          {pending.length > 0 && (
+            <>
+              {' '}
+              <a href="#/payday" className="font-medium text-slate-700 underline">
+                Where to send it: your Plan
+              </a>
+            </>
+          )}
         </p>
       ) : (
         <p className="mt-1 text-sm">Ended exactly on budget.</p>
       )}
       {last.carriedInDeficitCents > 0 && (
         <p className="mt-1 text-xs text-slate-500">Includes {formatCents(last.carriedInDeficitCents)} carried in from the month before.</p>
-      )}
-
-      {last.sweeps.length > 0 && (
-        <ul className="mt-3 space-y-2">
-          {last.sweeps.map((s, i) => (
-            <li key={s.id === '00000000-0000-0000-0000-000000000000' ? i : s.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm">
-              <span className={s.done ? 'text-slate-400 line-through' : ''}>
-                Send <span className="font-semibold tabular-nums">{formatCents(s.amountCents)}</span> to {s.destination}
-              </span>
-              {last.closed && (
-                <button type="button" onClick={() => onSweep(s.id, !s.done)} className="shrink-0 font-medium text-slate-700 underline">
-                  {s.done ? 'Undo' : 'Mark sent'}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {!last.closed && (
-        <button
-          type="button"
-          onClick={() => {
-            if (window.confirm(`Close ${name} now? Transactions that arrive later won't change its result.`)) onClose(last.month.start)
-          }}
-          className="mt-3 text-sm font-medium text-slate-700 underline"
-        >
-          Close {name} now
-        </button>
       )}
     </section>
   )
@@ -638,7 +654,7 @@ function LastMonthCard({ last, onClose, onSweep }: { last: LastMonth; onClose: (
  * Your own income and the partner's contributions are shown separately, each expected vs received so far.
  */
 /** The automatic budget at a glance: what it last changed, and any shortfall it couldn't squeeze away. */
-function AutoBudgetCard({ s }: { s: BudgetSummary }) {
+function AutoBudgetCard({ s, inPlan }: { s: BudgetSummary; inPlan?: boolean }) {
   const a = s.auto
   if (!a) return null
   if (!a.on)
@@ -651,9 +667,11 @@ function AutoBudgetCard({ s }: { s: BudgetSummary }) {
     <section aria-label="Automatic budget" className="mt-6 rounded-2xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
       <div className="flex items-baseline justify-between gap-3">
         <p className="font-semibold">Automatic budget</p>
-        <a href="#/budget/plan" className="text-xs font-medium text-sky-700">
-          How it's built ›
-        </a>
+        {!inPlan && (
+          <a href="#/budget/plan" className="text-xs font-medium text-sky-700">
+            How it’s built ›
+          </a>
+        )}
       </div>
       <p className="text-xs text-slate-500">Updates itself when your pay, bills, debt plan, savings or transactions change. Limits you set stay yours.</p>
       {a.note && (
@@ -744,7 +762,7 @@ function IncomeCard({ summary: s, onIncome }: { summary: BudgetSummary; onIncome
                     </button>
                   </>
                 ) : (
-                  'From your paychecks this month (Payday), or your usual income until there is pay data.'
+                  'From your paychecks this month (the Plan tab), or your usual income until there is pay data.'
                 )}
               </p>
             )}

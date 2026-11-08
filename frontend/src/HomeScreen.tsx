@@ -181,8 +181,87 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
   )
 }
 
+/** Whole days from one ISO date to another. */
+function daysBetween(from: string, to: string) {
+  const day = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number)
+    return Date.UTC(y, m - 1, d) / 86_400_000
+  }
+  return Math.round(day(to) - day(from))
+}
+
+/** "Can I afford this?" (DECISIONS.md 148): type a price and see Left to Spend and the daily amount after it. */
+function AffordCheck({ summary: s }: { summary: HomeSummary }) {
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState('')
+  const cents = Math.round(Number(amount.replace(/[$,\s]/g, '')) * 100)
+  const valid = amount.trim() !== '' && Number.isFinite(cents) && cents > 0
+  const after = s.leftToSpendCents - cents
+  const perDay = Math.max(0, Math.floor(after / Math.max(1, s.daysRemaining)))
+  return (
+    <section className="mt-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+      {!open ? (
+        <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center justify-between text-sm font-medium text-slate-700">
+          Can I afford this?
+          <span aria-hidden className="font-semibold text-slate-400">
+            ›
+          </span>
+        </button>
+      ) : (
+        <>
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Can I afford this?</span>
+            <span className="mt-1 flex items-center rounded-xl border border-slate-300 bg-white px-3">
+              <span className="text-slate-400">$</span>
+              <input
+                autoFocus
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-transparent px-1 py-2.5 text-base outline-none"
+              />
+            </span>
+          </label>
+          {valid && (
+            <p className={`mt-2 text-sm ${after < 0 ? 'text-red-700' : 'text-slate-700'}`}>
+              {after < 0 ? (
+                <>
+                  That’s <span className="font-semibold tabular-nums">{formatCents(-after)}</span> more than you have left this month.
+                </>
+              ) : (
+                <>
+                  Yes. You’d have <span className="font-semibold tabular-nums">{formatCents(after)}</span> left, about{' '}
+                  <span className="font-semibold tabular-nums">{formatCents(perDay)}</span> a day for {s.daysRemaining}{' '}
+                  {s.daysRemaining === 1 ? 'day' : 'days'}.
+                </>
+              )}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              setAmount('')
+            }}
+            className="mt-2 text-xs font-medium text-slate-500"
+          >
+            Close
+          </button>
+        </>
+      )}
+    </section>
+  )
+}
+
 function Summary({ summary: s }: { summary: HomeSummary }) {
   const style = statusStyles[s.status]
+  // What lasts until the next check: the safe daily amount for each day before payday (DECISIONS.md 148).
+  const daysToPayday = s.nextPayday ? daysBetween(s.today, s.nextPayday.payDate) : 0
+  const untilPayday =
+    s.nextPayday && daysToPayday > 0 && daysToPayday < s.daysRemaining
+      ? { date: s.nextPayday.payDate, cents: Math.max(0, Math.min(s.leftToSpendCents, s.safeToSpendPerDayCents * daysToPayday)) }
+      : null
   return (
     <>
       <section aria-labelledby="lts-label" className="mt-6 rounded-3xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
@@ -194,18 +273,30 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
           {formatCents(s.leftToSpendCents)}
         </p>
         <span className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-semibold ${style.badge}`}>{style.label}</span>
+        <p className="mt-2 text-xs text-slate-500">
+          {s.daysRemaining} {s.daysRemaining === 1 ? 'day' : 'days'} left in {s.budgetMonth.label.split(' ')[0]}’s budget
+        </p>
 
-        <dl className="mt-6 grid grid-cols-2 gap-3 text-left">
-          <div className="rounded-2xl bg-slate-50 p-3">
-            <dt className="text-xs text-slate-500">Days left</dt>
-            <dd className="text-xl font-semibold tabular-nums">{s.daysRemaining}</dd>
-          </div>
+        <dl className="mt-5 grid grid-cols-2 gap-3 text-left">
           <div className="rounded-2xl bg-slate-50 p-3">
             <dt className="text-xs text-slate-500">Safe per day</dt>
             <dd className="text-xl font-semibold tabular-nums">{formatCents(s.safeToSpendPerDayCents)}</dd>
           </div>
+          {untilPayday ? (
+            <div className="rounded-2xl bg-slate-50 p-3">
+              <dt className="text-xs text-slate-500">Until payday {formatDay(untilPayday.date)}</dt>
+              <dd className="text-xl font-semibold tabular-nums">{formatCents(untilPayday.cents)}</dd>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-slate-50 p-3">
+              <dt className="text-xs text-slate-500">Days left</dt>
+              <dd className="text-xl font-semibold tabular-nums">{s.daysRemaining}</dd>
+            </div>
+          )}
         </dl>
       </section>
+
+      <AffordCheck summary={s} />
 
       <ul className="mt-4 space-y-2 text-sm">
         {s.carriedInDeficitCents > 0 && (
@@ -214,9 +305,21 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
             <span className="font-semibold tabular-nums text-red-600">−{formatCents(s.carriedInDeficitCents)}</span>
           </li>
         )}
+        {(s.cashWarnings ?? []).map((w) => (
+          <li key={w.account}>
+            <a href="#/payday" className="flex justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-red-800">
+              <span>
+                {w.account} is <span className="font-semibold tabular-nums">{formatCents(w.shortCents)}</span> short for the{' '}
+                {w.billCount === 1 ? 'bill' : `${w.billCount} bills`} ({formatCents(w.billsCents)}) due before
+                {w.nextPayDate ? ` payday ${formatDay(w.nextPayDate)}` : ' your next payday'}.
+              </span>
+              <span aria-hidden className="font-semibold">›</span>
+            </a>
+          </li>
+        ))}
         {s.pendingSweeps.map((p) => (
           <li key={p.id}>
-            <a href="#/budget" className="flex justify-between gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-emerald-900">
+            <a href="#/payday"className="flex justify-between gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-emerald-900">
               <span>
                 Leftover from {p.fromMonth.split(" ")[0]}: send <span className="font-semibold tabular-nums">{formatCents(p.amountCents)}</span> to {p.destination}
               </span>

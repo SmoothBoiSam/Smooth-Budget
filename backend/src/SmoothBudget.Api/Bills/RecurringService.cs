@@ -27,6 +27,7 @@ public record RecurringUpdateRequest(
     bool? Confirmed = null, bool? Dismissed = null, bool? Canceled = null, bool AcknowledgePrice = false);
 
 public record TrackAsBillRequest(string Key);
+public record MoveBillRequest(string Key, Guid CategoryId);
 
 /// <summary>
 /// Bills and subscriptions (SPEC 4.7): runs <see cref="RecurringDetector"/> over the last 18 months each time
@@ -99,7 +100,6 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         var items = await ItemsAsync(householdId, ct);
         var item = items.FirstOrDefault(i => i.Dto.Key == key);
         if (item is null) return null;
-        var s = item.Series;
         var name = item.Dto.Name.Length > 100 ? item.Dto.Name[..100] : item.Dto.Name;
 
         var categories = await db.Categories.Where(c => c.HouseholdId == householdId).ToListAsync(ct);
@@ -118,20 +118,43 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         }
         cat.IsHidden = false;
         await db.SaveChangesAsync(ct);
+        await FileUnderAsync(householdId, item, cat.Id, "You made this its own bill.", ct);
+        return (cat.Id, cat.Name);
+    }
 
+    /// <summary>
+    /// Files a bill's charges under a category you pick (DECISIONS.md 146): its past charges move there, and a merchant
+    /// rule sends future ones too (unless one merchant bills several things, where a rule can't tell them apart).
+    /// </summary>
+    public async Task<(Guid CategoryId, string Name)?> MoveToCategoryAsync(Guid householdId, string key, Guid categoryId, CancellationToken ct)
+    {
+        var cat = await db.Categories.SingleOrDefaultAsync(c => c.Id == categoryId && c.HouseholdId == householdId, ct);
+        if (cat is null) return null;
+        var item = (await ItemsAsync(householdId, ct)).FirstOrDefault(i => i.Dto.Key == key);
+        if (item is null) return null;
+        cat.IsHidden = false;
+        await db.SaveChangesAsync(ct);
+        await FileUnderAsync(householdId, item, cat.Id, $"You filed this bill under {cat.Name}.", ct);
+        return (cat.Id, cat.Name);
+    }
+
+    private async Task FileUnderAsync(Guid householdId, Item item, Guid categoryId, string reason, CancellationToken ct)
+    {
+        var s = item.Series;
+        var key = item.Dto.Key;
         if (item.Dto.MerchantWide)
         {
             var rule = await db.CategoryRules.SingleOrDefaultAsync(r => r.HouseholdId == householdId && r.Pattern == s.MerchantKey, ct);
             if (rule is null)
                 db.CategoryRules.Add(rule = new CategoryRule { Id = Guid.NewGuid(), HouseholdId = householdId, Pattern = s.MerchantKey, CreatedUtc = clock.GetUtcNow().UtcDateTime });
-            rule.CategoryId = cat.Id;
+            rule.CategoryId = categoryId;
         }
         var ids = s.TransactionIds.ToList();
         await db.Transactions.Where(t => t.HouseholdId == householdId && ids.Contains(t.Id))
             .ExecuteUpdateAsync(u => u
-                .SetProperty(t => t.CategoryId, cat.Id).SetProperty(t => t.CategorySource, CategorySource.User)
+                .SetProperty(t => t.CategoryId, categoryId).SetProperty(t => t.CategorySource, CategorySource.User)
                 .SetProperty(t => t.NeedsReview, false).SetProperty(t => t.CategoryUnsure, false)
-                .SetProperty(t => t.CategoryReason, "You made this its own bill."), ct);
+                .SetProperty(t => t.CategoryReason, reason), ct);
         var row = await db.RecurringItems.SingleOrDefaultAsync(r => r.HouseholdId == householdId && r.Key == key, ct);
         if (row is null)
             db.RecurringItems.Add(row = new RecurringItem { Id = Guid.NewGuid(), HouseholdId = householdId, Key = key });
@@ -139,7 +162,6 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         row.UpdatedUtc = clock.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct);
         await categorization.RunAsync(householdId, ct); // the rule picks up anything else from that merchant
-        return (cat.Id, cat.Name);
     }
 
     private sealed record Item(RecurringSeries Series, RecurringItemDto Dto, bool Dismissed);

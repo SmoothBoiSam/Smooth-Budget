@@ -286,7 +286,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task A_card_shows_how_you_filed_the_merchant_before_and_what_else_you_bought_that_day()
+    public async Task A_card_shows_how_you_filed_the_merchant_before()
     {
         var c = await NewUserAsync();
         var card = await AccountAsync(c, "CreditCard", "4321");
@@ -303,7 +303,6 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
 
         var ctx = (await c.GetFromJsonAsync<TransactionContextDto>($"/api/transactions/{walmart[3].Id}/context", Json))!;
         Assert.Equal([("Groceries", 2), ("Household", 1)], ctx.History.Select(h => (h.CategoryName, h.Count)));
-        Assert.Equal("CORNER BISTRO", Assert.Single(ctx.SameDay).Merchant);
     }
 
     // ---- Nothing counted twice -----------------------------------------------------------------------
@@ -569,5 +568,27 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
         Assert.Equal(650_00, cats.Single(x => x.Name == "Food").MonthlyLimitCents);
         Assert.DoesNotContain(cats, x => x.Name == "Household");
+    }
+
+    // ---- Search (DECISIONS.md 150) -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Transactions_can_be_searched_by_store_category_or_amount()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard,
+            "03/08/2026,03/09/2026,FRESH MARKET,Groceries,Sale,-80.00,",
+            "11/09/2026,11/10/2026,TAQUERIA UNO,Food & Drink,Sale,-25.00,",
+            "11/10/2026,11/11/2026,100% JUICE BAR,Food & Drink,Sale,-12.50,");
+        async Task<List<string>> Find(string q) =>
+            (await c.GetFromJsonAsync<List<TransactionDto>>($"/api/transactions/search?q={Uri.EscapeDataString(q)}", Json))!.Select(t => t.Merchant).ToList();
+
+        Assert.Equal(["FRESH MARKET"], await Find("fresh")); // any month, any case
+        Assert.Equal(["FRESH MARKET"], await Find("groceries")); // by category
+        Assert.Equal(["JUICE BAR"], await Find("$12.50")); // by amount
+        Assert.Equal(["JUICE BAR"], await Find("0% j")); // a % is just a character (this one matches the description)
+        Assert.Empty(await Find("x")); // too short
+        Assert.Equal(["JUICE BAR", "FRESH MARKET"], await Find("ar")); // newest first
     }
 }

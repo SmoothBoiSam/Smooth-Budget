@@ -485,3 +485,23 @@ public class PaydayChecklistItem
     public required string Key { get; set; }
     public DateTime CreatedUtc { get; set; }
 }
+
+/// <summary>A phone or browser that asked for notifications (DECISIONS.md 151). Only the push service's address and keys.</summary>
+public class PushDevice
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string Endpoint { get; set; }
+    public required string P256dh { get; set; }
+    public required string Auth { get; set; }
+    public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>A notification already sent, so the same news never arrives twice ("bills:2026-12-03").</summary>
+public class NotificationLog
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string Key { get; set; }
+    public DateTime SentUtc { get; set; }
+}

@@ -33,7 +33,12 @@ public record HomeSummaryDto(
     IReadOnlyList<Budget.ContributionStatusDto>? Contributions = null,
     long PartnerShortfallCents = 0,
     // The next paycheck (SPEC 4.2, 6.3), once a schedule or pay stub is in. Null before that.
-    NextPaydayDto? NextPayday = null);
+    NextPaydayDto? NextPayday = null,
+    // An account that won't cover the bills due before the next payday (DECISIONS.md 148).
+    IReadOnlyList<CashWarningDto>? CashWarnings = null);
+
+/// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
+public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
 
 /// <param name="HasSchedule">False until that month's schedule is imported (date only).</param>
 public record NextPaydayDto(DateOnly PayDate, bool HasSchedule, long NetCents, long LowNetCents, long HighNetCents, bool LowConfidence);
@@ -144,7 +149,19 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             PartnerShortfallCents: data.PartnerShortfallCents,
             NextPayday: await payday.NextAsync(householdId, ct) is { } n
                 ? new NextPaydayDto(n.Period.PayDate, n.HasSchedule, n.NetCents, n.LowNetCents, n.HighNetCents, n.LowConfidence)
-                : null);
+                : null,
+            CashWarnings: await CashWarningsAsync(householdId, ct));
+    }
+
+    /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>
+    private async Task<IReadOnlyList<CashWarningDto>> CashWarningsAsync(Guid householdId, CancellationToken ct)
+    {
+        var checks = (await payday.GetAsync(householdId, ct)).Checks;
+        var i = checks.ToList().FindIndex(c => c.IsCurrent);
+        if (i < 0 || checks[i].Plan is not { } plan) return [];
+        DateOnly? next = i + 1 < checks.Count ? checks[i + 1].PayDate : null;
+        return plan.Items.Where(x => x.ShortCents > 0)
+            .Select(x => new CashWarningDto(x.Destination, x.Cents, x.ShortCents, x.Bills?.Count ?? 0, next)).ToList();
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

@@ -16,7 +16,7 @@ public record AmountDto(string Name, long Cents);
 /// <param name="Done">Checked off by you, or done according to your accounts (<paramref name="Auto"/>).</param>
 /// <param name="Status">For the check you're on now: what the app sees ("Sent $100 of $150 so far.").</param>
 public record PlanItemDto(string Key, string Kind, string Label, long Cents, string Destination, string Why, bool Done,
-    bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null);
+    bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null, long ShortCents = 0);
 public record PlanBillDto(string Name, long Cents, DateOnly Due);
 public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents);
 
@@ -319,13 +319,18 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 ? moves.Where(m => m.Type == AccountType.Savings && m.AmountCents < 0).Sum(m => -m.AmountCents)
                 : moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.CategoryId is { } id && savingsCategories.Contains(id)).Sum(m => m.AmountCents);
 
+            Account? AccountFor(PlanItem x) => accounts.FirstOrDefault(a => Label(a) == x.Destination || a.Name == x.Destination);
+            // How far the account's balance from the bank falls short of a "keep" line, for the check you're on now.
+            long ShortBy(PlanItem x) =>
+                current && x.Kind == "keep" && AccountFor(x) is { PlaidAccountId: not null } a && a.CurrentBalanceCents < x.Cents ? x.Cents - a.CurrentBalanceCents : 0;
+
             (bool Auto, string? Status) Status(PlanItem x)
             {
                 if (!current) return (false, null);
                 switch (x.Kind)
                 {
                     case "keep":
-                        var acct = accounts.FirstOrDefault(a => Label(a) == x.Destination || a.Name == x.Destination);
+                        var acct = AccountFor(x);
                         if (acct?.PlaidAccountId is null) return (false, "Check this one yourself: the app doesn't get this account's balance from the bank.");
                         return acct.CurrentBalanceCents >= x.Cents
                             ? (true, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}, enough for these.")
@@ -351,7 +356,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var (auto, status) = Status(x);
                 var manual = done.Any(d => d.PayDate == pay && d.Key == x.Key);
                 return new PlanItemDto(x.Key, x.Kind, x.Label, x.Cents, x.Destination, x.Why, manual || auto, auto, status,
-                    x.Bills?.Select(b => new PlanBillDto(b.Name, b.Cents, b.Due)).ToList());
+                    x.Bills?.Select(b => new PlanBillDto(b.Name, b.Cents, b.Due)).ToList(), ShortBy(x));
             }).ToList(), plan.ShortCents));
         }
         return result;

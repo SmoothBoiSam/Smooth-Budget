@@ -28,7 +28,7 @@ function rank(t: Transaction) {
  * Cards go one at a time with the app's guess up front; the list is for confirming the likely ones in bulk.
  * Nothing here is settled until the user says so (DECISIONS.md 80).
  */
-export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: () => void; onSignedOut: () => void }) {
+export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: (count?: number) => void; onSignedOut: () => void }) {
   const [scope, setScope] = useState<Scope>('todo')
   const [mode, setMode] = useState<'cards' | 'list'>('cards')
   const [queue, setQueue] = useState<Transaction[] | null>(null)
@@ -48,12 +48,11 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
   )
 
   const loadSide = useCallback(async () => {
-    const [s, p, c] = await Promise.all([budgetApi.reviewSummary(), partnerApi.get(), budgetApi.inboxCount()])
+    const [s, c] = await Promise.all([budgetApi.reviewSummary(), budgetApi.inboxCount()])
     setSummary(s)
     setTodoCount(c.count + c.review)
-    setPartnerName(p.partnerName)
+    return c.count + c.review
   }, [])
-
   const loadQueue = useCallback(
     async (which: Scope) => {
       const items = await budgetApi.review(which === 'todo' ? 'month' : which) // includes purchases with no category
@@ -69,13 +68,23 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
     Promise.all([loadQueue(scope), loadSide(), loadCategories()]).catch(fail)
   }, [scope, loadQueue, loadSide, loadCategories, fail])
 
+  useEffect(() => {
+    partnerApi
+      .get()
+      .then((p) => setPartnerName(p.partnerName))
+      .catch(fail)
+  }, [fail])
+
   /** After one card: drop it locally (no jumpy reload), refresh the counts and the badge. */
   async function done(id: string, message: string) {
     setNotice(message)
     setError(null)
     setQueue((q) => q?.filter((t) => t.id !== id) ?? null)
-    onChanged()
-    await loadSide().catch(fail)
+    try {
+      onChanged(await loadSide())
+    } catch (e) {
+      fail(e)
+    }
   }
 
   async function bulk(action: () => Promise<{ confirmed: number }>) {
@@ -93,6 +102,10 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
   const likely = counts?.likely ?? 0
   const reviewScope: ReviewScope = scope === 'todo' ? 'month' : scope
   const current = queue?.[0]
+  // Earlier and Older only show up when something there is waiting (DECISIONS.md 149).
+  const scopes = (['todo', 'earlier', 'older'] as const).filter(
+    (x) => x === 'todo' || x === scope || (x === 'earlier' ? summary?.earlier.total : summary?.older.total),
+  )
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
@@ -120,8 +133,9 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
         </a>
       </p>
 
+      {scopes.length > 1 && (
       <div className="mt-4 flex gap-2" role="tablist" aria-label="Which transactions">
-        {(['todo', 'earlier', 'older'] as const).map((s) => {
+        {scopes.map((s) => {
           const n = s === 'todo' ? todoCount : s === 'earlier' ? summary?.earlier.total : summary?.older.total
           return (
             <button
@@ -142,6 +156,7 @@ export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: ()
           )
         })}
       </div>
+      )}
 
 
       {notice && (

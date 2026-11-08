@@ -27,8 +27,7 @@ public record ReviewCounts(int Total, int Likely, int Unsure);
 /// <param name="Older">Before <paramref name="WindowStart"/>: doesn't affect your budget.</param>
 public record ReviewSummaryDto(ReviewCounts Month, ReviewCounts Earlier, ReviewCounts Older, DateOnly MonthStart, DateOnly WindowStart);
 public record MerchantHistoryDto(string CategoryName, int Count);
-public record SameDayDto(string Merchant, long AmountCents, string? CategoryName, string AccountName);
-public record TransactionContextDto(IReadOnlyList<MerchantHistoryDto> History, IReadOnlyList<SameDayDto> SameDay);
+public record TransactionContextDto(IReadOnlyList<MerchantHistoryDto> History);
 
 public record TransactionListDto(DateOnly From, DateOnly To, IReadOnlyList<TransactionDto> Items);
 
@@ -67,6 +66,27 @@ public static partial class TransactionEndpoints
             var items = await Project(db.Transactions.Where(t => t.HouseholdId == householdId && t.Date >= from && t.Date <= to))
                 .ToListAsync(ct);
             return Results.Ok(new TransactionListDto(from.Value, to.Value, items));
+        });
+
+        // Search every transaction (DECISIONS.md 150): by store, description or category, or by amount ("12.50" finds
+        // $12.50 either way). Newest first, at most 100.
+        group.MapGet("/transactions/search", async (string? q, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var text = (q ?? "").Trim();
+            if (text.Length < 2 || text.Length > 100) return Results.Ok(Array.Empty<TransactionDto>());
+            var householdId = ctx.User.HouseholdId();
+            var like = "%" + text.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+            var mine = db.Transactions.Where(t => t.HouseholdId == householdId);
+            var byText = mine.Where(t => EF.Functions.ILike(t.Merchant, like, "\\") || EF.Functions.ILike(t.Description, like, "\\")
+                || (t.Category != null && EF.Functions.ILike(t.Category.Name, like, "\\")));
+            long? cents = decimal.TryParse(text.TrimStart('$').Replace(",", ""), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var dollars) && dollars > 0 && dollars < 10_000_000
+                ? (long)Math.Round(dollars * 100) : null;
+            var matches = cents is { } c
+                ? mine.Where(t => t.AmountCents == c || t.AmountCents == -c || EF.Functions.ILike(t.Merchant, like, "\\")
+                    || EF.Functions.ILike(t.Description, like, "\\") || (t.Category != null && EF.Functions.ILike(t.Category.Name, like, "\\")))
+                : byText;
+            return Results.Ok(await Project(matches).Take(100).ToListAsync(ct));
         });
 
         // Everything that affects spending but has no category yet, newest first (SPEC section 4.3).
@@ -142,7 +162,7 @@ public static partial class TransactionEndpoints
             return Results.Ok(new { settled = rows.Count });
         });
 
-        // Memory aids for a card: how you filed this merchant before, and what else you bought that day.
+        // A memory aid for a card: how you filed this merchant before (the same-day list went with DECISIONS.md 145).
         group.MapGet("/transactions/{id:guid}/context", async (Guid id, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
@@ -154,12 +174,7 @@ public static partial class TransactionEndpoints
                 .Select(x => x.Category!.Name).ToListAsync(ct);
             var counts = history.GroupBy(n => n).Select(g => new MerchantHistoryDto(g.Key, g.Count()))
                 .OrderByDescending(x => x.Count).ThenBy(x => x.CategoryName, StringComparer.Ordinal).Take(4).ToList();
-            var sameDay = await db.Transactions.AsNoTracking()
-                .Where(x => x.HouseholdId == householdId && x.Date == t.Date && x.Id != id && !x.IsTransfer && x.AmountCents > 0)
-                .OrderByDescending(x => x.AmountCents).Take(6)
-                .Select(x => new SameDayDto(x.Merchant, x.AmountCents, x.Category != null ? x.Category.Name : null, x.Account.Name))
-                .ToListAsync(ct);
-            return Results.Ok(new TransactionContextDto(counts, sameDay));
+            return Results.Ok(new TransactionContextDto(counts));
         });
 
         group.MapPost("/transactions/auto-categorize", async (HttpContext ctx, CategorizationService svc, CancellationToken ct) =>

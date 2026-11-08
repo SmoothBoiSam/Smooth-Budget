@@ -112,7 +112,7 @@ export default function BudgetPlanner({ onApplied }: { onApplied: (message: stri
       <section className="mt-3 rounded-2xl bg-white p-4 text-sm ring-1 ring-slate-200">
         <p className="font-semibold">The automatic budget is off</p>
         <p className="mt-1 text-xs text-slate-500">
-          Turned on, the budget builds and updates itself from your history, bills, debt plan, savings priorities and Payday forecast, and squeezes spending when a month brings in less.
+          Turned on, the budget builds and updates itself from your history, bills, debt plan, savings priorities and paycheck forecast, and squeezes spending when a month brings in less.
         </p>
         <button type="button" disabled={busy} onClick={() => void setAutomatic(true)} className="mt-2 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
           Turn on the automatic budget

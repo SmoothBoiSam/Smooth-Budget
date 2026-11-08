@@ -26,6 +26,7 @@ public class TestApp : WebApplicationFactory<Program>
     public SettableClock Clock { get; } = new(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
     public FakePlaid Plaid { get; } = new();
     public FakeWebhookKeys WebhookKeys { get; } = new();
+    public FakePushSender Push { get; } = new();
     public string ConnectionString { get; }
     private readonly string _databaseName = $"smoothbudget_test_{Guid.NewGuid():N}";
     private readonly string _adminConnectionString;
@@ -55,6 +56,11 @@ public class TestApp : WebApplicationFactory<Program>
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);
+            // Never reach a real push service; notifications are on with throwaway keys.
+            services.RemoveAll<SmoothBudget.Api.Notifications.PushOptions>();
+            services.AddSingleton(new SmoothBudget.Api.Notifications.PushOptions { PublicKey = "test-public", PrivateKey = "test-private" });
+            services.RemoveAll<SmoothBudget.Api.Notifications.IPushSender>();
+            services.AddSingleton<SmoothBudget.Api.Notifications.IPushSender>(Push);
 
             if (UseRealPlaid)
                 return;
@@ -93,5 +99,19 @@ public class TestApp : WebApplicationFactory<Program>
             }
         }
         GC.SuppressFinalize(this);
+    }
+}
+
+/// <summary>Records notifications instead of sending them. Endpoints listed in <see cref="Gone"/> answer as uninstalled.</summary>
+public sealed class FakePushSender : SmoothBudget.Api.Notifications.IPushSender
+{
+    public System.Collections.Concurrent.ConcurrentQueue<(string Endpoint, SmoothBudget.Api.Notifications.PushMessage Message)> Sent { get; } = new();
+    public System.Collections.Concurrent.ConcurrentDictionary<string, bool> Gone { get; } = new();
+
+    public Task<bool> SendAsync(SmoothBudget.Api.Data.PushDevice device, SmoothBudget.Api.Notifications.PushMessage message, CancellationToken ct)
+    {
+        if (Gone.ContainsKey(device.Endpoint)) return Task.FromResult(false);
+        Sent.Enqueue((device.Endpoint, message));
+        return Task.FromResult(true);
     }
 }

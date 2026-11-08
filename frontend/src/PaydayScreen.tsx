@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, paydayApi, type PayCheck, type PaydaySummary, type PlanItem } from './api'
+import { ApiError, debtApi, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type PlanItem, type SavingsSummary } from './api'
+import { icons } from './icons'
 import { useRemembered } from './offline'
 import { Caret, ErrorNotice, Loading } from './ui'
 import { formatCents, formatDay } from './format'
@@ -14,11 +15,13 @@ const monthName = (iso: string) => {
 }
 
 /**
- * The Payday tab (SPEC 4.6): the next checks with a low/likely/high range, the payday plan for each, and predicted vs
+ * The Plan tab (SPEC 4.6; DECISIONS.md 147), with links to Debt and Savings under the checks: the next checks with a low/likely/high range, the payday plan for each, and predicted vs
  * actual once a deposit lands. Setup (schedule, pay stubs, profile, rules) is on its own screen.
  */
 export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [s, setS] = useState<PaydaySummary | null>(null)
+  const [debt, setDebt] = useState<DebtSummary | null>(null)
+  const [savings, setSavings] = useState<SavingsSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const fail = useCallback(
@@ -30,7 +33,11 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
   )
   const load = useCallback(async () => {
     try {
-      setS(await paydayApi.summary())
+      // Debt and Savings are extras here: the plan still shows without them.
+      const [p, d, sv] = await Promise.all([paydayApi.summary(), debtApi.summary().catch(() => null), savingsApi.summary().catch(() => null)])
+      setS(p)
+      setDebt(d)
+      setSavings(sv)
       setError(null)
     } catch (e) {
       fail(e)
@@ -55,7 +62,7 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
       <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Payday</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Plan</h1>
         <a href="#/payday/setup" className="text-sm font-medium text-sky-700">
           Schedule & stubs
         </a>
@@ -74,6 +81,7 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
           </a>
         </section>
       )}
+      {empty && <DebtSavingsLinks debt={debt} savings={savings} />}
 
       {s && !empty && (
         <>
@@ -84,6 +92,8 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
               </li>
             ))}
           </ul>
+
+          <DebtSavingsLinks debt={debt} savings={savings} />
 
           {s.history.length > 0 && (
             <section aria-labelledby="hist-h" className="mt-6">
@@ -130,6 +140,44 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
       )}
     </div>
   )
+}
+
+/** Debt and Savings, one tap away under the plan (they used to be tabs of their own). */
+function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings: SavingsSummary | null }) {
+  const debtLine = !debt
+    ? 'Cards, loans and your payoff plan'
+    : debt.debts.length === 0
+      ? 'No cards or loans yet'
+      : `${formatCents(debt.owedCents)} owed${debt.plan?.debtFreeBy ? ` · debt-free by ${monthYear(debt.plan.debtFreeBy)}` : ''}`
+  const savingsLine = !savings
+    ? 'Goals and what you’ve saved'
+    : `${formatCents(savings.totalSavedCents)} saved${savings.thisMonthCents > 0 ? ` · ${formatCents(savings.thisMonthCents)} moved in this month` : ''}`
+  return (
+    <div className="mt-4 grid gap-3">
+      {(
+        [
+          ['#/debt', 'Debt', debtLine, icons.debt],
+          ['#/savings', 'Savings', savingsLine, icons.savings],
+        ] as const
+      ).map(([href, title, line, icon]) => (
+        <a key={href} href={href} className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+          <span className="shrink-0">{icon}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold">{title}</span>
+            <span className="block truncate text-sm text-slate-500">{line}</span>
+          </span>
+          <span aria-hidden className="font-semibold text-slate-400">
+            ›
+          </span>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+const monthYear = (iso: string) => {
+  const [y, m] = iso.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
 function CheckCard({ c, first, onToggle }: { c: PayCheck; first: boolean; onToggle: (item: PlanItem) => void }) {

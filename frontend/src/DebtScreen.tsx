@@ -64,7 +64,10 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
   if (!saved) {
     return (
       <Page>
-        <h1 className="text-2xl font-bold tracking-tight">Debt</h1>
+        <a href="#/payday" className="text-sm font-medium text-slate-500">
+          ‹ Plan
+        </a>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight">Debt</h1>
         {error ? <ErrorNotice message={error} onRetry={() => void load()} /> : <Loading />}
       </Page>
     )
@@ -75,6 +78,8 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
   const savedPlan = saved.plan
   const currentExtra = extra ?? savedPlan?.extraCents ?? 0
   const currentStrategy = strategy ?? savedPlan?.strategy ?? 'Avalanche'
+  const cmp = s.comparison
+  const sameEitherWay = !!cmp && !cmp.neverPaysOff && cmp.interestDifferenceCents === 0 && cmp.monthsDifference === 0
   const changed = savedPlan !== null && (currentExtra !== savedPlan.extraCents || currentStrategy !== savedPlan.strategy)
   const sliderMax = Math.max(1_000_00, Math.ceil(((savedPlan?.extraCents ?? 0) * 2) / 100_00) * 100_00)
   const visible = s.debts.filter((d) => !d.isHidden)
@@ -95,7 +100,10 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
 
   return (
     <Page>
-      <h1 className="text-2xl font-bold tracking-tight">Debt</h1>
+      <a href="#/payday" className="text-sm font-medium text-slate-500">
+        ‹ Plan
+      </a>
+      <h1 className="mt-1 text-2xl font-bold tracking-tight">Debt</h1>
 
       {notice && (
         <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -156,6 +164,8 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
           <h2 id="plan-h" className="text-sm font-semibold">
             Your plan
           </h2>
+          {/* No choice to make when both orders come out the same (DECISIONS.md 149). */}
+          {!sameEitherWay && (
           <div role="radiogroup" aria-label="Strategy" className="mt-3 grid grid-cols-2 gap-2">
             {(['Avalanche', 'Snowball'] as const).map((st) => (
               <button
@@ -173,6 +183,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
               </button>
             ))}
           </div>
+          )}
           {s.comparison && <Comparison plan={plan} cmp={s.comparison} />}
 
           <label className="mt-5 block">
@@ -313,7 +324,7 @@ function Comparison({ plan, cmp }: { plan: NonNullable<DebtSummary['plan']>; cmp
   if (plan.neverPaysOff || cmp.neverPaysOff) return null
   const saves = cmp.interestDifferenceCents
   const months = cmp.monthsDifference
-  if (saves === 0 && months === 0) return <p className="mt-2 text-xs text-slate-500">Both strategies come out the same for your debts.</p>
+  if (saves === 0 && months === 0) return <p className="mt-2 text-xs text-slate-500">Highest APR first or smallest balance first comes out the same for your debts, so there’s nothing to choose.</p>
   return (
     <p className="mt-2 text-xs text-slate-500">
       {saves >= 0 ? (

@@ -98,7 +98,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
   return (
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
       <a href="#/payday" className="text-sm font-medium text-sky-700">
-        ‹ Payday
+        ‹ Plan
       </a>
       <h1 className="mt-1 text-2xl font-bold tracking-tight">Schedule & pay stubs</h1>
       {notice && (

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Bills;
@@ -148,5 +149,69 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         var home = (await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!;
         // Today is Nov 6: City Electric was due Nov 12 (monthly from Oct 12); Streamco Nov 3 has passed.
         Assert.Equal([("City Electric", new DateOnly(2026, 11, 12))], home.UpcomingBills!.Select(b => (b.Name, b.Date)));
+    }
+
+    [Fact]
+    public async Task A_bill_already_in_a_category_can_be_moved_to_another()
+    {
+        var c = await HistoryAsync();
+        var stream = (await Bills(c))!.Items.Single(i => i.Name == "Streamco");
+        Assert.Equal("Entertainment", stream.CategoryName);
+        var subs = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Subscriptions").Id;
+
+        var res = await c.PostAsJsonAsync("/api/recurring/category", new MoveBillRequest(stream.Key, subs), Json);
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+
+        var after = (await Bills(c))!.Items.Single(i => i.Key == stream.Key);
+        Assert.Equal(("Subscriptions", true), (after.CategoryName, after.InBillCategory));
+        var txns = (await c.GetFromJsonAsync<TransactionListDto>("/api/transactions?from=2026-01-01&to=2026-12-31", Json))!.Items;
+        Assert.All(txns.Where(t => t.Merchant == "STREAMCO.COM"), t => Assert.Equal(("Subscriptions", "User"), (t.CategoryName, t.CategorySource)));
+
+        // Future charges follow, and an unknown category or bill is turned away.
+        var card = (await c.GetFromJsonAsync<List<AccountDto>>("/api/accounts", Json))!.Single(a => a.Mask == "4321").Id;
+        await ImportAsync(c, card, ChaseCard, ["11/03/2026,11/04/2026,STREAMCO.COM,Entertainment,Sale,-17.99,"]);
+        txns = (await c.GetFromJsonAsync<TransactionListDto>("/api/transactions?from=2026-01-01&to=2026-12-31", Json))!.Items;
+        Assert.Equal("Subscriptions", txns.Single(t => t.Date == new DateOnly(2026, 11, 3)).CategoryName);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/recurring/category", new MoveBillRequest(stream.Key, Guid.NewGuid()), Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/recurring/category", new MoveBillRequest("NOPE", subs), Json)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_phone_hears_about_a_bill_due_tomorrow_once_and_never_at_night()
+    {
+        var c = await HistoryAsync();
+        var household = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+        var endpoint = $"https://fcm.googleapis.com/fcm/send/test-{Guid.NewGuid():N}";
+        var status = await c.GetFromJsonAsync<SmoothBudget.Api.Notifications.PushStatusDto>("/api/push", Json);
+        Assert.True(status!.Enabled);
+
+        // Only a browser's own push service is accepted: the server posts to this address.
+        foreach (var bad in new[] { "https://evil.example/push", "http://fcm.googleapis.com/x", "https://fcm.googleapis.com.evil.example/x" })
+            Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/push/subscribe", new { endpoint = bad, keys = new { p256dh = "k", auth = "a" } }, Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsJsonAsync("/api/push/subscribe", new { endpoint, keys = new { p256dh = "k", auth = "a" } }, Json)).StatusCode);
+
+        async Task<List<SmoothBudget.Api.Notifications.PushMessage>> CheckAt(DateTimeOffset utc)
+        {
+            app.Clock.SetUtcNow(utc);
+            var before = app.Push.Sent.Count(s => s.Endpoint == endpoint);
+            using var scope = app.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Notifications.NotificationService>().CheckAsync(household);
+            return app.Push.Sent.Where(s => s.Endpoint == endpoint).Skip(before).Select(s => s.Message).ToList();
+        }
+
+        // City Electric is paid on the 12th. At 10 p.m. Denver time on the 11th: nothing; the next morning would be too late,
+        // so the check at 10 a.m. on the 11th is the one that tells you, and it says so only once.
+        Assert.Empty(await CheckAt(new DateTimeOffset(2026, 11, 12, 5, 0, 0, TimeSpan.Zero)));
+        var morning = await CheckAt(new DateTimeOffset(2026, 11, 11, 17, 0, 0, TimeSpan.Zero));
+        var bill = Assert.Single(morning, m => m.Tag == "bills");
+        Assert.Equal("Bill due tomorrow", bill.Title);
+        Assert.StartsWith("City Electric $", bill.Body);
+        Assert.DoesNotContain(await CheckAt(new DateTimeOffset(2026, 11, 11, 20, 0, 0, TimeSpan.Zero)), m => m.Tag == "bills");
+
+        // A phone that was wiped stops being sent to.
+        app.Push.Gone[endpoint] = true;
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync("/api/push/test", null)).StatusCode);
+        using (var scope = app.Services.CreateScope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PushDevices.AnyAsync(d => d.Endpoint == endpoint));
     }
 }

@@ -27,6 +27,8 @@ export interface HomeSummary {
   partnerShortfallCents: number
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
+  /** Accounts that won't cover the bills due before the next payday. */
+  cashWarnings: { account: string; billsCents: number; shortCents: number; billCount: number; nextPayDate: string | null }[] | null
 }
 
 export interface Me {
@@ -194,6 +196,8 @@ export const budgetApi = {
     request<Account>('POST', '/accounts', { name, type, mask }),
   categories: () => request<Category[]>('GET', '/budget/categories'),
   monthTransactions: () => request<{ from: string; to: string; items: Transaction[] }>('GET', '/transactions'),
+  /** Every transaction matching a store, description, category or amount; newest first, up to 100. */
+  search: (q: string) => request<Transaction[]>('GET', `/transactions/search?q=${encodeURIComponent(q)}`),
   inbox: () => request<Transaction[]>('GET', '/transactions/inbox'),
   inboxCount: () => request<{ count: number; review: number }>('GET', '/transactions/inbox/count'),
   review: (scope: ReviewScope = 'month') => request<Transaction[]>('GET', `/transactions/review?scope=${scope}`),
@@ -512,7 +516,6 @@ export interface ReviewSummary {
 
 export interface TransactionContext {
   history: { categoryName: string; count: number }[]
-  sameDay: { merchant: string; amountCents: number; categoryName: string | null; accountName: string }[]
 }
 
 export interface DiscoveredCategory {
@@ -651,6 +654,8 @@ export interface RecurringItem {
   inBillCategory: boolean
   confirmed: boolean
   possibleDuplicate: boolean
+  /** One merchant bills only this, so a rule can send its future charges to a category. */
+  merchantWide: boolean
 }
 
 export interface RecurringSummary {
@@ -677,6 +682,8 @@ export const recurringApi = {
   summary: () => request<RecurringSummary>('GET', '/recurring'),
   update: (u: RecurringUpdate) => request<void>('PUT', '/recurring', u),
   trackAsBill: (key: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/track-as-bill', { key }),
+  /** File a bill's charges (past and future) under another category. */
+  moveToCategory: (key: string, categoryId: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/category', { key, categoryId }),
 }
 
 export interface ContributionStatus {
@@ -1017,4 +1024,13 @@ export const paydayApi = {
   model: () => request<ModelView>('GET', '/payday/model'),
   setModel: (m: WithholdingModel) => request<void>('PUT', '/payday/model', m),
   resetModel: () => request<void>('DELETE', '/payday/model'),
+}
+
+// Phone notifications (DECISIONS.md 151).
+export const pushApi = {
+  status: () => request<{ enabled: boolean; publicKey: string | null }>('GET', '/push'),
+  subscribe: (s: PushSubscriptionJSON) =>
+    request<void>('POST', '/push/subscribe', { endpoint: s.endpoint, keys: { p256dh: s.keys?.p256dh, auth: s.keys?.auth } }),
+  unsubscribe: (endpoint: string) => request<void>('POST', '/push/unsubscribe', { endpoint }),
+  test: () => request<void>('POST', '/push/test'),
 }

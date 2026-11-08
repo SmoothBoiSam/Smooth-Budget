@@ -614,6 +614,31 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("ImportBatches");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.NotificationLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("SentUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("NotificationLogs");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.PartnerArrangement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -865,6 +890,43 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("PlaidItems");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.PushDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Endpoint")
+                        .IsUnique();
+
+                    b.HasIndex("HouseholdId");
+
+                    b.ToTable("PushDevices");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.RecurringItem", b =>
@@ -1315,6 +1377,15 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Navigation("Account");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.NotificationLog", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.Household", null)
+                        .WithMany()
+                        .HasForeignKey("HouseholdId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.PartnerArrangement", b =>
                 {
                     b.HasOne("SmoothBudget.Api.Data.Category", "Category")
@@ -1327,6 +1398,15 @@ namespace SmoothBudget.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.PlaidItem", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.Household", null)
+                        .WithMany()
+                        .HasForeignKey("HouseholdId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.PushDevice", b =>
                 {
                     b.HasOne("SmoothBudget.Api.Data.Household", null)
                         .WithMany()

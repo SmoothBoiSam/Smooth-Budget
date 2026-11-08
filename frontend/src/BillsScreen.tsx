@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ApiError, recurringApi, type RecurringItem, type RecurringSummary, type RecurringUpdate } from './api'
+import { ApiError, budgetApi, recurringApi, type Category, type RecurringItem, type RecurringSummary, type RecurringUpdate } from './api'
 import { ErrorNotice, Loading } from './ui'
 import { formatCents, formatDay } from './format'
 
@@ -19,6 +19,7 @@ const every: Record<RecurringItem['frequency'], string> = {
 export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [s, setS] = useState<RecurringSummary | null>(null)
   const [open, setOpen] = useState<RecurringItem | null>(null)
+  const [categories, setCategories] = useState<Category[]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -32,8 +33,16 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
 
   const load = useCallback(async () => {
     try {
-      setS(await recurringApi.summary())
+      const [summary, cats] = await Promise.all([recurringApi.summary(), budgetApi.categories()])
+      setS(summary)
+      setCategories(cats)
       setError(null)
+      // A link to one bill (#/bills/<key>, from the Budget tab) opens it.
+      const key = decodeURIComponent(window.location.hash.replace(/^#\/?bills\/?/, ''))
+      if (key) {
+        setOpen(summary.items.find((i) => i.key === key) ?? null)
+        window.history.replaceState(null, '', '#/bills')
+      }
     } catch (e) {
       fail(e)
     }
@@ -43,8 +52,9 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
     void load()
   }, [load])
 
-  async function update(u: RecurringUpdate, message: string) {
+  async function update(u: RecurringUpdate, message: string, moveTo?: string) {
     try {
+      if (moveTo) await recurringApi.moveToCategory(u.key, moveTo)
       await recurringApi.update(u)
       setNotice(message)
       setOpen(null)
@@ -135,7 +145,7 @@ export default function BillsScreen({ onSignedOut }: { onSignedOut: () => void }
         </>
       )}
 
-      {open && <ItemSheet item={open} onClose={() => setOpen(null)} onUpdate={update} onTrackAsBill={trackAsBill} />}
+      {open && <ItemSheet item={open} categories={categories} onClose={() => setOpen(null)} onUpdate={update} onTrackAsBill={trackAsBill} />}
     </div>
   )
 }
@@ -220,26 +230,43 @@ function List({ title, items, counted, onOpen }: { title: string; items: Recurri
   )
 }
 
+const categoryGroups: { type: Category['type']; label: string }[] = [
+  { type: 'FixedBill', label: 'Bills' },
+  { type: 'Variable', label: 'Spending' },
+  { type: 'DebtPayment', label: 'Debt payments' },
+  { type: 'SavingsTransfer', label: 'Savings' },
+]
+
 function ItemSheet({
   item: i,
+  categories,
   onClose,
   onUpdate,
   onTrackAsBill,
 }: {
   item: RecurringItem
+  categories: Category[]
   onClose: () => void
-  onUpdate: (u: RecurringUpdate, m: string) => void
+  onUpdate: (u: RecurringUpdate, m: string, moveTo?: string) => void
   onTrackAsBill: (i: RecurringItem) => void
 }) {
   const [name, setName] = useState(i.name)
   const [due, setDue] = useState(i.dueDay ? String(i.dueDay) : '')
+  const [categoryId, setCategoryId] = useState(i.categoryId ?? '')
   const [err, setErr] = useState<string | null>(null)
+  const moved = categoryId !== '' && categoryId !== (i.categoryId ?? '')
 
   function save(e: FormEvent) {
     e.preventDefault()
     const day = due.trim() === '' ? null : Number(due)
     if (day !== null && (!Number.isInteger(day) || day < 1 || day > 31)) return setErr('The due day is a day of the month, 1 to 31.')
-    onUpdate({ key: i.key, name, confirmed: true, ...(day === null ? { clearDueDay: true } : { dueDay: day }) }, `Saved ${name.trim() || i.detectedName}.`)
+    const label = name.trim() || i.detectedName
+    const to = categories.find((c) => c.id === categoryId)?.name
+    onUpdate(
+      { key: i.key, name, confirmed: true, ...(day === null ? { clearDueDay: true } : { dueDay: day }) },
+      moved ? `${label} is filed under ${to} now, past charges and future ones.` : `Saved ${label}.`,
+      moved ? categoryId : undefined,
+    )
   }
 
   return (
@@ -273,7 +300,37 @@ function ItemSheet({
           </label>
         )}
 
-        {!i.inBillCategory && (
+        <label className="mt-4 block">
+          <span className="text-sm font-medium text-slate-700">Category</span>
+          <select
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base"
+          >
+            {categoryId === '' && <option value="">No category</option>}
+            {categoryGroups.map((g) => {
+              const list = categories.filter((c) => c.type === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
+              return list.length === 0 ? null : (
+                <optgroup key={g.type} label={g.label}>
+                  {list.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+            })}
+          </select>
+          <span className="mt-1 block text-xs text-slate-500">
+            {moved
+              ? i.merchantWide
+                ? 'Its past charges move there, and future ones go there too.'
+                : 'Its past charges move there. This store bills more than one thing, so check new charges in Review.'
+              : 'Pick another category to move its charges there.'}
+          </span>
+        </label>
+
+        {!i.inBillCategory && !moved && (
           <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
             <p className="text-sm">
               {i.categoryName ? `Its charges are filed under ${i.categoryName}` : 'Its charges have no category'}, so your budget treats it as everyday spending.
