@@ -32,8 +32,6 @@ const tabs: { label: string; route: Route; icon: ReactNode }[] = [
           <path d="M18 3.5a11 11 0 0 1 10.5 10.5H18z" fill={C.coin} />
         </Outlined>
         <path d="M18 3.5a11 11 0 0 1 10.5 10.5" fill="none" stroke={C.coinRim} strokeWidth={1} />
-        <ellipse cx="9.5" cy="21" rx="2.2" ry="1.3" fill={C.blush} />
-        <ellipse cx="18" cy="21" rx="2.2" ry="1.3" fill={C.blush} />
       </>,
     ),
   },
@@ -72,13 +70,21 @@ const tabs: { label: string; route: Route; icon: ReactNode }[] = [
     route: 'savings',
     icon: art(
       <>
-        {/* The stack's outline, then three of the logo's coins. */}
-        <rect x="7" y="9.5" width="18" height="19" rx="9" ry="2.6" fill="#fff" stroke="#fff" strokeWidth={2.4} />
+        {/* The outline comes from the coins themselves (same 2.4 white stroke as the other icons), then the coins on top. */}
+        <Outlined>
+          {[22, 17, 12].map((y) => (
+            <g key={y} fill="#fff">
+              <rect x="7" y={y} width="18" height="4.5" />
+              <ellipse cx="16" cy={y + 4.5} rx="9" ry="2.5" />
+              <ellipse cx="16" cy={y} rx="9" ry="2.5" />
+            </g>
+          ))}
+        </Outlined>
         {[22, 17, 12].map((y) => (
           <g key={y}>
             <rect x="7" y={y} width="18" height="4.5" fill={C.coinSide} />
             <ellipse cx="16" cy={y + 4.5} rx="9" ry="2.5" fill={C.coinSide} />
-            <ellipse cx="16" cy={y} rx="9" ry="2.5" fill={C.coin} stroke={C.coinRim} strokeWidth={0.9} />
+            <ellipse cx="16" cy={y} rx="8.55" ry="2.05" fill={C.coin} stroke={C.coinRim} strokeWidth={0.9} />
           </g>
         ))}
       </>,
@@ -118,7 +124,7 @@ const tabs: { label: string; route: Route; icon: ReactNode }[] = [
           ))}
         </Outlined>
         {[7, 16, 25].map((x) => (
-          <circle key={x} cx={x} cy="16.4" r="1.5" fill={C.blush} />
+          <circle key={x} cx={x} cy="16" r="1.5" fill={C.blush} />
         ))}
       </>,
     ),
