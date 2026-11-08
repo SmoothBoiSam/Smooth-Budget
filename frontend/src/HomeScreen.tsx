@@ -51,12 +51,15 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
   // Pull to refresh (SPEC section 4.2) and the Refresh link both sync connected banks, then reload.
   async function refresh() {
     setLoading(true)
+    setSyncing(true)
     await plaidApi.syncAll().catch(() => undefined) // a failed sync shows up in summary.sync
     await load()
+    setSyncing(false)
   }
 
   const startY = useRef<number | null>(null)
   const [pull, setPull] = useState(0)
+  const [syncing, setSyncing] = useState(false)
   const PULL_TRIGGER = 70
 
   function onTouchStart(e: React.TouchEvent) {
@@ -85,11 +88,17 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
     >
+      {/* Easter egg (DECISIONS.md 139): the tabby hangs down from the top of the screen as you pull to sync, and swings while it syncs. */}
+      <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center">
+        <div className={pull > 0 ? '' : 'transition-transform duration-300 ease-out'} style={{ transform: `translateY(${(syncing ? 100 : pull * 1.1) - 143}px)` }}>
+          <img src="/brand/cat-tabby.png" alt="" className={`w-32 origin-top ${syncing ? 'animate-tabby-swing' : ''}`} />
+        </div>
+      </div>
       {(pull > 0 || (loading && summary)) && (
         <div
           aria-live="polite"
           className="flex items-end justify-center overflow-hidden text-xs font-medium text-slate-500 transition-[height]"
-          style={{ height: loading ? 32 : pull }}
+          style={{ height: syncing ? 108 : loading ? 32 : pull }}
         >
           <span className="pb-1">{loading ? 'Syncing…' : pull >= PULL_TRIGGER ? 'Release to sync' : 'Pull to sync'}</span>
         </div>

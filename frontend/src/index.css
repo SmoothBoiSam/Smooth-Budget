@@ -63,3 +63,15 @@ body {
 :root.dark .bg-slate-900\/40 {
   background-color: rgb(0 0 0 / 0.6);
 }
+
+/* The tabby easter egg swings gently from the top of the screen while Home syncs (DECISIONS.md 139). */
+@keyframes tabby-swing {
+  0%, 100% { transform: rotate(-5deg); }
+  50% { transform: rotate(5deg); }
+}
+.animate-tabby-swing {
+  animation: tabby-swing 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-tabby-swing { animation: none; }
+}
