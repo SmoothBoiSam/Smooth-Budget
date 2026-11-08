@@ -466,9 +466,15 @@ export const budgetEditApi = {
     },
   ) => request<void>('PUT', `/budget/categories/${id}`, body),
   reorder: (ids: string[]) => request<void>('POST', '/budget/categories/order', { ids }),
-  /** Combine categories into one you have (intoId) or a new one (newName). It can't be undone. */
-  mergeCategories: (fromIds: string[], into: { intoId: string } | { newName: string }) =>
-    request<{ id: string; name: string; movedTransactions: number }>('POST', '/budget/categories/merge', { fromIds, ...into }),
+  /**
+   * Delete a category (DECISIONS.md 169). Its transactions move to `moveToId`, or without one they go to Review for a
+   * new category. It can't be undone.
+   */
+  deleteCategory: (id: string, moveToId?: string) =>
+    request<{ name: string; movedTo: string | null; movedTransactions: number; toReview: number }>(
+      'DELETE',
+      `/budget/categories/${id}${moveToId ? `?moveToId=${moveToId}` : ''}`,
+    ),
   hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
   setIncome: (incomeCents: number, partnerCents?: number, automatic = false) =>
     request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null, automatic }),

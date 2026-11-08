@@ -512,6 +512,43 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal("FOOD_AND_DRINK_RESTAURANT", after.Single(t => t.Merchant == "CORNER BISTRO").BankCategory);
     }
 
+    // ---- Deleting a category (DECISIONS.md 169) ---------------------------------------------------------
+
+    [Fact]
+    public async Task A_deleted_category_sends_its_transactions_to_another_or_to_review()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard,
+            "11/08/2026,11/09/2026,FRESH MARKET,Groceries,Sale,-80.00,",
+            "11/09/2026,11/10/2026,TAQUERIA UNO,Food & Drink,Sale,-25.00,",
+            "11/10/2026,11/11/2026,WAL-MART #1234,Shopping,Sale,-60.00,");
+        var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        Guid Id(string name) => cats.Single(x => x.Name == name).Id;
+        var groceryLimit = cats.Single(x => x.Name == "Groceries").MonthlyLimitCents;
+
+        // Moved: Eating out's purchases go to Groceries, which keeps its own limit.
+        var res = await c.DeleteAsync($"/api/budget/categories/{Id("Eating out")}?moveToId={Id("Groceries")}");
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        var moved = (await res.Content.ReadFromJsonAsync<DeleteCategoryResult>(Json))!;
+        Assert.Equal(("Eating out", "Groceries", 1), (moved.Name, moved.MovedTo, moved.MovedTransactions));
+        Assert.Equal("Groceries", (await All(c)).Single(t => t.Merchant == "TAQUERIA UNO").CategoryName);
+
+        // Not moved: Shopping's purchase loses its category and waits in Review.
+        res = await c.DeleteAsync($"/api/budget/categories/{Id("Shopping")}");
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        Assert.Equal(1, (await res.Content.ReadFromJsonAsync<DeleteCategoryResult>(Json))!.ToReview);
+        var walmart = (await All(c)).Single(t => t.Merchant.StartsWith("WAL-MART"));
+        Assert.True(walmart.NeedsReview || walmart.CategoryId is null); // a guess to confirm, or no category: either way it's in Review
+        Assert.NotEqual("Shopping", walmart.CategoryName);
+        Assert.Contains((await c.GetFromJsonAsync<List<TransactionDto>>("/api/transactions/review?scope=month", Json))!, t => t.Id == walmart.Id);
+
+        cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        Assert.DoesNotContain(cats, x => x.Name is "Eating out" or "Shopping");
+        Assert.Equal(groceryLimit, cats.Single(x => x.Name == "Groceries").MonthlyLimitCents);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, (await c.DeleteAsync($"/api/budget/categories/{Guid.NewGuid()}")).StatusCode);
+    }
+
     // ---- Merging categories (DECISIONS.md 144) ----------------------------------------------------------
 
     [Fact]

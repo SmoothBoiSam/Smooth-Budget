@@ -139,6 +139,32 @@ public static class BudgetEndpoints
             return Results.Ok(result);
         });
 
+        // Delete a category (DECISIONS.md 169): its transactions move to another one (?moveToId=), or go to Review for a new one.
+        g.MapDelete("/categories/{id:guid}", async (Guid id, Guid? moveToId, HttpContext ctx, AppDbContext db, CategorizationService categorization,
+            AutoBudgetService auto, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var name = await db.Categories.Where(c => c.Id == id && c.HouseholdId == householdId).Select(c => c.Name).SingleOrDefaultAsync(ct);
+            if (name is null) return Results.NotFound();
+            DeleteCategoryResult result;
+            if (moveToId is { } to)
+            {
+                if (to == id) return Results.ValidationProblem(new Dictionary<string, string[]> { ["moveToId"] = ["Pick a different category to move them to."] });
+                var (merged, errors) = await CategoryMerge.RunAsync(db, householdId, new MergeCategoriesRequest([id], IntoId: to), ct, addLimits: false);
+                if (errors is not null) return Results.ValidationProblem(errors);
+                result = new DeleteCategoryResult(name, merged!.Name, merged.MovedTransactions, 0);
+            }
+            else
+            {
+                var (toReview, errors) = await CategoryMerge.DeleteAsync(db, householdId, id, ct);
+                if (errors is not null) return Results.ValidationProblem(errors);
+                result = new DeleteCategoryResult(name, null, 0, toReview!.Value);
+            }
+            await categorization.RunAsync(householdId, ct); // anything waiting that fits elsewhere gets the app's guess
+            await auto.RefreshAsync(householdId, ct);
+            return Results.Ok(result);
+        });
+
         g.MapGet("/categories/discover",async (HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>
             await discovery.DiscoverAsync(ctx.User.HouseholdId(), ct));
 

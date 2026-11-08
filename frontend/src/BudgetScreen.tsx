@@ -21,7 +21,7 @@ import { useRemembered } from './offline'
 import { Caret, ErrorNotice, Loading } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import CategoryEditSheet from './CategoryEditSheet'
-import MergeCategoriesSheet from './MergeCategoriesSheet'
+import CategoriesPage from './CategoriesPage'
 import { centsToInput, formatCents, formatDay, formatSigned, formatTime, parseDollars, titleCase } from './format'
 import TransactionSheet from './TransactionSheet'
 
@@ -30,13 +30,15 @@ import TransactionSheet from './TransactionSheet'
 //   (#/budget/inbox moved to the Review tab, #/review)
 //   #/budget/all        every transaction this month
 //   #/budget/c/<id>     one category's transactions
-//   #/budget/plan       the budget generator
-type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'category'; id: string }
+//   #/budget/plan       budget settings and the budget generator
+//   #/budget/categories add or delete categories
+type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'categories' } | { kind: 'category'; id: string }
 
 function viewFromHash(): View {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
   if (parts[1] === 'all') return { kind: 'all' }
   if (parts[1] === 'plan') return { kind: 'plan' }
+  if (parts[1] === 'categories') return { kind: 'categories' }
   if (parts[1] === 'c' && parts[2]) return { kind: 'category', id: parts[2] }
   return { kind: 'overview' }
 }
@@ -58,7 +60,6 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [categories, setCategories] = useState<Category[]>([])
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
-  const [merging, setMerging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const searchFailed = useCallback((e: unknown) => setError(e instanceof Error ? e.message : 'Search failed.'), [])
   const [notice, setNotice] = useState<string | null>(null)
@@ -103,7 +104,6 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   function saved(message: string) {
     setSelected(null)
     setEditing(undefined)
-    setMerging(false)
     setNotice(message)
     onChanged()
     void load()
@@ -153,7 +153,13 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           </a>
           <div className="mt-1 flex items-center justify-between gap-3">
             <h1 className="truncate text-2xl font-bold tracking-tight">
-              {view.kind === 'all' ? 'Transactions' : view.kind === 'plan' ? 'Budget settings' : (line?.name ?? 'Category')}
+              {view.kind === 'all'
+                ? 'Transactions'
+                : view.kind === 'plan'
+                  ? 'Budget settings'
+                  : view.kind === 'categories'
+                    ? 'Categories'
+                    : (line?.name ?? 'Category')}
             </h1>
             {view.kind === 'category' && line && (
               <button type="button" onClick={() => setEditing(line)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-slate-200">
@@ -178,8 +184,6 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           bills={bills}
           inboxCount={inbox.length}
           guessCount={reviewSummary?.month.total ?? 0}
-          onAdd={() => setEditing(null)}
-          onMerge={() => setMerging(true)}
         />
       )}
 
@@ -219,6 +223,10 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         <p className="mt-6 text-sm text-slate-500">This category no longer exists.</p>
       )}
 
+      {summary && view.kind === 'categories' && (
+        <CategoriesPage categories={categories} onAdd={() => setEditing(null)} onDeleted={saved} />
+      )}
+
       {summary && view.kind === 'all' && (
         <SearchableList month={month} categories={categories} onSelect={setSelected} onError={searchFailed} />
       )}
@@ -227,7 +235,6 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         <TransactionSheet transaction={selected} categories={categories} onClose={() => setSelected(null)} onSaved={saved} />
       )}
 
-      {merging && <MergeCategoriesSheet categories={categories} onClose={() => setMerging(false)} onMerged={saved} />}
 
       {editing !== undefined && (
         <CategoryEditSheet
@@ -251,15 +258,11 @@ function Overview({
   bills,
   inboxCount,
   guessCount,
-  onAdd,
-  onMerge,
 }: {
   summary: BudgetSummary
   bills: RecurringItem[]
   inboxCount: number
   guessCount: number
-  onAdd: () => void
-  onMerge: () => void
 }) {
   // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
   return (
@@ -308,13 +311,11 @@ function Overview({
       ))}
 
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <button type="button" onClick={onAdd} className="rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
-          + Add category
-        </button>
-        <button type="button" onClick={onMerge} className="rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
-          Combine categories
-        </button>
-        <a href="#/budget/plan" className="col-span-2 rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
+        {/* Add and delete live on their own page (DECISIONS.md 169). */}
+        <a href="#/budget/categories" className="rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
+          Categories
+        </a>
+        <a href="#/budget/plan" className="rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
           Budget settings
         </a>
       </div>
@@ -560,7 +561,8 @@ function SearchableList({
       run.live = false
       window.clearTimeout(timer)
     }
-  }, [key, searching, onError])
+    // `month` changes after any save, so a transaction you just changed drops out of (or into) the results right away.
+  }, [key, searching, month, onError])
 
   const results = searching && found?.key === key ? found : null
   const set = (patch: Partial<SearchFilters>) => setF((x) => ({ ...x, ...patch }))
