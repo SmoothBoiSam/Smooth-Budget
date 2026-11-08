@@ -137,7 +137,7 @@ export default function ReviewScreen({
     <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
       <h1 className="text-2xl font-bold tracking-tight">Review</h1>
       {/* Two parts (DECISIONS.md 152): transactions to confirm, and bills the app found or that changed. */}
-      <div role="tablist" aria-label="What to review" className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-slate-200/70 p-1 text-sm font-semibold">
+      <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-slate-200/70 p-1 text-sm font-semibold">
         {(['transactions', 'bills'] as const).map((p) => {
           const n = p === 'transactions' ? todoCount : billsCount
           return (
@@ -147,7 +147,7 @@ export default function ReviewScreen({
               type="button"
               aria-selected={part === p}
               onClick={() => goTo(p)}
-              className={`flex items-center justify-center gap-1.5 rounded-lg py-2 ${part === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+              className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 ${part === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
             >
               {p === 'transactions' ? 'Transactions' : 'Bills'}
               {n != null && n > 0 && (
@@ -164,13 +164,34 @@ export default function ReviewScreen({
         <BillsSection onSignedOut={onSignedOut} onCount={onBillsCount} />
       ) : (
       <>
-      <header className="mt-4 flex items-baseline justify-between gap-3">
-        <p className="text-sm text-slate-500">
-          New purchases are sorted for you right away. Confirm each one or change it.{' '}
-          <a href="#/budget/plan" className="font-medium text-slate-700 underline">
-            Find categories from my history
-          </a>
-        </p>
+      {/* Compact so a whole review card fits on a phone screen without scrolling (DECISIONS.md 161). */}
+      <header className="mt-3 flex items-center justify-between gap-2">
+        {scopes.length > 1 ? (
+          <div className="flex min-w-0 gap-1.5 overflow-x-auto" role="tablist" aria-label="Which transactions">
+            {scopes.map((s) => {
+              const n = s === 'todo' ? todoCount : s === 'earlier' ? summary?.earlier.total : summary?.older.total
+              return (
+                <button
+                  key={s}
+                  role="tab"
+                  aria-selected={scope === s}
+                  type="button"
+                  onClick={() => {
+                    setScope(s)
+                    setQueue(null)
+                    setNotice(null)
+                  }}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${scope === s ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                >
+                  {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
+                  {n != null && n > 0 && <span className="ml-1 opacity-70">{n}</span>}
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <span />
+        )}
         <div role="tablist" aria-label="View" className="flex shrink-0 rounded-full bg-slate-200/70 p-0.5 text-xs font-medium">
           {(['cards', 'list'] as const).map((m) => (
             <button
@@ -187,41 +208,15 @@ export default function ReviewScreen({
         </div>
       </header>
 
-      {scopes.length > 1 && (
-      <div className="mt-4 flex gap-2" role="tablist" aria-label="Which transactions">
-        {scopes.map((s) => {
-          const n = s === 'todo' ? todoCount : s === 'earlier' ? summary?.earlier.total : summary?.older.total
-          return (
-            <button
-              key={s}
-              role="tab"
-              aria-selected={scope === s}
-              type="button"
-              onClick={() => {
-                setScope(s)
-                setQueue(null)
-                setNotice(null)
-              }}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 ${scope === s ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
-            >
-              {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
-              {n != null && n > 0 && <span className="ml-1.5 opacity-70">{n}</span>}
-            </button>
-          )
-        })}
-      </div>
-      )}
-
-
       {notice && (
-        <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <p role="status" className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           {notice}
         </p>
       )}
       {error && <ErrorNotice message={error} onRetry={() => window.location.reload()} />}
 
       {scope !== 'todo' && summary && (
-        <div className="mt-4 rounded-xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
+        <div className="mt-2 rounded-xl bg-white px-3 py-2 text-xs ring-1 ring-slate-200">
           <p className="text-slate-600">
             {scope === 'earlier'
               ? `These months (since ${formatDay(summary.windowStart)}) shape your budget proposal. If you can’t remember one, the app’s best guess is fine: what matters is that each has some category.`
@@ -266,8 +261,8 @@ export default function ReviewScreen({
         </div>
       ) : (
         <>
-          <div className="mt-5 flex items-baseline justify-between gap-3">
-            <p className="text-sm text-slate-600">
+          <div className="mt-2 flex items-baseline justify-between gap-3">
+            <p className="text-xs text-slate-600">
               <span className="font-semibold">{queue.length}</span> to go
               {counts && counts.unsure > 0 && <span className="text-slate-400"> · {counts.unsure} the app wasn’t sure about</span>}
             </p>
@@ -431,28 +426,36 @@ function ReviewCard({
     }
   }
 
+  // The bank's description, unless it only repeats the store name.
+  const showDescription = !!t.description && t.description.trim().toUpperCase() !== t.merchant.trim().toUpperCase()
+
   return (
-    <article aria-label={`Review ${titleCase(t.merchant)}`} className="mt-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <article aria-label={`Review ${titleCase(t.merchant)}`} className="mt-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold">{titleCase(t.merchant)}</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="truncate text-base font-semibold">{titleCase(t.merchant)}</h2>
+          <p className="truncate text-xs text-slate-500">
             {formatDay(t.date)} · {t.accountName}
           </p>
         </div>
-        <p className={`text-xl font-semibold tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</p>
+        <div className="shrink-0 text-right">
+          <p className={`text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</p>
+          <StatusTag t={t} />
+        </div>
       </div>
-      <div className="mt-2">
-        <StatusTag t={t} />
-      </div>
-      {t.description !== t.merchant && <p className="mt-2 break-words text-xs text-slate-400">{t.description}</p>}
-      {t.categoryReason && <p className="mt-2 text-xs text-slate-500">{t.categoryReason}</p>}
-      {t.isPartnerTransfer && t.kind === 'PartnerTransfer' && (
-        <p className="mt-2 text-xs text-slate-500">Not counted anywhere until you say what it was for.</p>
+      {(showDescription || t.categoryReason) && (
+        <p className="mt-1.5 break-words text-xs text-slate-500">
+          {showDescription && <span className="text-slate-400">{t.description}</span>}
+          {showDescription && t.categoryReason && ' · '}
+          {t.categoryReason}
+        </p>
       )}
-      {older && <p className="mt-2 text-xs text-slate-500">This is older than the months your budget is built from, so it doesn’t affect your budget.</p>}
+      {t.isPartnerTransfer && t.kind === 'PartnerTransfer' && (
+        <p className="mt-1.5 text-xs text-slate-500">Not counted anywhere until you say what it was for.</p>
+      )}
+      {older && <p className="mt-1.5 text-xs text-slate-500">This is older than the months your budget is built from, so it doesn’t affect your budget.</p>}
       {context && context.history.length > 0 && (
-        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <p className="mt-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
           You’ve filed {titleCase(t.merchant)} as{' '}
           {context.history.map((h, i) => (
             <span key={h.categoryName}>
@@ -465,7 +468,7 @@ function ReviewCard({
       )}
 
       {partnerIn && (
-        <fieldset className="mt-4">
+        <fieldset className="mt-3">
           <legend className="text-sm font-medium text-slate-700">What was this from {first}?</legend>
           <div className="mt-2 grid gap-2">
             {(
@@ -491,35 +494,37 @@ function ReviewCard({
 
       {needsCategory && (
         <>
-          <fieldset className="mt-4">
-            <legend className="text-sm font-medium text-slate-700">
+          <fieldset className="mt-3">
+            <legend className="text-xs font-medium text-slate-700">
               {partnerIn ? 'It paid you back for' : partnerOut ? `Your share of what ${first} paid for` : 'What was it?'}
             </legend>
-            <div className="mt-2 grid grid-cols-2 gap-2">
+            {/* One row of four, so the categories start higher up. */}
+            <div className="mt-1.5 grid grid-cols-4 gap-1.5">
               {groups.map((g) => (
                 <button
                   key={g.type}
                   type="button"
                   aria-pressed={group === g.type}
+                  aria-label={g.label}
                   onClick={() => chooseGroup(g.type)}
-                  className={`rounded-xl px-3 py-2.5 text-sm font-semibold ring-1 ${group === g.type ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                  className={`rounded-lg px-1 py-2 text-xs font-semibold ring-1 ${group === g.type ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
                 >
-                  {g.label}
+                  {g.short}
                 </button>
               ))}
             </div>
           </fieldset>
 
-          <fieldset className="mt-4">
-            <legend className="text-sm font-medium text-slate-700">{groups.find((g) => g.type === group)!.pick}</legend>
-            <div className="mt-2 flex flex-wrap gap-2">
+          <fieldset className="mt-3">
+            <legend className="text-xs font-medium text-slate-700">{groups.find((g) => g.type === group)!.pick}</legend>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
               {inGroup.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   aria-pressed={c.id === categoryId}
                   onClick={() => setCategoryId(c.id)}
-                  className={`rounded-full px-3 py-1.5 text-sm ring-1 ${c.id === categoryId ? 'bg-slate-900 font-semibold text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                  className={`rounded-full px-3 py-1 text-sm ring-1 ${c.id === categoryId ? 'bg-slate-900 font-semibold text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
                 >
                   {c.name}
                 </button>
@@ -527,7 +532,7 @@ function ReviewCard({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="rounded-full px-3 py-1.5 text-sm font-semibold"
+                className="rounded-full px-3 py-1 text-sm font-semibold"
                 // Green so it stands out from the categories; fixed colors so the dark theme doesn't swap them.
                 style={{ backgroundColor: '#16a34a', color: '#fff' }}
               >
@@ -552,11 +557,11 @@ function ReviewCard({
       )}
 
       {needsCategory && selected && !t.isPartnerTransfer && (
-        <label className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-          <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="size-5" />
-          <span className="text-sm">
+        <label className="mt-3 flex items-center gap-2.5 rounded-lg bg-slate-50 px-3 py-2">
+          <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="size-4 shrink-0" />
+          <span className="text-xs">
             Always {selected.name} for {titleCase(t.merchant)}
-            <span className="block text-xs text-slate-500">Leave this off for stores where it varies, like a supercenter.</span>
+            <span className="text-slate-500"> (leave off where it varies, like a supercenter)</span>
           </span>
         </label>
       )}
@@ -565,7 +570,7 @@ function ReviewCard({
         type="button"
         disabled={busy || (partnerIn && !mode) || (needsCategory && !categoryId)}
         onClick={() => void save()}
-        className="mt-5 w-full rounded-xl bg-slate-900 py-3.5 text-base font-semibold text-white disabled:opacity-40"
+        className="mt-3 w-full rounded-xl bg-slate-900 py-3 text-base font-semibold text-white disabled:opacity-40"
       >
         {busy
           ? 'Saving…'
@@ -577,11 +582,11 @@ function ReviewCard({
                 ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
                 : 'Pick a category'}
       </button>
-      <div className="mt-2 grid gap-2">
-        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-xl bg-white py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
           I don’t remember
         </button>
-        <button type="button" onClick={onSkip} className="rounded-xl bg-white py-2.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
+        <button type="button" onClick={onSkip} className="rounded-xl bg-white py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
           Skip for now
         </button>
       </div>
@@ -590,11 +595,11 @@ function ReviewCard({
 }
 
 /** The four kinds of transaction (DECISIONS.md 145); each one's categories show when you pick it. */
-const groups: { type: Category['type']; label: string; pick: string }[] = [
-  { type: 'Variable', label: 'Spending', pick: 'Spending category' },
-  { type: 'FixedBill', label: 'Bill', pick: 'Which bill' },
-  { type: 'DebtPayment', label: 'Debt payment', pick: 'Which debt' },
-  { type: 'SavingsTransfer', label: 'Savings transfer', pick: 'Which savings' },
+const groups: { type: Category['type']; label: string; short: string; pick: string }[] = [
+  { type: 'Variable', label: 'Spending', short: 'Spending', pick: 'Spending category' },
+  { type: 'FixedBill', label: 'Bill', short: 'Bill', pick: 'Which bill' },
+  { type: 'DebtPayment', label: 'Debt payment', short: 'Debt', pick: 'Which debt' },
+  { type: 'SavingsTransfer', label: 'Savings transfer', short: 'Savings', pick: 'Which savings' },
 ]
 
 /** "No category" in red, or the app's guess as a question in orange: "Groceries?" */
