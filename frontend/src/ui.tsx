@@ -109,12 +109,13 @@ const noticeDot = { danger: 'bg-danger', todo: 'bg-gold', good: 'bg-good' }
 export function Notice({ tone, href, children }: { tone: keyof typeof noticeDot; href?: string; children: ReactNode }) {
   const inner = (
     <>
-      <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${noticeDot[tone]}`} />
+      <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full transition-colors duration-300 ${noticeDot[tone]}`} />
       <span className="min-w-0 flex-1">{children}</span>
       {href && <Chevron />}
     </>
   )
   const cls = 'neu flex items-start gap-3 rounded-2xl px-4 py-3 text-sm'
+  // The pressed look comes from the shared button styles (index.css); a status notice that appears slides in there too.
   return href ? (
     <a href={href} className={cls}>
       {inner}
@@ -129,7 +130,7 @@ export function Notice({ tone, href, children }: { tone: keyof typeof noticeDot;
 /** A small rounded label, e.g. "On track". */
 export function Pill({ tone, children }: { tone?: 'good' | 'danger' | 'todo'; children: ReactNode }) {
   const color = tone === 'good' ? 'text-good' : tone === 'danger' ? 'text-danger' : tone === 'todo' ? 'text-gold-ink' : 'text-ink-soft'
-  return <span className={`neu-inset inline-block rounded-full px-3 py-1 text-xs font-semibold ${color}`}>{children}</span>
+  return <span className={`neu-inset inline-block rounded-full px-3 py-1 text-xs font-semibold transition-colors duration-300 ${color}`}>{children}</span>
 }
 
 /** The one main button style (coral) and the one secondary style (raised). */
@@ -174,9 +175,9 @@ export function Loading({ label = 'Loading' }: { label?: string }) {
   return (
     <div role="status" aria-live="polite" className="mt-6 space-y-4">
       <span className="sr-only">{label}…</span>
-      <div className="neu h-64 animate-pulse rounded-3xl" />
-      <div className="neu h-14 animate-pulse rounded-2xl" />
-      <div className="neu h-14 animate-pulse rounded-2xl" />
+      <div className="neu shimmer h-64 rounded-3xl" />
+      <div className="neu shimmer h-14 rounded-2xl" />
+      <div className="neu shimmer h-14 rounded-2xl" />
     </div>
   )
 }

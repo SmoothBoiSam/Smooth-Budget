@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, budgetApi, needsLook, openPlanItems, paydayApi, recurringApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
@@ -11,6 +11,7 @@ import ReviewScreen from './ReviewScreen'
 import PaydayScreen from './PaydayScreen'
 import PaySetupScreen from './PaySetupScreen'
 import SavingsScreen from './SavingsScreen'
+import { inViewTransition, reducedMotion } from './motion'
 import { saved, useOnline } from './offline'
 import { OfflineBar } from './ui'
 
@@ -94,6 +95,21 @@ export default function App() {
   const reviewChanged = useCallback((known?: number) => (typeof known === 'number' ? setInboxCount(known) : refreshInbox()), [refreshInbox])
 
   const online = useOnline()
+
+  // A page change the tap's view transition didn't animate (the back button, or a phone without view transitions):
+  // the new screen fades up on its own (DECISIONS.md 190).
+  const screen = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onHash = () => {
+      if (inViewTransition() || reducedMotion()) return
+      screen.current?.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], {
+        duration: 200,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+      })
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   const signedOut = useCallback(() => {
     saved.clear()
     setMe(null)
@@ -116,6 +132,7 @@ export default function App() {
   return (
     <>
       {!online && <OfflineBar />}
+      <div ref={screen}>
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
       {(route === 'budget' || route === 'transactions') && <BudgetScreen key={route} onChanged={refreshInbox} onSignedOut={signedOut} />}
       {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} billsCount={billsCount} onBillsCount={setBillsCount} />}
@@ -125,6 +142,7 @@ export default function App() {
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
       {route === 'partner' && <PartnerScreen onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
+      </div>
       <BottomNav route={route} badges={{ review: inboxCount + billsCount, payday: planCount }} />
     </>
   )

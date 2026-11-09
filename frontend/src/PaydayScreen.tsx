@@ -218,7 +218,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
       </button>
     )
   return (
-    <article className="rounded-3xl neu p-4">
+    <article className="animate-rise-in rounded-3xl neu p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
           {c.isCurrent ? `Paid ${weekday(c.payDate)}` : weekday(c.payDate)}

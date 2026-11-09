@@ -433,7 +433,7 @@ function ReviewCard({
   const reason = context && context.history.length > 0 ? null : t.categoryReason
 
   return (
-    <article aria-label={`Review ${titleCase(t.merchant)}`} className="mt-2 rounded-3xl neu p-4">
+    <article aria-label={`Review ${titleCase(t.merchant)}`} className="animate-rise-in mt-2 rounded-3xl neu p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">{titleCase(t.merchant)}</h2>

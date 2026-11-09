@@ -20,7 +20,7 @@ export default function BottomNav({ route, badges }: { route: Route; badges: Par
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 bottom-0 z-10 rounded-t-3xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-[0_-6px_16px_var(--color-neu-dark)]"
+      className="fixed inset-x-0 bottom-0 z-10 rounded-t-3xl bg-surface [view-transition-name:tabbar] pb-[env(safe-area-inset-bottom)] shadow-[0_-6px_16px_var(--color-neu-dark)]"
     >
       <ul className="mx-auto flex max-w-md justify-between px-3 pt-2">
         {tabs.map((tab) => {
@@ -34,14 +34,15 @@ export default function BottomNav({ route, badges }: { route: Route; badges: Par
                 aria-label={count > 0 ? `${tab.label}, ${count} ${tab.route === 'review' ? 'to review' : 'to do'}` : tab.label}
                 className={`flex flex-col items-center gap-1 pb-2 ${active ? "text-coral" : "text-ink-faint"}`}
               >
-                <span className={`relative rounded-2xl px-3.5 py-1.5 ${active ? "neu-inset" : ""}`}>
-                  <span className={active ? "" : "opacity-60"}>{tab.icon}</span>
+                <span className={`relative block rounded-2xl px-3.5 py-1.5 transition-shadow duration-200 ${active ? 'neu-inset' : ''}`}>
+                  <span className={`block transition-opacity duration-200 ${active ? '' : 'opacity-60'}`}>{tab.icon}</span>
                   {count > 0 && (
                     <span
+                      key={count}
                       aria-hidden
-                      className="absolute top-0 left-1/2 ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4"
+                      className="animate-pop absolute top-0 left-1/2 ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4"
                       // A strong red so the white number stands out; fixed colors so the dark theme doesn't swap them.
-                      style={{ backgroundColor: '#DC2626', color: '#fff' }}
+                      style={{ backgroundColor: '#DC2626', backgroundImage: 'linear-gradient(160deg, #f05a5a, #c81e1e)', color: '#fff' }}
                     >
                       {count > 99 ? '99+' : count}
                     </span>

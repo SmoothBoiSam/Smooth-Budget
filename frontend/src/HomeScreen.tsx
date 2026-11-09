@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, plaidApi, type CashCheck, type Category, type HomeSummary, type Me, type Status, type Transaction } from './api'
+import { ApiError, api, budgetApi, plaidApi, type CashCheck, type Category, type HomeSummary, type Me, type Transaction } from './api'
 import { TransactionList } from './BudgetScreen'
 import TransactionSheet from './TransactionSheet'
 import { formatCents, formatDay, formatTime } from './format'
+import { useArrivals, useTween } from './motion'
 import { saved, useOnline } from './offline'
 import { Card, Chevron, Loading, Notice, Pill, Row, Rows } from './ui'
 
@@ -18,16 +19,30 @@ const levels: Record<Level, { ring: string; tone: 'good' | 'todo' | 'danger'; la
   'near-zero': { ring: 'stroke-danger', tone: 'danger', label: 'Running low', cat: { src: '/brand/cat-over.png', alt: 'A crying cat' } },
   over: { ring: 'stroke-danger', tone: 'danger', label: 'Overspent', cat: { src: '/brand/cat-over.png', alt: 'A crying cat' } },
 }
-function levelOf(s: { status: Status; leftToSpendCents: number; totalVariableLimitCents: number }) {
-  const level: Level =
-    s.status === 'overspent'
-      ? 'over'
-      : s.status === 'low'
-        ? 'near-zero'
-        : s.leftToSpendCents * 100 < 40 * s.totalVariableLimitCents
-          ? 'getting-low'
-          : 'plenty'
-  return levels[level]
+/** The level for an amount left: the server's own lines (below zero; zero or under 15%) plus the 40% one. */
+function levelAt(leftCents: number, limitCents: number): Level {
+  if (leftCents < 0) return 'over'
+  if (leftCents === 0 || leftCents * 100 < 15 * limitCents) return 'near-zero'
+  return leftCents * 100 < 40 * limitCents ? 'getting-low' : 'plenty'
+}
+
+const ringColors: Record<'good' | 'gold' | 'danger', Level[]> = { good: ['plenty'], gold: ['getting-low'], danger: ['near-zero', 'over'] }
+
+// The first time Home shows in a visit, Left to Spend counts up from zero with its ring (DECISIONS.md 190); after
+// that it shows straight away and glides when it changes.
+let introPlayed = false
+
+/** Left to Spend as shown: counting up on the first open, gliding after; its level follows the number as it moves. */
+function useShownLeft(s: HomeSummary) {
+  const [intro] = useState(() => !introPlayed)
+  useEffect(() => {
+    introPlayed = true
+  }, [])
+  const left = Math.round(useTween(s.leftToSpendCents, intro ? 900 : 500, intro ? 0 : s.leftToSpendCents))
+  const share = s.totalVariableLimitCents > 0 ? Math.max(0, Math.min(1, left / s.totalVariableLimitCents)) : 0
+  // At rest it's the server's status; on the way there, the same lines applied to the number shown.
+  const level = left === s.leftToSpendCents ? (s.status === 'overspent' ? 'over' : s.status === 'low' ? 'near-zero' : levelAt(left, s.totalVariableLimitCents)) : levelAt(left, s.totalVariableLimitCents)
+  return { left, share, level, intro }
 }
 
 export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: () => void }) {
@@ -174,28 +189,62 @@ function daysBetween(from: string, to: string) {
 }
 
 /** Left to Spend in a pressed-in well, with a ring for the share of the variable budget still left. */
-function Gauge({ s }: { s: HomeSummary }) {
-  const style = levelOf(s)
-  const share = s.totalVariableLimitCents > 0 ? Math.max(0, Math.min(1, s.leftToSpendCents / s.totalVariableLimitCents)) : 0
+function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShownLeft> }) {
+  const style = levels[shown.level]
   const r = 88
   const arc = 2 * Math.PI * r * 0.75 // a three-quarter ring, open at the bottom
   return (
     <div className="neu-inset relative mx-auto grid aspect-square w-full max-w-60 place-items-center rounded-full">
       <svg viewBox="0 0 200 200" aria-hidden className="absolute inset-0 size-full">
+        <defs>
+          {(['good', 'gold', 'danger'] as const).map((c) => (
+            <linearGradient key={c} id={`ring-${c}`} x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" style={{ stopColor: `var(--color-${c})` }} />
+              <stop offset="1" style={{ stopColor: `color-mix(in oklab, var(--color-${c}) 65%, white)` }} />
+            </linearGradient>
+          ))}
+        </defs>
         <g transform="rotate(135 100 100)">
           <circle cx="100" cy="100" r={r} fill="none" strokeWidth="10" strokeLinecap="round" className="stroke-ink/10" strokeDasharray={`${arc} 999`} />
-          {share > 0 && (
-            <circle cx="100" cy="100" r={r} fill="none" strokeWidth="10" strokeLinecap="round" className={style.ring} strokeDasharray={`${arc * share} 999`} />
-          )}
+          {/* One ring per color, cross-fading as the level changes. */}
+          {shown.share > 0 &&
+            (['good', 'gold', 'danger'] as const).map((c) => (
+              <circle
+                key={c}
+                cx="100"
+                cy="100"
+                r={r}
+                fill="none"
+                strokeWidth="10"
+                strokeLinecap="round"
+                stroke={`url(#ring-${c})`}
+                strokeDasharray={`${arc * shown.share} 999`}
+                className="transition-opacity duration-300"
+                opacity={ringColors[c].includes(shown.level) ? 1 : 0}
+              />
+            ))}
         </g>
       </svg>
       <div className="relative text-center">
-        <img src={style.cat.src} alt={style.cat.alt} className="mx-auto size-16 object-contain" />
+        <div className="relative mx-auto size-16">
+          {(['plenty', 'getting-low', 'near-zero'] as const).map((l) => {
+            const on = (shown.level === 'over' ? 'near-zero' : shown.level) === l
+            return (
+              <img
+                key={l}
+                src={levels[l].cat.src}
+                alt={on ? style.cat.alt : ''}
+                aria-hidden={!on}
+                className={`absolute inset-0 size-16 object-contain transition-[opacity,transform] duration-300 ${on ? 'scale-100 opacity-100' : 'scale-90 opacity-0'}`}
+              />
+            )
+          })}
+        </div>
         <h2 id="lts-label" className="mt-1 text-xs font-medium text-ink-soft">
           Left to Spend
         </h2>
-        <p data-testid="left-to-spend" className="text-4xl font-bold tracking-tight tabular-nums">
-          {formatCents(s.leftToSpendCents)}
+        <p data-testid="left-to-spend" className="text-4xl font-bold tracking-tight tabular-nums" aria-label={formatCents(s.leftToSpendCents)}>
+          {formatCents(shown.left)}
         </p>
         <p className="mt-0.5 text-xs text-ink-faint">
           {s.daysRemaining} {s.daysRemaining === 1 ? 'day' : 'days'} left
@@ -255,7 +304,8 @@ function CashCheckRow({ cash: c, shortCents }: { cash: CashCheck; shortCents: nu
 }
 
 function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }) {
-  const style = levelOf(s)
+  const shown = useShownLeft(s)
+  const style = levels[shown.level]
   // What lasts until the next check: the safe daily amount for each day before payday (DECISIONS.md 148).
   const daysToPayday = s.nextPayday ? daysBetween(s.today, s.nextPayday.payDate) : 0
   const untilPayday =
@@ -266,7 +316,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
   // Everything that wants a tap, most urgent first: problems, then things to do, then good news.
   const notices: { key: string; tone: 'danger' | 'todo' | 'good'; href?: string; text: React.ReactNode }[] = []
   if (!stale && (s.sync.state === 'stale' || s.sync.state === 'error'))
-    notices.push({ key: 'sync', tone: s.sync.state === 'error' ? 'danger' : 'todo', href: '#/more', text: s.sync.message ?? 'Bank sync needs a look.' })
+    notices.push({ key: 'sync', tone: s.sync.state === 'error' ? 'danger' : 'todo', href: '#/more/banks', text: s.sync.message ?? 'Bank sync needs a look.' })
   for (const w of s.cashWarnings ?? [])
     notices.push({
       key: `cash-${w.account}`,
@@ -318,21 +368,26 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
       ),
     })
 
+  // A notice that turns up while you're looking (after a sync, say) slides in; the ones already there don't.
+  const isNew = useArrivals(notices.map((n) => n.key))
+
   return (
     <>
       <section aria-labelledby="lts-label" className="neu mt-5 rounded-[2rem] px-5 pt-6 pb-5">
-        <Gauge s={s} />
+        <Gauge s={s} shown={shown} />
         <div className="mt-4 text-center">
           <Pill tone={style.tone}>{style.label}</Pill>
         </div>
         <dl className="mt-5 grid grid-cols-2 gap-3">
           <div className="neu-inset rounded-2xl px-4 py-3">
             <dt className="text-xs text-ink-soft">Safe per day</dt>
-            <dd className="text-lg font-semibold tabular-nums">{formatCents(s.safeToSpendPerDayCents)}</dd>
+            <dd className="text-lg font-semibold tabular-nums">
+              <Cents cents={s.safeToSpendPerDayCents} countUp={shown.intro} />
+            </dd>
           </div>
           <div className="neu-inset rounded-2xl px-4 py-3">
             <dt className="text-xs text-ink-soft">{untilPayday ? `Until payday ${formatDay(untilPayday.date)}` : 'Days left'}</dt>
-            <dd className="text-lg font-semibold tabular-nums">{untilPayday ? formatCents(untilPayday.cents) : s.daysRemaining}</dd>
+            <dd className="text-lg font-semibold tabular-nums">{untilPayday ? <Cents cents={untilPayday.cents} countUp={shown.intro} /> : s.daysRemaining}</dd>
           </div>
         </dl>
       </section>
@@ -340,7 +395,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
       {notices.length > 0 && (
         <ul className="mt-6 space-y-3">
           {notices.map((n) => (
-            <li key={n.key}>
+            <li key={n.key} className={isNew(n.key) ? 'reveal' : undefined}>
               <Notice tone={n.tone} href={n.href}>
                 {n.text}
               </Notice>
@@ -440,4 +495,9 @@ function RecentTransactions({ summary, onChanged }: { summary: HomeSummary; onCh
       )}
     </section>
   )
+}
+
+/** An amount that counts up with Left to Spend on the first open and glides when it changes. */
+function Cents({ cents, countUp }: { cents: number; countUp: boolean }) {
+  return <>{formatCents(Math.round(useTween(cents, countUp ? 900 : 500, countUp ? 0 : cents)))}</>
 }
