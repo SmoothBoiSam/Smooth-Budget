@@ -9,6 +9,7 @@ using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Import;
+using SmoothBudget.Api.Savings;
 using SmoothBudget.Api.Seeding;
 using SmoothBudget.Api.Transactions;
 
@@ -367,5 +368,41 @@ public class ImportApiTests(TestApp app) : IClassFixture<TestApp>
         // Importing the same file again (nothing new) still keeps the balance current.
         Assert.Equal(2_600_00L, (await Import(s.Client, savings, ChaseSavings)).BalanceSetCents);
         Assert.Null((await Import(s.Client, s.Chase, ChaseCard)).BalanceSetCents); // cards: no Balance column
+    }
+
+    // A Chase savings export whose Balance column is blank: nothing to set the balance from.
+    private const string SavingsNoBalance = """
+        Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #
+        CREDIT,11/07/2026,"Online Transfer from CHK ...1111 transaction#: 1234567893",10.00,ACCT_XFER,,,
+        """;
+
+    private const string SavingsLaterDeposit = """
+        Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #
+        CREDIT,11/25/2026,"Online Transfer from CHK ...1111 transaction#: 1234567894",20.00,ACCT_XFER,,,
+        """;
+
+    [Fact]
+    public async Task Savings_follows_its_transactions_when_no_balance_was_given_and_after_a_typed_one()
+    {
+        var s = await SetupAsync(); // today: Nov 22, 2026
+        var res = await s.Client.PostAsJsonAsync("/api/accounts", new { name = "Chase Savings", type = "Savings", mask = "8810" }, Json);
+        var savings = (await res.Content.ReadFromJsonAsync<AccountDto>(Json))!.Id;
+        async Task<SavingsSummaryDto> Summary() => (await s.Client.GetFromJsonAsync<SavingsSummaryDto>("/api/savings", Json))!;
+
+        // No balance ever given: the $10 moved in is what it holds, not $0 (DECISIONS.md 189).
+        Assert.Null((await Import(s.Client, savings, SavingsNoBalance)).BalanceSetCents);
+        var summary = await Summary();
+        Assert.Equal(10_00L, summary.Accounts.Single(a => a.Id == savings).BalanceCents);
+        Assert.Equal(10_00L, summary.TotalSavedCents);
+
+        // You type the real balance today; a deposit after today adds to it, the $10 before it doesn't count again.
+        await s.Client.PutAsJsonAsync($"/api/savings/accounts/{savings}/balance", new BalanceRequest(500_00), Json);
+        Assert.Equal(500_00L, (await Summary()).TotalSavedCents);
+        await Import(s.Client, savings, SavingsLaterDeposit);
+        Assert.Equal(520_00L, (await Summary()).TotalSavedCents);
+
+        // A file whose newest line (Nov 21) is older than the balance you typed leaves it, and its rows don't count again.
+        Assert.Null((await Import(s.Client, savings, ChaseSavings)).BalanceSetCents);
+        Assert.Equal(520_00L, (await Summary()).TotalSavedCents);
     }
 }

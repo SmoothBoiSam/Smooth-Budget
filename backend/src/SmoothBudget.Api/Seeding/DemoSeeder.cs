@@ -76,7 +76,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         Account NewAccount(string name, AccountType type, string mask, long balance) => new()
         {
             Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = type, Mask = mask,
-            CurrentBalanceCents = balance, Source = DataSource.Seed, CreatedUtc = now,
+            CurrentBalanceCents = balance, BalanceAsOf = today, Source = DataSource.Seed, CreatedUtc = now,
         };
         var checking = NewAccount("Demo Checking", AccountType.Checking, "0001", 1_204_33);
         var visa = NewAccount("Demo Visa", AccountType.CreditCard, "0002", -3_812_40);

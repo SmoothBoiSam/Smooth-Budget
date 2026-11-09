@@ -128,14 +128,15 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
         }).ToList();
         db.Transactions.AddRange(created);
 
-        // A checking or savings account the bank doesn't sync takes its balance from the file, unless the account
-        // already has newer transactions than the file (an older export shouldn't roll it back) (DECISIONS.md 186).
+        // A checking or savings account the bank doesn't sync takes its balance from the file, as of the file's newest
+        // day; transactions after that day move it (DECISIONS.md 186, 189). A file older than the balance it already has
+        // leaves it alone.
         long? balanceSet = null;
-        if (parsed.Balance is { } ending && account.PlaidAccountId is null && account.Type != AccountType.CreditCard)
+        if (parsed.Balance is { } ending && account.PlaidAccountId is null && account.Type != AccountType.CreditCard
+            && (account.BalanceAsOf is null || ending.Date >= account.BalanceAsOf))
         {
-            var newest = await db.Transactions.Where(t => t.AccountId == accountId).MaxAsync(t => (DateOnly?)t.Date, ct);
-            if (newest is null || ending.Date >= newest)
-                account.CurrentBalanceCents = (balanceSet = ending.Cents).Value;
+            account.CurrentBalanceCents = (balanceSet = ending.Cents).Value;
+            account.BalanceAsOf = ending.Date;
         }
 
         await using (var tx = await db.Database.BeginTransactionAsync(ct))

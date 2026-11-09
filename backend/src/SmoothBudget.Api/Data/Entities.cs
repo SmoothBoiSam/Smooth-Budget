@@ -72,6 +72,11 @@ public class Account
 
     /// <summary>From the owner's point of view: money in a bank account is positive, a card balance owed is negative.</summary>
     public long CurrentBalanceCents { get; set; }
+    /// <summary>
+    /// For an account the bank doesn't sync: the day <see cref="CurrentBalanceCents"/> was true (a CSV's newest line, or
+    /// the day you typed it). Transactions after it move the balance; with none ever given, all of them do (DECISIONS.md 189).
+    /// </summary>
+    public DateOnly? BalanceAsOf { get; set; }
     /// <summary>A credit card's limit, from the bank when it reports one (for utilization).</summary>
     public long? CreditLimitCents { get; set; }
     public bool IncludedInBudget { get; set; } = true;

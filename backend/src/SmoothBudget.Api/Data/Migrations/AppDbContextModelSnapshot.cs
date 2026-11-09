@@ -178,6 +178,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("BalanceAsOf")
+                        .HasColumnType("date");
+
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 

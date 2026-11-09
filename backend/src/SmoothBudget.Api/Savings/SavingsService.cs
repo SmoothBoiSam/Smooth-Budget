@@ -54,12 +54,18 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var m = current;
         for (var i = 0; i < PaceMonths; i++)
             paceMonths.Add(m = calendar.MonthContaining(m.Start.AddDays(-1)));
+        // A bank-synced balance is the bank's. Otherwise: the balance last given (by a CSV or by you), moved by every
+        // transaction after that day, or the sum of all of them if none was ever given (DECISIONS.md 189).
+        var balances = accounts.ToDictionary(a => a.Id, a => a.PlaidAccountId is not null
+            ? a.CurrentBalanceCents
+            : a.CurrentBalanceCents - txns.Where(t => t.AccountId == a.Id && (a.BalanceAsOf is null || t.Date > a.BalanceAsOf)).Sum(t => t.AmountCents));
+
         var pace = accounts.ToDictionary(a => a.Id,
             a => SavingsGoals.Pace(txns.Where(t => t.AccountId == a.Id).Select(t => (t.Date, t.AmountCents)).ToList(), paceMonths));
 
         var goals = await db.SavingsGoals.AsNoTracking().Include(g => g.Account)
             .Where(g => g.HouseholdId == householdId).OrderBy(g => g.SortOrder).ThenBy(g => g.CreatedUtc).ToListAsync(ct);
-        var statuses = SavingsGoals.Status(goals.Select(Input).ToList(), accounts.ToDictionary(a => a.Id, a => a.CurrentBalanceCents), pace, today);
+        var statuses = SavingsGoals.Status(goals.Select(Input).ToList(), balances, pace, today);
 
         // The chart: total savings at the end of each of the last 12 budget months, and today.
         var ends = new List<DateOnly>();
@@ -68,7 +74,7 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
             ends.Insert(0, (m = calendar.MonthContaining(m.Start.AddDays(-1))).End);
         ends.Add(today);
         var history = ends.Select(d => new BalancePoint(d, accounts.Sum(a =>
-            SavingsGoals.History(a.CurrentBalanceCents, txns.Where(t => t.AccountId == a.Id).Select(t => (t.Date, t.AmountCents)).ToList(), [d])[0].BalanceCents))).ToList();
+            SavingsGoals.History(balances[a.Id], txns.Where(t => t.AccountId == a.Id).Select(t => (t.Date, t.AmountCents)).ToList(), [d])[0].BalanceCents))).ToList();
 
         // Transfers into savings, tracked automatically: money into a savings account (or, with none linked, transfers out
         // of checking filed as savings).
@@ -84,8 +90,8 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var planned = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer && !c.IsHidden).SumAsync(c => c.MonthlyLimitCents, ct);
 
         return new SavingsSummaryDto(
-            accounts.Sum(a => Math.Max(0, a.CurrentBalanceCents)) + goals.Where(g => g.AccountId is null).Sum(g => g.ManualSavedCents ?? 0),
-            accounts.Select(a => new SavingsAccountDto(a.Id, a.Name, a.Mask, a.CurrentBalanceCents, a.PlaidAccountId is not null, pace[a.Id])).ToList(),
+            accounts.Sum(a => Math.Max(0, balances[a.Id])) + goals.Where(g => g.AccountId is null).Sum(g => g.ManualSavedCents ?? 0),
+            accounts.Select(a => new SavingsAccountDto(a.Id, a.Name, a.Mask, balances[a.Id], a.PlaidAccountId is not null, pace[a.Id])).ToList(),
             goals.Select(g =>
             {
                 var s = statuses.Single(x => x.Id == g.Id);
@@ -197,7 +203,7 @@ public static class SavingsEndpoints
         });
 
         // A savings account imported from CSV has no balance from a bank: you enter it. A bank-linked one follows the bank.
-        g.MapPut("/accounts/{id:guid}/balance", async (Guid id, BalanceRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        g.MapPut("/accounts/{id:guid}/balance", async (Guid id, BalanceRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var a = await db.Accounts.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == ctx.User.HouseholdId() && x.Type == AccountType.Savings, ct);
             if (a is null) return Results.NotFound();
@@ -206,6 +212,9 @@ public static class SavingsEndpoints
             if (req.BalanceCents is < 0 or > MaxCents)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["balanceCents"] = ["Enter the balance in dollars."] });
             a.CurrentBalanceCents = req.BalanceCents;
+            // True as of today: only what comes in or goes out after today moves it (DECISIONS.md 189).
+            var zone = await db.Households.Where(h => h.Id == a.HouseholdId).Select(h => h.TimeZoneId).SingleAsync(ct);
+            a.BalanceAsOf = HomeSummaryService.TodayIn(zone, clock);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
