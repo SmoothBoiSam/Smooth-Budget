@@ -81,35 +81,35 @@ export default function CategoriesPage({
 
   return (
     <div className="pb-6">
-      <button type="button" onClick={onAdd} className="mt-4 w-full rounded-xl bg-slate-900 py-3 text-sm font-semibold text-white">
+      <button type="button" onClick={onAdd} className="mt-4 w-full rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink">
         + Add a category
       </button>
 
       {error && (
-        <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
 
       {unused.length > 0 && (
-        <section className="mt-4 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200" aria-labelledby="unused-h">
-          <h2 id="unused-h" className="text-sm font-semibold text-amber-900">
+        <section className="mt-4 rounded-xl neu-inset p-4" aria-labelledby="unused-h">
+          <h2 id="unused-h" className="text-sm font-semibold text-gold-ink">
             Not used in about 3 months
           </h2>
-          <p className="mt-0.5 text-xs text-amber-800">Archive one to take its limit out of your budget. Its history stays, and you can bring it back.</p>
+          <p className="mt-0.5 text-xs text-gold-ink">Archive one to take its limit out of your budget. Its history stays, and you can bring it back.</p>
           <ul className="mt-2 space-y-2">
             {unused.map((c) => (
-              <li key={c.id} className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-amber-100">
+              <li key={c.id} className="flex items-center gap-2 rounded-xl neu-inset px-3 py-2">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{c.name}</span>
-                  <span className="block truncate text-xs text-slate-500 tabular-nums">
+                  <span className="block truncate text-xs text-ink-soft tabular-nums">
                     {formatCents(c.monthlyLimitCents)} a month · {lastUsedText(c)}
                   </span>
                 </span>
-                <button type="button" disabled={busy !== null} onClick={() => void keep(c)} className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 disabled:opacity-40">
+                <button type="button" disabled={busy !== null} onClick={() => void keep(c)} className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-ink-soft disabled:opacity-40">
                   Keep
                 </button>
-                <button type="button" disabled={busy !== null} onClick={() => void archive(c)} className="shrink-0 rounded-full bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+                <button type="button" disabled={busy !== null} onClick={() => void archive(c)} className="shrink-0 rounded-full bg-coral shadow-neu-sm px-2.5 py-1.5 text-xs font-semibold text-coral-ink disabled:opacity-40">
                   Archive
                 </button>
               </li>
@@ -123,15 +123,15 @@ export default function CategoriesPage({
         if (list.length === 0) return null
         return (
           <section key={g.type} className="mt-6" aria-labelledby={`cats-${g.type}`}>
-            <h2 id={`cats-${g.type}`} className="text-sm font-semibold text-slate-700">
+            <h2 id={`cats-${g.type}`} className="px-1 text-sm font-semibold text-ink-soft">
               {g.label}
             </h2>
-            <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+            <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {list.map((c) => (
                 <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
                   <a href={`#/budget/c/${c.id}`} className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{c.name}</span>
-                    <span className="text-xs text-slate-500 tabular-nums">
+                    <span className="text-xs text-ink-soft tabular-nums">
                       {c.type === 'Variable' && `${priorityLabels[c.priority]} · `}
                       {formatCents(c.monthlyLimitCents)} a month
                     </span>
@@ -141,7 +141,7 @@ export default function CategoriesPage({
                     disabled={busy !== null}
                     onClick={() => void archive(c)}
                     aria-label={`Archive ${c.name}`}
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 disabled:opacity-40"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-ink-soft disabled:opacity-40"
                   >
                     {busy === c.id ? '…' : 'Archive'}
                   </button>
@@ -149,7 +149,7 @@ export default function CategoriesPage({
                     type="button"
                     onClick={() => setDeleting(c)}
                     aria-label={`Delete ${c.name}`}
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-red-600 ring-1 ring-red-200"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-danger"
                   >
                     Delete
                   </button>
@@ -162,21 +162,21 @@ export default function CategoriesPage({
 
       {archived.length > 0 && (
         <details className="mt-6">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-700">Archived ({archived.length})</summary>
-          <p className="mt-1 text-xs text-slate-500">Out of your budget, with their history kept. Restore one to use it again.</p>
-          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+          <summary className="cursor-pointer text-sm font-semibold text-ink-soft">Archived ({archived.length})</summary>
+          <p className="mt-1 text-xs text-ink-soft">Out of your budget, with their history kept. Restore one to use it again.</p>
+          <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
             {archived.map((c) => (
               <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{c.name}</span>
-                  <span className="block truncate text-xs text-slate-500">{lastUsedText(c)}</span>
+                  <span className="block truncate text-xs text-ink-soft">{lastUsedText(c)}</span>
                 </span>
                 <button
                   type="button"
                   disabled={busy !== null}
                   onClick={() => void restore(c)}
                   aria-label={`Restore ${c.name}`}
-                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 disabled:opacity-40"
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-ink-soft disabled:opacity-40"
                 >
                   {busy === c.id ? '…' : 'Restore'}
                 </button>
@@ -187,16 +187,15 @@ export default function CategoriesPage({
       )}
 
       {/* Moved here from More → Bank connections (DECISIONS.md 176). Fixed colors so the dark theme keeps them. */}
-      <section className="mt-8 rounded-xl bg-white p-4 ring-1 ring-slate-200" aria-labelledby="reset-cats-h">
-        <h2 id="reset-cats-h" className="text-sm font-semibold text-slate-700">
+      <section className="mt-8 rounded-2xl neu p-4" aria-labelledby="reset-cats-h">
+        <h2 id="reset-cats-h" className="px-1 text-sm font-semibold text-ink-soft">
           Start categories over
         </h2>
-        <p className="mt-1 text-xs text-slate-500">Files every transaction again from what your bank says and the app’s guesses, replacing your own picks.</p>
+        <p className="mt-1 text-xs text-ink-soft">Re-files every transaction from your bank’s categories, replacing your own picks.</p>
         <button
           type="button"
           onClick={() => setResetting(true)}
-          className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold"
-          style={{ backgroundColor: '#2563EB', color: '#fff' }}
+          className="neu mt-3 w-full rounded-2xl py-3 text-sm font-semibold text-danger"
         >
           Refresh categories from bank
         </button>
@@ -259,7 +258,7 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
         aria-labelledby="reset-h"
         aria-describedby="reset-d"
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <p className="text-xs font-semibold tracking-wide uppercase" style={{ color: '#B45309' }}>
           Caution
@@ -267,28 +266,28 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
         <h2 id="reset-h" className="mt-1 text-lg font-semibold">
           Reset all categories?
         </h2>
-        <div id="reset-d" className="mt-2 space-y-2 text-sm text-slate-600">
+        <div id="reset-d" className="mt-2 space-y-2 text-sm text-ink-soft">
           <p>
             This clears the category on <strong>every</strong> transaction, including the ones you picked yourself, downloads what your bank says
             about each one again, and files them all from the bank’s info and the app’s guesses.
           </p>
           <p>Everything it files waits in Review for you to confirm. Ones it can’t place wait there with no category.</p>
           <p>Your merchant rules, transfers, and what you said about money from your partner stay as they are.</p>
-          <p className="font-semibold" style={{ color: '#DC2626' }}>
+          <p className="font-semibold text-danger">
             This can’t be undone.
           </p>
         </div>
 
         {error && (
-          <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {error}
           </p>
         )}
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <button type="button" disabled={busy} onClick={onClose} className="rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-700 disabled:opacity-40">
+          <button type="button" disabled={busy} onClick={onClose} className="rounded-xl neu-sm py-3 text-sm font-semibold text-ink-soft disabled:opacity-40">
             Cancel
           </button>
-          <button type="button" disabled={busy} onClick={reset} className="rounded-xl py-3 text-sm font-semibold disabled:opacity-60" style={{ backgroundColor: '#DC2626', color: '#fff' }}>
+          <button type="button" disabled={busy} onClick={reset} className="rounded-2xl bg-danger py-3 text-sm font-semibold text-coral-ink shadow-neu-sm disabled:opacity-60">
             {busy ? 'Refreshing…' : 'Yes, reset all'}
           </button>
         </div>
@@ -341,16 +340,16 @@ function DeleteSheet({
         aria-labelledby="delete-cat-h"
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <h2 id="delete-cat-h" className="text-lg font-semibold">
           Delete {c.name}?
         </h2>
-        <p className="mt-1 text-sm text-slate-500">Where should the transactions filed under it go? This can’t be undone.</p>
+        <p className="mt-1 text-sm text-ink-soft">Where should the transactions filed under it go? This can’t be undone.</p>
 
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Send its transactions to</span>
-          <select value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base">
+          <span className="text-sm font-medium text-ink-soft">Send its transactions to</span>
+          <select value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base">
             <option value="" disabled>
               Choose…
             </option>
@@ -368,7 +367,7 @@ function DeleteSheet({
               )
             })}
           </select>
-          <span className="mt-1 block text-xs text-slate-500">
+          <span className="mt-1 block text-xs text-ink-soft">
             {to === REVIEW
               ? 'They lose their category and wait in Review, with the app’s best guess where it has one, for you to pick a new one.'
               : target
@@ -378,15 +377,15 @@ function DeleteSheet({
         </label>
 
         {error && (
-          <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {error}
           </p>
         )}
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <button type="button" onClick={onClose} className="rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-700">
+          <button type="button" onClick={onClose} className="rounded-xl neu-sm py-3 text-sm font-semibold text-ink-soft">
             Cancel
           </button>
-          <button type="submit" disabled={to === '' || busy} className="rounded-xl py-3 text-sm font-semibold disabled:opacity-40" style={{ backgroundColor: '#DC2626', color: '#fff' }}>
+          <button type="submit" disabled={to === '' || busy} className="rounded-2xl bg-danger py-3 text-sm font-semibold text-coral-ink shadow-neu-sm disabled:opacity-40">
             {busy ? 'Deleting…' : 'Delete'}
           </button>
         </div>

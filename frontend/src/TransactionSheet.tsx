@@ -60,44 +60,44 @@ export default function TransactionSheet({
         aria-labelledby="sheet-title"
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 id="sheet-title" className="truncate text-lg font-semibold">
               {titleCase(t.merchant)}
             </h2>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-ink-soft">
               {formatDay(t.date)} · {t.accountName}
             </p>
           </div>
-          <p className={`text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</p>
+          <p className={`text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>{formatSigned(t.amountCents)}</p>
         </div>
-        <p className="mt-2 break-words text-xs text-slate-400">
+        <p className="mt-2 break-words text-xs text-ink-faint">
           {t.description}
           {t.bankCategory && ` · Bank category: ${t.bankCategory}`}
         </p>
         {t.categoryReason && t.categoryName && (
-          <p className={`mt-2 rounded-lg px-3 py-2 text-xs ${t.needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>
+          <p className={`mt-2 rounded-lg px-3 py-2 text-xs ${t.needsReview ? 'neu-inset text-gold-ink' : 'neu-inset text-ink-soft'}`}>
             {t.needsReview ? `${t.unsure ? "Not sure" : "Not confirmed yet"}. Sorted into ${t.categoryName}: ` : `${t.categoryName}: `}
             {t.categoryReason}
           </p>
         )}
 
-        <label className="mt-5 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
+        <label className="mt-5 flex items-center gap-3 rounded-xl neu-inset px-4 py-3">
           <input type="checkbox" checked={isTransfer} onChange={(e) => setIsTransfer(e.target.checked)} className="size-5" />
           <span className="text-sm">
             Transfer or card payment
-            <span className="block text-xs text-slate-500">Never counted as spending</span>
+            <span className="block text-xs text-ink-soft">Never counted as spending</span>
           </span>
         </label>
 
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Category</span>
+          <span className="text-sm font-medium text-ink-soft">Category</span>
           <select
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
-            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base"
+            className="mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base"
           >
             <option value="">No category</option>
             {grouped
@@ -115,37 +115,37 @@ export default function TransactionSheet({
         </label>
 
         {!isTransfer && categoryId && (
-          <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
+          <div className="mt-4 rounded-xl neu-inset px-4 py-3">
             <label className="flex items-center gap-3">
               <input type="checkbox" checked={makeRule} onChange={(e) => setMakeRule(e.target.checked)} className="size-5" />
               <span className="text-sm">Always use this category for this merchant</span>
             </label>
             {makeRule && (
               <label className="mt-3 block">
-                <span className="text-xs text-slate-500">Merchants containing</span>
+                <span className="text-xs text-ink-soft">Merchants containing</span>
                 <input
                   value={pattern}
                   onChange={(e) => setPattern(e.target.value)}
                   required
-                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm uppercase"
+                  className="mt-1 block w-full rounded-2xl neu-inset px-4 py-3 text-sm uppercase"
                 />
-                <span className="mt-1 block text-xs text-slate-500">Shorten it (e.g. just the store name) to match every location.</span>
+                <span className="mt-1 block text-xs text-ink-soft">Shorten it (e.g. just the store name) to match every location.</span>
               </label>
             )}
           </div>
         )}
 
         {error && (
-          <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {error}
           </p>
         )}
 
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-slate-100 py-3 font-semibold text-slate-700">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
             Cancel
           </button>
-          <button type="submit" disabled={busy} className="flex-1 rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50">
+          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm">
             {busy ? 'Saving…' : 'Save'}
           </button>
         </div>

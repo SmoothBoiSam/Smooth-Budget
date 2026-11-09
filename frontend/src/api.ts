@@ -1088,6 +1088,10 @@ function fileForm(file: File, extra?: Record<string, string>) {
   return form
 }
 
+/** Payday plan steps still to do on the check you're on now: the Plan tab's badge (DECISIONS.md 188). */
+export const openPlanItems = (s: PaydaySummary) =>
+  s.checks.filter((c) => c.isCurrent && c.plan).reduce((n, c) => n + c.plan!.items.filter((i) => !i.done).length, 0)
+
 export const paydayApi = {
   summary: () => request<PaydaySummary>('GET', '/payday'),
   setDone: (payDate: string, key: string, done: boolean) =>

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, debtApi, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type PlanItem, type SavingsSummary } from './api'
+import { ApiError, debtApi, openPlanItems, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type PlanItem, type SavingsSummary } from './api'
 import { icons } from './icons'
 import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading } from './ui'
+import { Caret, Card, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows } from './ui'
 import { formatCents, formatDay } from './format'
 
 const weekday = (iso: string) => {
@@ -18,7 +18,7 @@ const monthName = (iso: string) => {
  * The Plan tab (SPEC 4.6; DECISIONS.md 147), with links to Debt and Savings under the checks: the next checks with a low/likely/high range, the payday plan for each, and predicted vs
  * actual once a deposit lands. Setup (schedule, pay stubs, profile, rules) is on its own screen.
  */
-export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void }) {
+export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut: () => void; onOpenItems: (n: number) => void }) {
   const [s, setS] = useState<PaydaySummary | null>(null)
   const [debt, setDebt] = useState<DebtSummary | null>(null)
   const [savings, setSavings] = useState<SavingsSummary | null>(null)
@@ -36,13 +36,14 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
       // Debt and Savings are extras here: the plan still shows without them.
       const [p, d, sv] = await Promise.all([paydayApi.summary(), debtApi.summary().catch(() => null), savingsApi.summary().catch(() => null)])
       setS(p)
+      onOpenItems(openPlanItems(p))
       setDebt(d)
       setSavings(sv)
       setError(null)
     } catch (e) {
       fail(e)
     }
-  }, [fail])
+  }, [fail, onOpenItems])
   useEffect(() => {
     void load()
   }, [load])
@@ -61,32 +62,25 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
   const [doneOpen, setDoneOpen] = useState(false)
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Plan</h1>
-        <a href="#/payday/setup" className="text-sm font-medium text-sky-700">
-          Schedule & stubs
-        </a>
-      </div>
+    <Page>
+      <PageHeader title="Plan" />
+      <DebtSavingsLinks debt={debt} savings={savings} />
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
       {!s && !error && <Loading />}
 
       {empty && (
-        <section className="mt-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+        <section className="mt-6 rounded-3xl neu p-5">
           <h2 className="font-semibold">Forecast your paychecks</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Import this month’s SkedPlus+ schedule to see what each check should be, then add 2 or more recent pay stubs so the app learns your taxes and deductions.
-          </p>
-          <a href="#/payday/setup" className="mt-4 block rounded-xl bg-slate-900 py-3 text-center text-sm font-semibold text-white">
+          <p className="mt-1 text-sm text-ink-soft">Import your SkedPlus+ schedule and 2 or more pay stubs.</p>
+          <a href="#/payday/setup" className="mt-4 block rounded-2xl bg-coral shadow-neu-sm py-3 text-center text-sm font-semibold text-coral-ink">
             Import a schedule or pay stub
           </a>
         </section>
       )}
-      {empty && <DebtSavingsLinks debt={debt} savings={savings} />}
 
       {s && !empty && (
         <>
-          <ul className="mt-4 space-y-3">
+          <ul className="mt-6 space-y-4">
             {s.checks
               .filter((c) => !finished(c))
               .map((c) => (
@@ -96,13 +90,12 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
               ))}
           </ul>
 
-          <DebtSavingsLinks debt={debt} savings={savings} />
 
           {/* A check whose plan is all done is put away (DECISIONS.md 154), one tap from coming back. */}
           {s.checks.some(finished) && (
             <section aria-labelledby="done-h" className="mt-6">
               <h2 id="done-h">
-                <button type="button" onClick={() => setDoneOpen(!doneOpen)} aria-expanded={doneOpen} className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+                <button type="button" onClick={() => setDoneOpen(!doneOpen)} aria-expanded={doneOpen} className="flex items-center gap-1 px-1 text-sm font-semibold text-ink-soft">
                   <Caret open={doneOpen} />
                   Finished paychecks
                 </button>
@@ -122,28 +115,28 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
           {s.history.length > 0 && (
             <section aria-labelledby="hist-h" className="mt-6">
               <h2 id="hist-h">
-                <button type="button" onClick={() => setHistoryOpen(!historyOpen)} aria-expanded={historyOpen} className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+                <button type="button" onClick={() => setHistoryOpen(!historyOpen)} aria-expanded={historyOpen} className="flex items-center gap-1 px-1 text-sm font-semibold text-ink-soft">
                   <Caret open={historyOpen} />
                   Predicted vs actual
                 </button>
               </h2>
               {historyOpen && (
-              <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+              <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
                 {s.history.map((h) => (
                   <li key={h.payDate} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
                     <span>
                       <span className="font-medium">{formatDay(h.payDate)}</span>
-                      <span className="block text-xs text-slate-500">
+                      <span className="block text-xs text-ink-soft">
                         Predicted {formatCents(h.predictedNetCents)}
                         {h.source === 'stub' ? ' · from your stub' : h.source === 'deposit' ? ' · deposit' : ''}
                       </span>
                     </span>
                     {h.actualNetCents === null ? (
-                      <span className="text-xs text-slate-500">Not seen yet</span>
+                      <span className="text-xs text-ink-soft">Not seen yet</span>
                     ) : (
                       <span className="text-right tabular-nums">
                         <span className="font-semibold">{formatCents(h.actualNetCents)}</span>
-                        <span className={`block text-xs ${Math.abs(h.varianceCents ?? 0) < 1_000 ? 'text-slate-500' : (h.varianceCents ?? 0) > 0 ? 'text-emerald-700' : 'text-amber-600'}`}>
+                        <span className={`block text-xs ${Math.abs(h.varianceCents ?? 0) < 1_000 ? 'text-ink-soft' : (h.varianceCents ?? 0) > 0 ? 'text-good' : 'text-gold-ink'}`}>
                           {(h.varianceCents ?? 0) >= 0 ? '+' : '−'}
                           {formatCents(Math.abs(h.varianceCents ?? 0))}
                         </span>
@@ -156,20 +149,20 @@ export default function PaydayScreen({ onSignedOut }: { onSignedOut: () => void 
             </section>
           )}
 
-          <p className="mt-6 text-xs text-slate-500">
-            Forecasts use your imported schedule, the pay rules table and the withholding model learned from {s.stubCount} pay stub{s.stubCount === 1 ? '' : 's'}
-            {s.modelEdited ? ' (with your edits)' : ''}. They’re estimates, not guarantees. Profit sharing and other irregular payouts are left out.
+          <p className="mt-6 px-1 text-xs text-ink-faint">
+            Estimates from your schedule, pay rules and {s.stubCount} pay stub{s.stubCount === 1 ? '' : 's'}
+            {s.modelEdited ? ' (with your edits)' : ''}. Irregular payouts are left out.
           </p>
         </>
       )}
-    </div>
+    </Page>
   )
 }
 
 /** A paid check whose every plan item is done. */
 const finished = (c: PayCheck) => c.isCurrent && !!c.plan && c.plan.items.length > 0 && c.plan.items.every((i) => i.done)
 
-/** Debt and Savings, one tap away under the plan (they used to be tabs of their own). */
+/** Debt, Savings, and Schedule & pay stubs, one tap away under the plan (they used to be tabs of their own). */
 function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings: SavingsSummary | null }) {
   const debtLine = !debt
     ? 'Cards, loans and your payoff plan'
@@ -179,26 +172,15 @@ function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings
   const savingsLine = !savings
     ? 'Goals and what you’ve saved'
     : `${formatCents(savings.totalSavedCents)} saved${savings.thisMonthCents > 0 ? ` · ${formatCents(savings.thisMonthCents)} moved in this month` : ''}`
+  // Everything else on Plan, in one menu: debt, savings, and where the forecast comes from (DECISIONS.md 187).
   return (
-    <div className="mt-4 space-y-3">
-      {(
-        [
-          ['#/debt', 'Debt', debtLine, icons.debt],
-          ['#/savings', 'Savings', savingsLine, icons.savings],
-        ] as const
-      ).map(([href, title, line, icon]) => (
-        <a key={href} href={href} className="flex w-full min-w-0 items-center gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
-          <span className="w-7 shrink-0">{icon}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block font-semibold">{title}</span>
-            <span className="block truncate text-sm text-slate-500">{line}</span>
-          </span>
-          <span aria-hidden className="font-semibold text-slate-400">
-            ›
-          </span>
-        </a>
-      ))}
-    </div>
+    <Card>
+      <Rows>
+        <MenuRow icon={icons.debt} label={<span className="font-semibold">Debt</span>} hint={debtLine} href="#/debt" />
+        <MenuRow icon={icons.savings} label={<span className="font-semibold">Savings</span>} hint={savingsLine} href="#/savings" />
+        <MenuRow icon={icons.payday} label={<span className="font-semibold">Schedule & pay stubs</span>} hint="What the forecast learns from" href="#/payday/setup" />
+      </Rows>
+    </Card>
   )
 }
 
@@ -219,11 +201,11 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
         type="button"
         onClick={() => setFolded(false)}
         aria-expanded={false}
-        className="flex w-full items-center gap-3 rounded-2xl bg-white px-4 py-3 text-left ring-1 ring-slate-200"
+        className="flex w-full items-center gap-3 rounded-3xl neu px-4 py-3 text-left"
       >
         <span className="min-w-0 flex-1">
           <span className="block font-semibold">{c.isCurrent ? `Paid ${weekday(c.payDate)}` : weekday(c.payDate)}</span>
-          <span className="block truncate text-xs text-slate-500">
+          <span className="block truncate text-xs text-ink-soft">
             {finished(c)
               ? `All ${c.plan!.items.length} done`
               : known
@@ -236,48 +218,48 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
       </button>
     )
   return (
-    <article className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <article className="rounded-3xl neu p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
           {c.isCurrent ? `Paid ${weekday(c.payDate)}` : weekday(c.payDate)}
-          {c.isCurrent && <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">You're on this check</span>}
+          {c.isCurrent && <span className="whitespace-nowrap rounded-full neu-inset px-2 py-0.5 text-xs font-medium text-good">You're on this check</span>}
         </h2>
-        <span className="shrink-0 text-xs text-slate-500">
+        <span className="shrink-0 text-xs text-ink-soft">
           Covers {formatDay(c.periodStart)}–{formatDay(c.periodEnd)}
           {(!c.isCurrent || finished(c)) && (
-            <button type="button" onClick={() => setFolded(true)} className="ml-2 font-medium text-sky-700">
+            <button type="button" onClick={() => setFolded(true)} className="ml-2 font-medium text-coral">
               Fold
             </button>
           )}
         </span>
       </div>
       {!c.hasSchedule && c.landedNetCents === null ? (
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-ink-soft">
           Import your {monthName(c.periodStart)} schedule to forecast this check.{' '}
-          <a href="#/payday/setup" className="font-medium text-sky-700">
+          <a href="#/payday/setup" className="font-medium text-coral">
             Import
           </a>
         </p>
       ) : (
         <>
           <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{formatCents(c.landedNetCents ?? c.netCents)}</p>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-ink-soft">
             {c.landedNetCents !== null
               ? `Landed${c.hasSchedule ? ` · forecast was ${formatCents(c.netCents)}` : ''}`
               : `Likely take-home · range ${formatCents(c.lowNetCents)}–${formatCents(c.highNetCents)} · gross ${formatCents(c.grossCents)}`}
           </p>
           {c.lowConfidence && c.landedNetCents === null && (
-            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <p className="mt-2 rounded-lg neu-inset px-3 py-2 text-xs text-gold-ink">
               <span className="font-semibold">Low confidence.</span> {c.reasons.join(' ')}
             </p>
           )}
           {c.notes.map((n) => (
-            <p key={n} className="mt-2 text-xs text-slate-500">
+            <p key={n} className="mt-2 text-xs text-ink-soft">
               {n}
             </p>
           ))}
           {c.hasSchedule && (
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 text-xs font-medium text-sky-700">
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 text-xs font-medium text-coral">
             {open ? 'Hide' : 'How this is figured'}
           </button>
           )}
@@ -298,17 +280,17 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
           )}
 
           {c.plan && (
-            <section className="mt-3 border-t border-slate-100 pt-3">
+            <section className="mt-3 border-t border-ink/10 pt-3">
               <button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex w-full items-center justify-between text-sm font-semibold">
                 Payday plan
-                <span className="text-xs font-normal text-slate-500">
+                <span className="text-xs font-normal text-ink-soft">
                   {c.plan.items.filter((i) => i.done).length} of {c.plan.items.length} done
                 </span>
               </button>
               {planOpen && (
                 <>
                   {c.plan.shortCents > 0 && (
-                    <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+                    <p className="mt-2 rounded-lg neu-inset px-3 py-2 text-xs text-danger">
                       This check is {formatCents(c.plan.shortCents)} short of everything planned for it.
                     </p>
                   )}
@@ -334,9 +316,9 @@ function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
   const [billsOpen, setBillsOpen] = useState(false)
   const body = (
     <span className="min-w-0 flex-1">
-      <span className={`block text-sm ${item.done ? 'text-slate-400 line-through' : ''}`}>{planText(item)}</span>
-      {item.status && <span className={`block text-xs ${item.done ? 'text-emerald-700' : 'text-amber-700'}`}>{item.status}</span>}
-      <span className="block text-xs text-slate-500">{item.why}</span>
+      <span className={`block text-sm ${item.done ? 'text-ink-faint line-through' : ''}`}>{planText(item)}</span>
+      {item.status && <span className={`block text-xs ${item.done ? 'text-good' : 'text-gold-ink'}`}>{item.status}</span>}
+      <span className="block text-xs text-ink-soft">{item.why}</span>
     </span>
   )
   return (
@@ -348,22 +330,22 @@ function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
           disabled={item.auto}
           onChange={onToggle}
           aria-label={item.auto ? `${planText(item)}: done, from your accounts` : planText(item)}
-          className="mt-1 size-4 shrink-0 accent-emerald-600"
+          className="mt-1 size-4 shrink-0 accent-coral"
         />
         {body}
       </label>
       {item.bills && item.bills.length > 0 && (
         <div className="ml-7">
-          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-sky-700">
+          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-coral">
             <Caret open={billsOpen} />
             {billsOpen ? 'Hide the bills' : 'Show the bills'}
           </button>
           {billsOpen && (
-            <ul className="mt-1 divide-y divide-slate-100 text-xs">
+            <ul className="mt-1 divide-y divide-ink/[0.07] text-xs">
               {item.bills.map((b) => (
                 <li key={b.name + b.due} className="flex justify-between gap-3 py-1">
                   <span>
-                    {b.name} <span className="text-slate-400">· {formatDay(b.due)}</span>
+                    {b.name} <span className="text-ink-faint">· {formatDay(b.due)}</span>
                   </span>
                   <span className="tabular-nums">{formatCents(b.cents)}</span>
                 </li>
@@ -391,12 +373,12 @@ function planText(i: PlanItem) {
 
 function Row({ label, cents, note, strong }: { label: string; cents: number; note?: string; strong?: boolean }) {
   return (
-    <div className={strong ? 'border-t border-slate-100 pt-1 font-semibold' : ''}>
+    <div className={strong ? 'border-t border-ink/10 pt-1 font-semibold' : ''}>
       <div className="flex justify-between gap-3">
         <dt>{label}</dt>
         <dd className="tabular-nums">{cents < 0 ? `−${formatCents(-cents)}` : formatCents(cents)}</dd>
       </div>
-      {note && <p className="text-xs text-slate-500">{note}</p>}
+      {note && <p className="text-xs text-ink-soft">{note}</p>}
     </div>
   )
 }

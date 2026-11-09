@@ -329,10 +329,10 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 transfers.AddRange(split.Select(s => s.Card.Key == $"debt:{targetDebt.Id}"
                     ? new PlanTransfer(s.Card.Key, s.ExtraCents > 0 ? "Minimum + extra" : "Minimum payment", s.Cents, s.Card.Destination,
                         s.ExtraCents > 0
-                            ? $"The {PayEngine.Dollars(s.Card.MinimumCents)} minimum{checkShare}, plus {PayEngine.Dollars(s.ExtraCents)} extra: this card has the {why}."
-                            : $"The minimum{checkShare}. This card has the {why}, so any extra your budget allows goes here.")
+                            ? $"The {PayEngine.Dollars(s.Card.MinimumCents)} minimum{checkShare}, plus {PayEngine.Dollars(s.ExtraCents)} extra ({why})."
+                            : $"The minimum{checkShare}. Extra goes here first ({why}).")
                     : new PlanTransfer(s.Card.Key, "Minimum payment", s.Cents, s.Card.Destination,
-                        $"Just the minimum{checkShare}. Extra goes to {target} first ({why}).")));
+                        $"Just the minimum{checkShare}. Extra goes to {target} first.")));
             }
             else
                 transfers.Add(new("debt", "Card payment", debtShare, target,
@@ -353,13 +353,13 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                         (current
                             ? $"What you put on this card from {spendFrom:MMM d} to {spendTo:MMM d}."
                             : $"What you've put on this card since {spendFrom:MMM d}; it'll be more by payday.")
-                        + " It already counts in your spending, so pay it from the spending money you didn't use from checking. Paying it keeps the card from growing.",
+                        + " Already in your spending, so pay it from checking.",
                         FromEarlierCents: cents));
                 }
             }
             if (i == 0)
                 transfers.AddRange(sweeps.Where(s => s.DoneUtc == null || (current && s.DoneUtc >= pay.ToDateTime(TimeOnly.MinValue)))
-                    .Select(s => new PlanTransfer($"sweep:{s.Id}", "Last month's leftover", s.AmountCents, s.Destination, "The rollover sweep from your last closed month.")));
+                    .Select(s => new PlanTransfer($"sweep:{s.Id}", "Last month's leftover", s.AmountCents, s.Destination, "Left over from last month.")));
             transfers.Add(new("savings", "Savings", PaydayPlan.Share(savingsMonthly, inMonth.Count, index), savingsAccount,
                 inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(savingsMonthly)} savings in your budget." : $"Your budget's {PayEngine.Dollars(savingsMonthly)} savings."));
 
@@ -392,7 +392,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 {
                     case "keep":
                         var acct = AccountFor(x);
-                        if (acct?.PlaidAccountId is null) return (false, "Check this one yourself: the app doesn't get this account's balance from the bank.");
+                        if (acct?.PlaidAccountId is null) return (false, "Check this balance yourself; it isn't bank-synced.");
                         return acct.CurrentBalanceCents >= x.Cents
                             ? (true, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}, enough for these.")
                             : (false, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}: {PayEngine.Dollars(x.Cents - acct.CurrentBalanceCents)} short for these."

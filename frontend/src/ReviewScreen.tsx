@@ -11,7 +11,7 @@ import {
   type TransactionContext,
 } from './api'
 import BillsSection from './BillsSection'
-import { ErrorNotice, Loading } from './ui'
+import { ErrorNotice, Loading, Page, PageHeader } from './ui'
 import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
@@ -134,11 +134,12 @@ export default function ReviewScreen({
   )
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
+    <Page>
       {/* The view switch sits beside the title so the scope chips get a row of their own and always fit (DECISIONS.md 167). It applies to both parts. */}
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Review</h1>
-        <div role="tablist" aria-label="View" className="flex shrink-0 rounded-full bg-slate-200/70 p-0.5 text-xs font-medium">
+      <PageHeader
+        title="Review"
+        action={
+        <div role="tablist" aria-label="View" className="flex shrink-0 rounded-full neu-inset p-1 text-xs font-medium">
           {(['cards', 'list'] as const).map((m) => (
             <button
               key={m}
@@ -146,15 +147,16 @@ export default function ReviewScreen({
               aria-selected={mode === m}
               type="button"
               onClick={() => setMode(m)}
-              className={`rounded-full px-3 py-1 ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+              className={`rounded-full px-3 py-1 ${mode === m ? 'neu-sm text-ink' : 'text-ink-soft'}`}
             >
               {m === 'cards' ? 'One by one' : 'List'}
             </button>
           ))}
         </div>
-      </div>
+        }
+      />
       {/* Two parts (DECISIONS.md 152): transactions to confirm, and bills the app found or that changed. */}
-      <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-slate-200/70 p-1 text-sm font-semibold">
+      <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1 rounded-2xl neu-inset p-1 text-sm font-semibold">
         {(['transactions', 'bills'] as const).map((p) => {
           const n = p === 'transactions' ? todoCount : billsCount
           return (
@@ -164,7 +166,7 @@ export default function ReviewScreen({
               type="button"
               aria-selected={part === p}
               onClick={() => goTo(p)}
-              className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 ${part === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+              className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 ${part === p ? 'neu-sm text-ink' : 'text-ink-soft'}`}
             >
               {p === 'transactions' ? 'Transactions' : 'Bills'}
               {n != null && n > 0 && (
@@ -197,7 +199,7 @@ export default function ReviewScreen({
                     setQueue(null)
                     setNotice(null)
                   }}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${scope === s ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu text-ink-soft'}`}
                 >
                   {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
                   {n != null && n > 0 && <span className="ml-1 opacity-70">{n}</span>}
@@ -208,15 +210,15 @@ export default function ReviewScreen({
       )}
 
       {notice && (
-        <p role="status" className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <p role="status" className="mt-2 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
         </p>
       )}
       {error && <ErrorNotice message={error} onRetry={() => window.location.reload()} />}
 
       {scope !== 'todo' && summary && (
-        <div className="mt-2 rounded-xl bg-white px-3 py-2 text-xs ring-1 ring-slate-200">
-          <p className="text-slate-600">
+        <div className="mt-2 rounded-2xl neu px-3 py-2 text-xs">
+          <p className="text-ink-soft">
             {scope === 'earlier'
               ? `These months (since ${formatDay(summary.windowStart)}) shape your budget proposal. If you can’t remember one, the app’s best guess is fine: what matters is that each has some category.`
               : `Before ${formatDay(summary.windowStart)}: these don’t affect your budget. There’s no need to remember them.`}
@@ -236,7 +238,7 @@ export default function ReviewScreen({
                   fail(e)
                 }
               }}
-              className="mt-2 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+              className="mt-2 rounded-full bg-coral shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-coral-ink"
             >
               I can’t remember these: use best guesses ({counts!.total})
             </button>
@@ -247,13 +249,13 @@ export default function ReviewScreen({
       {queue === null ? (
         <Loading />
       ) : queue.length === 0 ? (
-        <div className="mt-8 rounded-2xl bg-white px-5 py-8 text-center ring-1 ring-slate-200">
+        <div className="mt-8 rounded-3xl neu px-5 py-8 text-center">
           <p className="text-lg font-semibold">All caught up</p>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-soft">
             {scope === 'todo' ? 'Everything this month has a category you confirmed.' : scope === 'earlier' ? 'Nothing from these months is waiting.' : 'Nothing older is waiting.'}
           </p>
           {scope === 'todo' && (summary?.earlier.total ?? 0) > 0 && (
-            <button type="button" onClick={() => setScope('earlier')} className="mt-4 text-sm font-medium text-slate-700 underline">
+            <button type="button" onClick={() => setScope('earlier')} className="mt-4 text-sm font-medium text-ink-soft underline">
               Review {summary!.earlier.total} from earlier months
             </button>
           )}
@@ -261,15 +263,15 @@ export default function ReviewScreen({
       ) : (
         <>
           <div className="mt-2 flex items-baseline justify-between gap-3">
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-ink-soft">
               <span className="font-semibold">{queue.length}</span> to go
-              {counts && counts.unsure > 0 && <span className="text-slate-400"> · {counts.unsure} the app wasn’t sure about</span>}
+              {counts && counts.unsure > 0 && <span className="text-ink-faint"> · {counts.unsure} the app wasn’t sure about</span>}
             </p>
             {likely > 1 && (
               <button
                 type="button"
                 onClick={() => void bulk(() => budgetApi.confirmLikely(reviewScope))}
-                className="shrink-0 text-xs font-medium text-slate-700 underline"
+                className="shrink-0 text-xs font-medium text-ink-soft underline"
               >
                 Confirm {likely} likely
               </button>
@@ -291,7 +293,7 @@ export default function ReviewScreen({
           )}
 
           {mode === 'list' && (
-            <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+            <ul className="mt-3 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {queue.slice(0, 200).map((t) => (
                 <ListRow
                   key={t.id}
@@ -313,13 +315,13 @@ export default function ReviewScreen({
             </ul>
           )}
           {mode === 'list' && queue.length > 200 && (
-            <p className="mt-2 text-center text-xs text-slate-400">Showing the first 200. Confirm some to see the rest.</p>
+            <p className="mt-2 text-center text-xs text-ink-faint">Showing the first 200. Confirm some to see the rest.</p>
           )}
         </>
       )}
       </>
       )}
-    </div>
+    </Page>
   )
 }
 
@@ -427,39 +429,41 @@ function ReviewCard({
 
   // The bank's description, unless it only repeats the store name.
   const showDescription = !!t.description && t.description.trim().toUpperCase() !== t.merchant.trim().toUpperCase()
+  // The history box below says the same thing in more detail, so the one-line reason steps aside for it.
+  const reason = context && context.history.length > 0 ? null : t.categoryReason
 
   return (
-    <article aria-label={`Review ${titleCase(t.merchant)}`} className="mt-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+    <article aria-label={`Review ${titleCase(t.merchant)}`} className="mt-2 rounded-3xl neu p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">{titleCase(t.merchant)}</h2>
-          <p className="truncate text-xs text-slate-500">
+          <p className="truncate text-xs text-ink-soft">
             {formatDay(t.date)} · {t.accountName}
           </p>
         </div>
         <div className="shrink-0 text-right">
-          <p className={`text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</p>
+          <p className={`text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>{formatSigned(t.amountCents)}</p>
           <StatusTag t={t} />
         </div>
       </div>
-      {(showDescription || t.categoryReason) && (
-        <p className="mt-1.5 break-words text-xs text-slate-500">
-          {showDescription && <span className="text-slate-400">{t.description}</span>}
-          {showDescription && t.categoryReason && ' · '}
-          {t.categoryReason}
+      {(showDescription || reason) && (
+        <p className="mt-1.5 break-words text-xs text-ink-soft">
+          {showDescription && <span className="text-ink-faint">{t.description}</span>}
+          {showDescription && reason && ' · '}
+          {reason}
         </p>
       )}
       {t.isPartnerTransfer && t.kind === 'PartnerTransfer' && (
-        <p className="mt-1.5 text-xs text-slate-500">Not counted anywhere until you say what it was for.</p>
+        <p className="mt-1.5 text-xs text-ink-soft">Not counted anywhere until you say what it was for.</p>
       )}
-      {older && <p className="mt-1.5 text-xs text-slate-500">This is older than the months your budget is built from, so it doesn’t affect your budget.</p>}
+      {older && <p className="mt-1.5 text-xs text-ink-soft">Too old to affect your budget.</p>}
       {context && context.history.length > 0 && (
-        <p className="mt-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+        <p className="mt-2 rounded-lg neu-inset px-3 py-1.5 text-xs text-ink-soft">
           You’ve filed {titleCase(t.merchant)} as{' '}
           {context.history.map((h, i) => (
             <span key={h.categoryName}>
               {i > 0 && (i === context.history.length - 1 ? ' and ' : ', ')}
-              <span className="font-medium text-slate-700">{h.categoryName}</span> {h.count === 1 ? 'once' : `${h.count} times`}
+              <span className="font-medium text-ink-soft">{h.categoryName}</span> {h.count === 1 ? 'once' : `${h.count} times`}
             </span>
           ))}
           .
@@ -468,7 +472,7 @@ function ReviewCard({
 
       {partnerIn && (
         <fieldset className="mt-3">
-          <legend className="text-sm font-medium text-slate-700">What was this from {first}?</legend>
+          <legend className="text-sm font-medium text-ink-soft">What was this from {first}?</legend>
           <div className="mt-2 grid gap-2">
             {(
               [
@@ -478,12 +482,12 @@ function ReviewCard({
             ).map(([value, label, hint]) => (
               <label
                 key={value}
-                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ring-1 ${mode === value ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white ring-slate-200'}`}
+                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ${mode === value ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu'}`}
               >
                 <input type="radio" name={`purpose-${t.id}`} checked={mode === value} onChange={() => setMode(value)} className="sr-only" />
                 <span>
                   <span className="block text-sm font-semibold">{label}</span>
-                  <span className={`block text-xs ${mode === value ? 'text-slate-300' : 'text-slate-500'}`}>{hint}</span>
+                  <span className={`block text-xs ${mode === value ? 'text-ink-faint' : 'text-ink-soft'}`}>{hint}</span>
                 </span>
               </label>
             ))}
@@ -494,7 +498,7 @@ function ReviewCard({
       {needsCategory && (
         <>
           <fieldset className="mt-3">
-            <legend className="text-xs font-medium text-slate-700">
+            <legend className="text-xs font-medium text-ink-soft">
               {partnerIn ? 'It paid you back for' : partnerOut ? `Your share of what ${first} paid for` : 'What was it?'}
             </legend>
             {/* One row of four, so the categories start higher up. */}
@@ -506,7 +510,7 @@ function ReviewCard({
                   aria-pressed={group === g.type}
                   aria-label={g.label}
                   onClick={() => chooseGroup(g.type)}
-                  className={`rounded-lg px-1 py-2 text-xs font-semibold ring-1 ${group === g.type ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu text-ink-soft'}`}
                 >
                   {g.short}
                 </button>
@@ -515,7 +519,7 @@ function ReviewCard({
           </fieldset>
 
           <fieldset className="mt-3">
-            <legend className="text-xs font-medium text-slate-700">{groups.find((g) => g.type === group)!.pick}</legend>
+            <legend className="text-xs font-medium text-ink-soft">{groups.find((g) => g.type === group)!.pick}</legend>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {inGroup.map((c) => (
                 <button
@@ -523,7 +527,7 @@ function ReviewCard({
                   type="button"
                   aria-pressed={c.id === categoryId}
                   onClick={() => setCategoryId(c.id)}
-                  className={`rounded-full px-3 py-1 text-sm ring-1 ${c.id === categoryId ? 'bg-slate-900 font-semibold text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-coral shadow-neu-sm font-semibold text-coral-ink' : 'neu text-ink-soft'}`}
                 >
                   {c.name}
                 </button>
@@ -531,9 +535,7 @@ function ReviewCard({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="rounded-full px-3 py-1 text-sm font-semibold"
-                // Green so it stands out from the categories; fixed colors so the dark theme doesn't swap them.
-                style={{ backgroundColor: '#16a34a', color: '#fff' }}
+                className="neu-sm rounded-full px-3 py-1 text-sm font-semibold text-coral"
               >
                 + New category
               </button>
@@ -556,11 +558,11 @@ function ReviewCard({
       )}
 
       {needsCategory && selected && !t.isPartnerTransfer && (
-        <label className="mt-3 flex items-center gap-2.5 rounded-lg bg-slate-50 px-3 py-2">
+        <label className="mt-3 flex items-center gap-2.5 rounded-lg neu-inset px-3 py-2">
           <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="size-4 shrink-0" />
           <span className="text-xs">
             Always {selected.name} for {titleCase(t.merchant)}
-            <span className="text-slate-500"> (leave off where it varies, like a supercenter)</span>
+            <span className="text-ink-soft"> (leave off where it varies, like a supercenter)</span>
           </span>
         </label>
       )}
@@ -569,7 +571,7 @@ function ReviewCard({
         type="button"
         disabled={busy || (partnerIn && !mode) || (needsCategory && !categoryId)}
         onClick={() => void save()}
-        className="mt-3 w-full rounded-xl bg-slate-900 py-3 text-base font-semibold text-white disabled:opacity-40"
+        className="mt-3 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-40 text-sm"
       >
         {busy
           ? 'Saving…'
@@ -582,10 +584,10 @@ function ReviewCard({
                 : 'Pick a category'}
       </button>
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-xl bg-white py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
+        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-2xl neu py-2 text-sm font-medium text-ink-soft">
           I don’t remember
         </button>
-        <button type="button" onClick={onSkip} className="rounded-xl bg-white py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200">
+        <button type="button" onClick={onSkip} className="rounded-2xl neu py-2 text-sm font-medium text-ink-soft">
           Skip for now
         </button>
       </div>
@@ -605,9 +607,9 @@ const groups: { type: Category['type']; label: string; short: string; pick: stri
 function StatusTag({ t }: { t: Transaction }) {
   const name = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Money from your partner' : null)
   return name ? (
-    <span className="inline-block rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700 ring-1 ring-orange-200">{name}?</span>
+    <span className="inline-block rounded-full neu-inset px-2.5 py-0.5 text-xs font-semibold text-gold-ink">{name}?</span>
   ) : (
-    <span className="inline-block rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-semibold text-red-700 ring-1 ring-red-100">No category</span>
+    <span className="inline-block rounded-full neu-inset px-2.5 py-0.5 text-xs font-semibold text-danger">No category</span>
   )
 }
 
@@ -630,19 +632,19 @@ function NewCategory({
   const fallback = type === 'FixedBill' ? suggestion : ''
   const kind = groups.find((g) => g.type === type)!.label.toLowerCase()
   return (
-    <div className="mt-3 rounded-xl bg-slate-50 p-3">
+    <div className="mt-3 rounded-xl neu-inset p-3">
       <label className="block">
-        <span className="text-xs text-slate-500">New {kind} category</span>
+        <span className="text-xs text-ink-soft">New {kind} category</span>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={fallback || 'e.g. Household'}
           maxLength={100}
-          className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base"
+          className="mt-1 block w-full rounded-xl neu-inset px-3 py-2 text-base"
         />
       </label>
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={onCancel} className="flex-1 rounded-lg bg-white py-2 text-sm font-medium ring-1 ring-slate-200">
+        <button type="button" onClick={onCancel} className="flex-1 rounded-2xl neu py-2 text-sm font-medium">
           Cancel
         </button>
         <button
@@ -658,7 +660,7 @@ function NewCategory({
               setBusy(false)
             }
           }}
-          className="flex-1 rounded-lg bg-slate-900 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-40"
         >
           Add
         </button>
@@ -671,12 +673,12 @@ function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void;
   const label = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Contribution' : null)
   return (
     <li className="flex items-center gap-2 pr-2">
-      <button type="button" onClick={onOpen} className="min-w-0 flex-1 px-4 py-3 text-left hover:bg-slate-50">
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 px-4 py-3 text-left">
         <div className="flex items-baseline justify-between gap-3">
           <span className="truncate text-sm font-medium">{titleCase(t.merchant)}</span>
-          <span className={`shrink-0 text-sm tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>{formatSigned(t.amountCents)}</span>
+          <span className={`shrink-0 text-sm tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>{formatSigned(t.amountCents)}</span>
         </div>
-        <p className="mt-0.5 flex items-center gap-2 truncate text-xs text-slate-500">
+        <p className="mt-0.5 flex items-center gap-2 truncate text-xs text-ink-soft">
           {formatDay(t.date)} <StatusTag t={t} />
         </p>
       </button>
@@ -685,12 +687,12 @@ function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void;
           type="button"
           onClick={onConfirm}
           aria-label={`${label} is right for ${titleCase(t.merchant)}`}
-          className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+          className="shrink-0 rounded-full neu-inset px-3 py-1.5 text-xs font-semibold text-good"
         >
           ✓ Right
         </button>
       ) : (
-        <button type="button" onClick={onOpen} className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">
+        <button type="button" onClick={onOpen} className="shrink-0 rounded-full neu-sm px-3 py-1.5 text-xs font-semibold text-ink-soft">
           Sort
         </button>
       )}

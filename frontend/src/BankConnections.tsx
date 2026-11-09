@@ -3,11 +3,13 @@ import { usePlaidLink } from 'react-plaid-link'
 import { plaidApi, type AccountMapping, type LinkResult, type PlaidConfig, type PlaidItem, type SyncResult } from './api'
 import { formatTime } from './format'
 
+const chip = 'neu-sm rounded-full px-3.5 py-1.5 text-ink'
+
 const statusBadge: Record<PlaidItem['status'], { label: string; cls: string }> = {
-  Active: { label: 'Connected', cls: 'bg-emerald-100 text-emerald-800' },
-  PendingSetup: { label: 'Needs setup', cls: 'bg-amber-100 text-amber-800' },
-  LoginRequired: { label: 'Sign in again', cls: 'bg-red-100 text-red-800' },
-  Error: { label: 'Error', cls: 'bg-red-100 text-red-800' },
+  Active: { label: 'Connected', cls: 'neu-inset text-good' },
+  PendingSetup: { label: 'Needs setup', cls: 'neu-inset text-gold-ink' },
+  LoginRequired: { label: 'Sign in again', cls: 'neu-inset text-danger' },
+  Error: { label: 'Error', cls: 'neu-inset text-danger' },
 }
 
 function describe(r: SyncResult): string {
@@ -20,7 +22,7 @@ function describe(r: SyncResult): string {
   return `${r.institutionName ?? 'Bank'}: ${parts.join(', ')}`
 }
 
-/** "Bank connections" card on the More screen (SPEC sections 4.1 and 4.9). */
+/** More → Bank connections (SPEC sections 4.1 and 4.9). */
 export default function BankConnections({ onChanged }: { onChanged: () => void }) {
   const [config, setConfig] = useState<PlaidConfig | null>(null)
   const [items, setItems] = useState<PlaidItem[]>([])
@@ -69,7 +71,7 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
     const url = new URL(window.location.href)
     if (!url.pathname.startsWith('/plaid-oauth')) return
     const returned = url.origin + url.pathname + url.search
-    window.history.replaceState(null, '', '/#/more')
+    window.history.replaceState(null, '', '/#/more/banks')
     if (!url.searchParams.has('oauth_state_id')) return
     void (async () => {
       try {
@@ -193,45 +195,34 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
   if (!config) return null
 
   return (
-    <section aria-labelledby="banks-h" className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 id="banks-h" className="font-semibold">
-          Bank connections
-        </h2>
-        {config.enabled && config.environment !== 'production' && (
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Plaid {config.environment}</span>
-        )}
-      </div>
-
+    <section aria-label="Bank connections" className="mt-6">
       {!config.enabled ? (
-        <p className="mt-1 text-sm text-slate-500">Plaid isn't set up on this server. Use CSV import below instead.</p>
+        <p className="neu rounded-3xl px-5 py-4 text-sm text-ink-soft">Bank sync isn’t set up here. Use Import a CSV instead.</p>
       ) : (
         <>
-          <p className="mt-1 text-sm text-slate-500">Connect checking, savings and credit cards to sync automatically. The app never sees your bank password.</p>
-
           {items.length > 0 && (
-            <ul className="mt-3 divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200">
+            <ul className="space-y-4">
               {items.map((i) => (
-                <li key={i.id} className="px-3 py-3">
+                <li key={i.id} className="neu rounded-3xl px-5 py-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-medium">{i.institutionName ?? 'Bank'}</p>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge[i.status].cls}`}>
+                    <p className="truncate font-semibold">{i.institutionName ?? 'Bank'}</p>
+                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusBadge[i.status].cls}`}>
                       {statusBadge[i.status].label}
                     </span>
                   </div>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs text-ink-soft">
                     {i.accounts.length > 0 ? i.accounts.join(', ') : 'No accounts imported'}
                     {i.lastSyncedUtc && ` · synced ${formatTime(i.lastSyncedUtc)}`}
                   </p>
-                  {i.statusMessage && <p className="mt-1 text-xs text-red-700">{i.statusMessage}</p>}
-                  <div className="mt-2 flex flex-wrap gap-3 text-sm font-medium">
+                  {i.statusMessage && <p className="mt-1 text-xs text-danger">{i.statusMessage}</p>}
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
                     {(i.status === 'LoginRequired' || i.status === 'Error') && (
-                      <button type="button" onClick={() => connect(i.id)} className="text-slate-900 underline">
+                      <button type="button" onClick={() => connect(i.id)} className="rounded-full bg-coral px-3.5 py-1.5 text-coral-ink shadow-neu-sm">
                         Reconnect
                       </button>
                     )}
                     {i.status === 'Active' && (
-                      <button type="button" disabled={busy !== null} onClick={() => connect(i.id, true)} className="text-slate-900 underline">
+                      <button type="button" disabled={busy !== null} onClick={() => connect(i.id, true)} className={chip}>
                         Add accounts
                       </button>
                     )}
@@ -240,20 +231,18 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                         type="button"
                         disabled={busy !== null}
                         onClick={() => void run('Checking your accounts…', () => showAccounts(i.id))}
-                        className="text-slate-900 underline"
+                        className={chip}
                       >
                         Import accounts
                       </button>
                     )}
                     {config.sandboxShortcut && i.status === 'Active' && (
-                      <button type="button" onClick={() => refreshSandbox(i)} className="text-slate-600">
-                        Simulate new activity
+                      <button type="button" onClick={() => refreshSandbox(i)} className={chip}>
+                        Simulate activity
                       </button>
                     )}
-                  </div>
-                  {/* "Refresh categories from bank" moved to Budget → Categories (DECISIONS.md 176). */}
-                  <div className="mt-3 grid gap-2">
-                    <button type="button" onClick={() => remove(i)} className="w-full rounded-xl py-2.5 text-sm font-semibold text-red-600 ring-1 ring-red-200">
+                    {/* "Refresh categories from bank" moved to Budget → Categories (DECISIONS.md 176). */}
+                    <button type="button" onClick={() => remove(i)} className={`${chip} text-danger!`}>
                       Disconnect
                     </button>
                   </div>
@@ -262,37 +251,40 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
             </ul>
           )}
 
-          <div className="mt-3 flex flex-col gap-2">
+          <div className={`flex flex-col gap-3 ${items.length > 0 ? 'mt-6' : ''}`}>
             <button
               type="button"
               disabled={busy !== null}
               onClick={() => connect()}
-              className="w-full rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50"
+              className="w-full rounded-2xl bg-coral py-3 text-sm font-semibold text-coral-ink shadow-neu-sm disabled:opacity-50"
             >
               Connect a bank
             </button>
             {items.length > 0 && (
-              <button type="button" disabled={busy !== null} onClick={syncNow} className="w-full rounded-xl bg-slate-100 py-3 font-semibold disabled:opacity-50">
+              <button type="button" disabled={busy !== null} onClick={syncNow} className="neu w-full rounded-2xl py-3 text-sm font-semibold disabled:opacity-50">
                 Sync now
               </button>
             )}
             {config.sandboxShortcut && (
-              <button type="button" disabled={busy !== null} onClick={sandbox} className="text-sm font-medium text-slate-600 underline disabled:opacity-50">
+              <button type="button" disabled={busy !== null} onClick={sandbox} className="text-xs font-medium text-ink-soft underline disabled:opacity-50">
                 Add Plaid's sandbox test bank (dev only)
               </button>
             )}
           </div>
+          <p className="mt-3 text-center text-xs text-ink-faint">
+            Through Plaid{config.environment !== 'production' ? ` (${config.environment})` : ''}. The app never sees your bank password.
+          </p>
         </>
       )}
 
-      {busy && <p className="mt-3 text-sm text-slate-500">{busy}</p>}
+      {busy && <p className="mt-3 text-sm text-ink-soft">{busy}</p>}
       {message && (
-        <p role="status" className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p role="status" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {message}
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
@@ -325,18 +317,18 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
 function DuplicateBank({ name, onAddThere, onKeepBoth }: { name: string; onAddThere: () => void; onKeepBoth: () => void }) {
   return (
     <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/40">
-      <div role="dialog" aria-modal="true" aria-labelledby="dup-h" className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+      <div role="dialog" aria-modal="true" aria-labelledby="dup-h" className="w-full max-w-md rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
         <h2 id="dup-h" className="text-lg font-semibold">
           {name} is already connected
         </h2>
-        <p className="mt-1 text-sm text-slate-600">
+        <p className="mt-1 text-sm text-ink-soft">
           To add an account there, like a new savings account, add it to your existing {name} connection. This extra connection will be removed, and
           Plaid will open so you can tick the new account.
         </p>
-        <button type="button" onClick={onAddThere} className="mt-4 w-full rounded-xl bg-slate-900 py-3 font-semibold text-white">
+        <button type="button" onClick={onAddThere} className="mt-4 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink text-sm">
           Add accounts to my {name} connection
         </button>
-        <button type="button" onClick={onKeepBoth} className="mt-2 w-full rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-700">
+        <button type="button" onClick={onKeepBoth} className="mt-2 w-full rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
           This is a different login (keep both)
         </button>
       </div>
@@ -377,32 +369,32 @@ function AccountSetup({ setup, onDone }: { setup: LinkResult; onDone: (r: SyncRe
         role="dialog"
         aria-modal="true"
         aria-labelledby="setup-h"
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <h2 id="setup-h" className="text-lg font-semibold">
           {setup.institutionName ?? 'Your bank'} is connected
         </h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-ink-soft">
           Choose what to import. If you already imported CSVs for an account, link it to that account so nothing is counted twice.
         </p>
         <ul className="mt-4 space-y-3">
           {setup.accounts.map((a) => {
             const sameType = setup.existingAccounts.filter((e) => e.type === a.accountType)
             return (
-              <li key={a.plaidAccountId} className="rounded-xl bg-slate-50 p-3">
+              <li key={a.plaidAccountId} className="rounded-xl neu-inset p-3">
                 <p className="text-sm font-medium">
                   {a.name}
-                  {a.mask && <span className="text-slate-500"> ••{a.mask}</span>}
+                  {a.mask && <span className="text-ink-soft"> ••{a.mask}</span>}
                 </p>
-                <p className="text-xs text-slate-500">{a.subtype ?? a.type}</p>
+                <p className="text-xs text-ink-soft">{a.subtype ?? a.type}</p>
                 {a.accountType === null ? (
-                  <p className="mt-1 text-xs text-slate-500">Not tracked by the budget (loans and investments come later).</p>
+                  <p className="mt-1 text-xs text-ink-soft">Not tracked by the budget (loans and investments come later).</p>
                 ) : (
                   <select
                     aria-label={`Import ${a.name} as`}
                     value={choices[a.plaidAccountId]}
                     onChange={(e) => setChoices({ ...choices, [a.plaidAccountId]: e.target.value })}
-                    className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    className="mt-2 block w-full rounded-2xl neu-inset px-4 py-3 text-sm"
                   >
                     <option value="new">Import as a new account</option>
                     {sameType.map((e) => (
@@ -419,7 +411,7 @@ function AccountSetup({ setup, onDone }: { setup: LinkResult; onDone: (r: SyncRe
           })}
         </ul>
         {error && (
-          <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {error}
           </p>
         )}
@@ -427,7 +419,7 @@ function AccountSetup({ setup, onDone }: { setup: LinkResult; onDone: (r: SyncRe
           type="button"
           disabled={busy}
           onClick={save}
-          className="mt-5 w-full rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50"
+          className="mt-5 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
         >
           {busy ? 'Importing transactions…' : 'Import and sync'}
         </button>

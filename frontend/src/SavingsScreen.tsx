@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
 import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading } from './ui'
+import { Caret, ErrorNotice, Loading, Page, PageHeader } from './ui'
 import { centsToInput, formatCents, formatDay, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -64,13 +64,10 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <a href="#/payday" className="text-sm font-medium text-slate-500">
-        ‹ Plan
-      </a>
-      <h1 className="mt-1 text-2xl font-bold tracking-tight">Savings</h1>
+    <Page>
+      <PageHeader title="Savings" back={{ href: '#/payday', label: 'Plan' }} />
       {notice && (
-        <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <p role="status" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
         </p>
       )}
@@ -79,28 +76,28 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
 
       {s && (
         <>
-          <section aria-label="Total" className="mt-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">You’ve saved</p>
+          <section aria-label="Total" className="mt-4 rounded-3xl neu p-5">
+            <p className="text-sm text-ink-soft">You’ve saved</p>
             <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.totalSavedCents)}</p>
             {s.accounts.length === 0 && (
-              <p className="mt-2 text-xs text-slate-500">No savings account yet. Connect it in More → Bank connections (Add accounts or Import accounts on your bank) to see its balance here and have goals follow it.</p>
+              <p className="mt-2 text-xs text-ink-soft">No savings account yet. Add it in More → Bank connections, or import its CSV.</p>
             )}
           </section>
 
           {s.accounts.length > 0 && (
             <section aria-labelledby="accts-h" className="mt-4">
-              <h2 id="accts-h" className="text-sm font-semibold text-slate-700">
+              <h2 id="accts-h" className="px-1 text-sm font-semibold text-ink-soft">
                 Savings accounts
               </h2>
-              <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+              <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
                 {s.accounts.map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">
                         {a.name}
-                        {a.mask && <span className="text-slate-400"> ••{a.mask}</span>}
+                        {a.mask && <span className="text-ink-faint"> ••{a.mask}</span>}
                       </span>
-                      <span className="block text-xs text-slate-500">
+                      <span className="block text-xs text-ink-soft">
                         {a.paceCents > 0 ? `About ${formatCents(a.paceCents)} a month going in lately` : 'No regular deposits lately'}
                         {a.balanceFromBank ? ' · from your bank' : ''}
                       </span>
@@ -122,7 +119,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
           <TransfersCard s={s} />
 
           <section aria-labelledby="goals-h" className="mt-6">
-            <h2 id="goals-h" className="text-sm font-semibold text-slate-700">
+            <h2 id="goals-h" className="px-1 text-sm font-semibold text-ink-soft">
               Goals
             </h2>
             <ul className="mt-2 space-y-2">
@@ -132,7 +129,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
                 </li>
               ))}
             </ul>
-            <button type="button" onClick={() => setEditing(null)} className="mt-2 w-full rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
+            <button type="button" onClick={() => setEditing(null)} className="mt-2 w-full rounded-2xl neu py-3 text-sm font-medium">
               + Add a goal
             </button>
           </section>
@@ -140,23 +137,23 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
           {s.history.some((p) => p.balanceCents !== 0) && <SavingsChart points={s.history} />}
 
           <section aria-labelledby="prio-h" className="mt-6">
-            <h2 id="prio-h" className="text-sm font-semibold text-slate-700">
+            <h2 id="prio-h" className="px-1 text-sm font-semibold text-ink-soft">
               Where money left over goes
             </h2>
-            <p className="text-xs text-slate-500">When you build a budget, what’s left after spending, bills and minimums goes in this order.</p>
-            <ol className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+            <p className="px-1 text-xs text-ink-faint">What’s left after spending, bills and minimums.</p>
+            <ol className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {s.priority.map((p, i) => (
                 <li key={p} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="w-5 text-sm font-semibold tabular-nums text-slate-400">{i + 1}</span>
+                  <span className="w-5 text-sm font-semibold tabular-nums text-ink-faint">{i + 1}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium">{stepLabel[p].title}</span>
-                    <span className="block text-xs text-slate-500">{stepLabel[p].hint}</span>
+                    <span className="block text-xs text-ink-soft">{stepLabel[p].hint}</span>
                   </span>
                   <span className="flex shrink-0 gap-1">
-                    <button type="button" aria-label={`Move ${stepLabel[p].title} up`} disabled={i === 0} onClick={() => move(i, -1)} className="rounded-lg px-2 py-1 text-slate-600 ring-1 ring-slate-200 disabled:opacity-30">
+                    <button type="button" aria-label={`Move ${stepLabel[p].title} up`} disabled={i === 0} onClick={() => move(i, -1)} className="rounded-lg px-2 py-1 text-ink-soft disabled:opacity-30">
                       ↑
                     </button>
-                    <button type="button" aria-label={`Move ${stepLabel[p].title} down`} disabled={i === s.priority.length - 1} onClick={() => move(i, 1)} className="rounded-lg px-2 py-1 text-slate-600 ring-1 ring-slate-200 disabled:opacity-30">
+                    <button type="button" aria-label={`Move ${stepLabel[p].title} down`} disabled={i === s.priority.length - 1} onClick={() => move(i, 1)} className="rounded-lg px-2 py-1 text-ink-soft disabled:opacity-30">
                       ↓
                     </button>
                   </span>
@@ -177,32 +174,32 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
           onRemove={editing && !editing.isStarter ? () => act(() => savingsApi.removeGoal(editing.id), `Removed ${editing.name}.`) : undefined}
         />
       )}
-    </div>
+    </Page>
   )
 }
 
 function GoalCard({ g, onOpen }: { g: SavingsGoal; onOpen: () => void }) {
   return (
-    <button type="button" onClick={onOpen} className="block w-full rounded-2xl bg-white p-4 text-left ring-1 ring-slate-200">
+    <button type="button" onClick={onOpen} className="block w-full rounded-3xl neu p-4 text-left">
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate font-semibold">{g.name}</span>
         <span className="shrink-0 text-sm tabular-nums">
-          <span className="font-semibold">{formatCents(g.savedCents)}</span> <span className="text-slate-500">of {formatCents(g.targetCents)}</span>
+          <span className="font-semibold">{formatCents(g.savedCents)}</span> <span className="text-ink-soft">of {formatCents(g.targetCents)}</span>
         </span>
       </div>
-      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden>
-        <div className={`h-full rounded-full ${g.reached ? 'bg-emerald-600' : 'bg-sky-700'}`} style={{ width: `${g.percent}%` }} />
+      <div className="mt-2 h-2 overflow-hidden rounded-full neu-inset" aria-hidden>
+        <div className={`h-full rounded-full ${g.reached ? 'bg-good' : 'bg-gold'}`} style={{ width: `${g.percent}%` }} />
       </div>
-      <p className="mt-1.5 text-xs text-slate-500">
+      <p className="mt-1.5 text-xs text-ink-soft">
         {g.reached ? (
-          <span className="font-medium text-emerald-700">Reached</span>
+          <span className="font-medium text-good">Reached</span>
         ) : g.projectedDate ? (
           <>
-            On track for <span className="font-medium text-slate-700">{formatMonth(g.projectedDate)}</span> at {formatCents(g.monthlyCents)} a month
+            On track for <span className="font-medium text-ink-soft">{formatMonth(g.projectedDate)}</span> at {formatCents(g.monthlyCents)} a month
             {g.monthlySource === 'pace' ? ' (your pace lately)' : ''}
           </>
         ) : (
-          <span className="text-amber-600">Add a monthly amount to see when you’ll get there</span>
+          <span className="text-gold-ink">Add a monthly amount to see when you’ll get there</span>
         )}
         {g.accountName ? ` · in ${g.accountName}` : ' · tracked by hand'}
       </p>
@@ -228,8 +225,8 @@ function BalanceEditor({ cents, onSave }: { cents: number; onSave: (cents: numbe
         if (parsed !== null) onSave(parsed)
       }}
     >
-      <input aria-label="Balance" value={value} onChange={(e) => setValue(e.target.value)} inputMode="decimal" className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-sm tabular-nums" />
-      <button type="submit" disabled={parsed === null} className="rounded-lg bg-slate-900 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40">
+      <input aria-label="Balance" value={value} onChange={(e) => setValue(e.target.value)} inputMode="decimal" className="w-24 rounded-xl neu-inset px-2 py-1 text-right text-sm tabular-nums" />
+      <button type="submit" disabled={parsed === null} className="rounded-lg bg-coral shadow-neu-sm px-2 py-1 text-xs font-semibold text-coral-ink disabled:opacity-40">
         Save
       </button>
     </form>
@@ -258,11 +255,11 @@ function SavingsChart({ points }: { points: { date: string; balanceCents: number
   }
 
   return (
-    <figure className="mt-6 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <figure className="mt-6 rounded-3xl neu p-4">
       <figcaption className="flex items-baseline justify-between gap-3">
         <span className="text-sm font-semibold">Saved over the last year</span>
-        <span className="text-xs tabular-nums text-slate-500" aria-live="polite">
-          {h ? `${formatMonth(h.date)}: ${formatCents(Math.max(0, h.balanceCents))}` : 'Hover or touch for a month'}
+        <span className="text-xs tabular-nums text-ink-soft" aria-live="polite">
+          {h ? `${formatMonth(h.date)}: ${formatCents(Math.max(0, h.balanceCents))}` : ''}
         </span>
       </figcaption>
       <svg
@@ -312,7 +309,7 @@ function shortMoney(cents: number) {
   return d >= 1000 ? `$${(d / 1000).toFixed(d % 1000 === 0 ? 0 : 1)}k` : `$${Math.round(d)}`
 }
 
-const inputCls = 'mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base'
+const inputCls = 'mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base'
 
 function GoalSheet({
   goal,
@@ -354,22 +351,22 @@ function GoalSheet({
         aria-labelledby="goal-h"
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <h2 id="goal-h" className="text-lg font-semibold">
           {goal ? goal.name : 'Add a goal'}
         </h2>
-        {goal?.isStarter && <p className="text-xs text-slate-500">Your starter emergency fund. It comes first in your priorities unless you change them.</p>}
+        {goal?.isStarter && <p className="text-xs text-ink-soft">Your starter emergency fund. It comes first unless you reorder.</p>}
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Name</span>
+          <span className="text-sm font-medium text-ink-soft">Name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Trip" className={inputCls} />
         </label>
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Target</span>
+          <span className="text-sm font-medium text-ink-soft">Target</span>
           <Money value={target} onChange={setTarget} label="Target" />
         </label>
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Progress comes from</span>
+          <span className="text-sm font-medium text-ink-soft">Progress comes from</span>
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className={inputCls}>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -381,30 +378,30 @@ function GoalSheet({
         </label>
         {!accountId && (
           <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Saved so far</span>
+            <span className="text-sm font-medium text-ink-soft">Saved so far</span>
             <Money value={saved} onChange={setSaved} label="Saved so far" />
           </label>
         )}
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Each month (optional)</span>
+          <span className="text-sm font-medium text-ink-soft">Each month (optional)</span>
           <Money value={monthly} onChange={setMonthly} label="Monthly amount" />
-          <span className="mt-1 block text-xs text-slate-500">Leave empty to use your actual pace into its account.</span>
+          <span className="mt-1 block text-xs text-ink-soft">Leave empty to use your actual pace into its account.</span>
         </label>
         {err && (
-          <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {err}
           </p>
         )}
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-slate-100 py-3 font-semibold text-slate-700">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
             Cancel
           </button>
-          <button type="submit" className="flex-1 rounded-xl bg-slate-900 py-3 font-semibold text-white">
+          <button type="submit" className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink text-sm">
             Save
           </button>
         </div>
         {onRemove && (
-          <button type="button" onClick={onRemove} className="mt-3 w-full py-2 text-sm font-medium text-red-600">
+          <button type="button" onClick={onRemove} className="mt-3 w-full py-2 text-sm font-medium text-danger">
             Remove this goal
           </button>
         )}
@@ -416,7 +413,7 @@ function GoalSheet({
 function Money({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
   return (
     <div className={`${inputCls} flex items-center`}>
-      <span className="text-sm text-slate-500">$</span>
+      <span className="text-sm text-ink-soft">$</span>
       <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" className="w-full bg-transparent px-1 text-right tabular-nums outline-none" />
     </div>
   )
@@ -428,7 +425,7 @@ function TransfersCard({ s }: { s: SavingsSummary }) {
   const list = s.transfers ?? []
   const pct = s.plannedCents > 0 ? Math.min(100, Math.round((s.thisMonthCents * 100) / s.plannedCents)) : 0
   return (
-    <section aria-labelledby="moved-h" className="mt-6 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <section aria-labelledby="moved-h" className="mt-6 rounded-3xl neu p-4">
       <h2 id="moved-h">
         <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
           <span className="flex items-center gap-1 text-sm font-semibold">
@@ -437,30 +434,30 @@ function TransfersCard({ s }: { s: SavingsSummary }) {
           </span>
           <span className="text-sm font-semibold tabular-nums">
             {formatCents(s.thisMonthCents)}
-            {s.plannedCents > 0 && <span className="font-normal text-slate-500"> of {formatCents(s.plannedCents)}</span>}
+            {s.plannedCents > 0 && <span className="font-normal text-ink-soft"> of {formatCents(s.plannedCents)}</span>}
           </span>
         </button>
       </h2>
       {s.plannedCents > 0 && (
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden>
-          <div className="h-full rounded-full bg-emerald-600" style={{ width: `${pct}%` }} />
+        <div className="mt-2 h-2 overflow-hidden rounded-full neu-inset" aria-hidden>
+          <div className="h-full rounded-full bg-good" style={{ width: `${pct}%` }} />
         </div>
       )}
-      <p className="mt-1.5 text-xs text-slate-500">Tracked from your accounts automatically. {s.plannedCents > 0 ? 'The goal is what this month’s budget plans for savings.' : ''}</p>
+      <p className="mt-1.5 text-xs text-ink-soft">{s.plannedCents > 0 ? 'Out of what this month’s budget plans for savings.' : 'Tracked from your accounts.'}</p>
       {open &&
         (list.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">No transfers into savings seen yet.</p>
+          <p className="mt-2 text-sm text-ink-soft">No transfers into savings seen yet.</p>
         ) : (
-          <ul className="mt-2 divide-y divide-slate-100 text-sm">
+          <ul className="mt-2 divide-y divide-ink/[0.07] text-sm">
             {list.map((t, i) => (
               <li key={t.date + t.cents + i} className="flex items-center justify-between gap-3 py-2">
                 <span className="min-w-0">
                   <span className="block truncate">{t.description}</span>
-                  <span className="block text-xs text-slate-500">
+                  <span className="block text-xs text-ink-soft">
                     {formatDay(t.date)} · {t.account}
                   </span>
                 </span>
-                <span className="shrink-0 font-semibold tabular-nums text-emerald-700">+{formatCents(t.cents)}</span>
+                <span className="shrink-0 font-semibold tabular-nums text-good">+{formatCents(t.cents)}</span>
               </li>
             ))}
           </ul>

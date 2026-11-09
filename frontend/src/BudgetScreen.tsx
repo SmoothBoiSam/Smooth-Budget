@@ -17,7 +17,7 @@ import {
   type Transaction,
 } from './api'
 import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading } from './ui'
+import { Caret, ErrorNotice, Loading, Notice, Page, PageHeader, headerActionCls } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
@@ -43,11 +43,11 @@ function viewFromHash(): View {
   return { kind: 'overview' }
 }
 
-const healthBar: Record<Health, string> = { onTrack: 'bg-emerald-500', low: 'bg-amber-500', over: 'bg-red-500' }
+const healthBar: Record<Health, string> = { onTrack: 'bg-good', low: 'bg-gold', over: 'bg-danger' }
 const statusText: Record<BudgetSummary['status'], string> = {
-  healthy: 'text-emerald-600',
-  low: 'text-amber-500',
-  overspent: 'text-red-600',
+  healthy: 'text-good',
+  low: 'text-gold-ink',
+  overspent: 'text-danger',
 }
 
 export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: () => void; onSignedOut: () => void }) {
@@ -133,42 +133,32 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
     view.kind === 'category' ? summary?.groups.flatMap((g) => g.categories).find((c) => c.id === view.id) : undefined
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      {view.kind === 'overview' ? (
-        <header>
-          <h1 className="text-2xl font-bold tracking-tight">Budget</h1>
-          {summary && (
-            <p className="text-sm text-slate-500">
-              {summary.budgetMonth.label} · {formatDay(summary.budgetMonth.start)} – {formatDay(summary.budgetMonth.end)}
-            </p>
-          )}
-        </header>
-      ) : (
-        <header>
-          <a href={view.kind === 'all' ? '#/' : '#/budget'} className="text-sm font-medium text-slate-500">
-            {view.kind === 'all' ? '‹ Home' : '‹ Budget'}
-          </a>
-          <div className="mt-1 flex items-center justify-between gap-3">
-            <h1 className="truncate text-2xl font-bold tracking-tight">
-              {view.kind === 'all'
-                ? 'Transactions'
-                : view.kind === 'plan'
-                  ? 'Budget settings'
-                  : view.kind === 'categories'
-                    ? 'Categories'
-                    : (line?.name ?? 'Category')}
-            </h1>
-            {view.kind === 'category' && line && (
-              <button type="button" onClick={() => setEditing(line)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-slate-200">
-                Edit
-              </button>
-            )}
-          </div>
-        </header>
-      )}
+    <Page>
+      <PageHeader
+        title={
+          view.kind === 'overview'
+            ? 'Budget'
+            : view.kind === 'all'
+              ? 'Transactions'
+              : view.kind === 'plan'
+                ? 'Budget settings'
+                : view.kind === 'categories'
+                  ? 'Categories'
+                  : (line?.name ?? 'Category')
+        }
+        sub={view.kind === 'overview' && summary ? `${summary.budgetMonth.label} · ${formatDay(summary.budgetMonth.start)} – ${formatDay(summary.budgetMonth.end)}` : undefined}
+        back={view.kind === 'overview' ? undefined : view.kind === 'all' ? { href: '#/', label: 'Home' } : { href: '#/budget', label: 'Budget' }}
+        action={
+          view.kind === 'category' && line ? (
+            <button type="button" onClick={() => setEditing(line)} className={headerActionCls}>
+              Edit
+            </button>
+          ) : undefined
+        }
+      />
 
       {notice && (
-        <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <p role="status" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
         </p>
       )}
@@ -217,7 +207,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         </>
       )}
       {summary && view.kind === 'category' && !line && (
-        <p className="mt-6 text-sm text-slate-500">This category no longer exists.</p>
+        <p className="mt-6 text-sm text-ink-soft">This category no longer exists.</p>
       )}
 
       {summary && view.kind === 'categories' && (
@@ -246,7 +236,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           auto={editing && summary?.auto ? { on: summary.auto.on, setByYou: summary.auto.setByYou.includes(editing.id) } : undefined}
         />
       )}
-    </div>
+    </Page>
   )
 }
 
@@ -254,31 +244,44 @@ function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; 
   // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
   return (
     <>
-      <p className="mt-3 text-sm text-slate-600">
+      <p className="mt-3 text-sm text-ink-soft">
         <span className={`font-semibold tabular-nums ${statusText[s.status]}`}>{formatCents(s.leftToSpendCents)}</span> left to spend ·{' '}
         {formatCents(s.totalVariableSpentCents)} of {formatCents(s.totalVariableLimitCents)} spent
         {s.carriedInDeficitCents > 0 && <> · {formatCents(s.carriedInDeficitCents)} carried over</>}
         {s.unfiledSpendingCents > 0 && <> · {formatCents(s.unfiledSpendingCents)} not filed yet</>}
         {s.cashShortCents > 0 && <> · {formatCents(s.cashShortCents)} more than your accounts cover</>}
       </p>
-      {s.overplannedCents > 0 && (
-        <a href="#/budget/plan" role="alert" className="mt-3 block rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          The plan is {formatCents(s.overplannedCents)} more than this month’s money, so that much comes off Left to Spend. Budget settings ›
+      {/* Managing the budget sits right under its numbers, one tap away (DECISIONS.md 169, 187). */}
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <a href="#/budget/categories" className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
+          Categories
         </a>
+        <a href="#/budget/plan" className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
+          Budget settings
+        </a>
+      </div>
+
+      {(s.overplannedCents > 0 || (s.auto?.on && s.auto.shortCents > 0) || unusedCount > 0) && (
+        <div className="mt-5 space-y-3">
+          {s.overplannedCents > 0 && (
+            <Notice tone="danger" href="#/budget/plan">
+              The plan is {formatCents(s.overplannedCents)} more than this month’s money.
+            </Notice>
+          )}
+          {s.auto?.on && s.auto.shortCents > 0 && (
+            <Notice tone="danger" href="#/budget/plan">
+              {formatCents(s.auto.shortCents)} short this month, even with spending trimmed.
+            </Notice>
+          )}
+          {unusedCount > 0 && (
+            <Notice tone="todo" href="#/budget/categories">
+              {unusedCount === 1 ? '1 category' : `${unusedCount} categories`} unused for 3 months. Archive or keep {unusedCount === 1 ? 'it' : 'them'}.
+            </Notice>
+          )}
+        </div>
       )}
 
       {s.lastMonth && <LastMonthCard last={s.lastMonth} />}
-      {s.auto?.on && s.auto.shortCents > 0 && (
-        <a href="#/budget/plan" role="alert" className="mt-3 block rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-          This month is {formatCents(s.auto.shortCents)} short even with spending squeezed as far as it sensibly goes. Budget settings ›
-        </a>
-      )}
-
-      {unusedCount > 0 && (
-        <a href="#/budget/categories" className="mt-3 block rounded-xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
-          {unusedCount === 1 ? '1 category hasn’t' : `${unusedCount} categories haven’t`} been used in about 3 months. Archive or keep {unusedCount === 1 ? 'it' : 'them'} ›
-        </a>
-      )}
 
       {/* What needs a category or a confirmation is on the Review tab's badge, not here (DECISIONS.md 171). */}
       {s.auto && !s.auto.on && <AutoBudgetOff />}
@@ -286,16 +289,6 @@ function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; 
       {s.groups.map((g) => (
         <Group key={g.type} group={g} bills={g.type === 'FixedBill' ? bills : []} month={s.budgetMonth} today={s.today} />
       ))}
-
-      <div className="mt-6 grid grid-cols-2 gap-3">
-        {/* Add and delete live on their own page (DECISIONS.md 169). */}
-        <a href="#/budget/categories" className="rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
-          Categories
-        </a>
-        <a href="#/budget/plan" className="rounded-xl bg-white py-3 text-center text-sm font-medium ring-1 ring-slate-200">
-          Budget settings
-        </a>
-      </div>
     </>
   )
 }
@@ -319,28 +312,28 @@ function Group({
   return (
     <section aria-labelledby={`g-${g.type}`} className="mt-7">
       <h2 id={`g-${g.type}`}>
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
-          <span className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 px-1 text-left">
+          <span className="flex items-center gap-1 px-1 text-sm font-semibold text-ink-soft">
             <Caret open={open} />
             {g.label}
           </span>
-          <span className="text-xs font-normal tabular-nums text-slate-500">
+          <span className="text-xs font-normal tabular-nums text-ink-soft">
             {formatCents(g.spentCents)} {spending ? 'spent' : 'paid'} of {formatCents(g.limitCents)}
           </span>
         </button>
       </h2>
       {open && (
         <>
-      {!spending && <p className="text-xs text-slate-400">Not part of Left to Spend</p>}
+      {!spending && <p className="px-1 text-xs text-ink-faint">Not part of Left to Spend</p>}
       {g.type === 'DebtPayment' && (
-        <p className="text-xs text-slate-400">Card payments count only what you pay beyond this month’s card purchases, which already count in their own categories.</p>
+        <p className="px-1 text-xs text-ink-faint">Only what you pay beyond this month’s card purchases counts.</p>
       )}
-      <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+      <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
         {g.categories.map((c) => {
           const items = live.filter((b) => b.categoryId === c.id)
           return (
             <li key={c.id}>
-              <a href={`#/budget/c/${c.id}`} className="block px-4 py-3 hover:bg-slate-50">
+              <a href={`#/budget/c/${c.id}`} className="block px-4 py-3">
                 <CategoryRow line={c} spending={spending} />
               </a>
               {items.length > 0 && <BillItems lineId={c.id} items={items} month={month} today={today} />}
@@ -358,15 +351,15 @@ function Group({
 function BillItems({ lineId, items, month, today }: { lineId: string; items: RecurringItem[]; month: { start: string; end: string }; today: string }) {
   const [open, setOpen] = useRemembered(`budget.items.${lineId}`, items.length <= 3)
   return (
-    <div className="mb-2 ml-4 mr-4 border-l-2 border-slate-100 pl-3">
+    <div className="mb-2 ml-4 mr-4 border-l-2 border-ink/10 pl-3">
       {items.length > 3 && (
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-center gap-1 py-1 text-xs font-medium text-slate-500">
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-center gap-1 py-1 text-xs font-medium text-ink-soft">
           <Caret open={open} />
           {items.length} bills
         </button>
       )}
       {open && (
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-ink/[0.07]">
           {items.map((b) => (
             <BillItemRow key={b.key} b={b} month={month} today={today} />
           ))}
@@ -381,14 +374,14 @@ function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: st
   const paidThisMonth = b.lastDate >= month.start && b.lastDate <= month.end
   const [text, cls] =
     b.status === 'possiblyCanceled'
-      ? [`Stopped? Last ${formatDay(b.lastDate)}`, 'text-slate-400']
+      ? [`Stopped? Last ${formatDay(b.lastDate)}`, 'text-ink-faint']
       : paidThisMonth
-        ? [`Paid ${formatDay(b.lastDate)}`, 'text-emerald-700']
+        ? [`Paid ${formatDay(b.lastDate)}`, 'text-good']
         : b.nextExpected < today
-          ? [`Due ${formatDay(b.nextExpected)}: not seen yet`, 'text-amber-600']
+          ? [`Due ${formatDay(b.nextExpected)}: not seen yet`, 'text-gold-ink']
           : b.nextExpected <= month.end
-            ? [`Due ${formatDay(b.nextExpected)}`, 'text-slate-500']
-            : [`Next ${formatDay(b.nextExpected)}`, 'text-slate-400']
+            ? [`Due ${formatDay(b.nextExpected)}`, 'text-ink-soft']
+            : [`Next ${formatDay(b.nextExpected)}`, 'text-ink-faint']
   return (
     <li>
       <a href={`#/review/bills/${encodeURIComponent(b.key)}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
@@ -401,7 +394,7 @@ function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: st
         <span className="shrink-0 tabular-nums">
           {formatCents(b.amountCents)}
           {(b.status === 'priceUp' || b.status === 'priceDown') && (
-            <span className="block text-right text-[11px] text-amber-600">{b.status === 'priceUp' ? 'price went up' : 'price went down'}</span>
+            <span className="block text-right text-[11px] text-gold-ink">{b.status === 'priceUp' ? 'price went up' : 'price went down'}</span>
           )}
         </span>
       </a>
@@ -412,23 +405,23 @@ function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: st
 function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending: boolean }) {
   // Bar width is display only: how much of the limit is used, capped at full.
   const used = c.limitCents > 0 ? Math.min(1, Math.max(0, c.spentCents / c.limitCents)) : c.spentCents > 0 ? 1 : 0
-  const barColor = spending ? healthBar[c.health] : c.health === 'over' ? 'bg-red-500' : 'bg-sky-500'
+  const barColor = spending ? healthBar[c.health] : c.health === 'over' ? 'bg-danger' : 'bg-gold'
   return (
     <>
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate text-sm font-medium">{c.name}</span>
         <RemainingLabel line={c} spending={spending} />
       </div>
-      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden>
+      <div className="mt-2 h-2 overflow-hidden rounded-full neu-inset" aria-hidden>
         <div className={`h-full rounded-full ${barColor}`} style={{ width: `${used * 100}%` }} />
       </div>
-      <p className="mt-1 text-xs tabular-nums text-slate-500">
+      <p className="mt-1 text-xs tabular-nums text-ink-soft">
         {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
-        {c.hasMonthOverride && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">this month only</span>}
+        {c.hasMonthOverride && <span className="ml-1 rounded neu-sm px-1.5 py-0.5 text-[10px] font-medium text-ink-soft">this month only</span>}
       </p>
       {c.partnerOffsetCents > 0 && (
-        <p className="mt-0.5 text-xs tabular-nums text-slate-500">
-          Partner covers {formatCents(c.partnerOffsetCents)} · your share <span className="font-medium text-slate-700">{formatCents(c.limitCents - c.partnerOffsetCents)}</span>
+        <p className="mt-0.5 text-xs tabular-nums text-ink-soft">
+          Partner covers {formatCents(c.partnerOffsetCents)} · your share <span className="font-medium text-ink-soft">{formatCents(c.limitCents - c.partnerOffsetCents)}</span>
         </p>
       )}
     </>
@@ -437,15 +430,15 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
 
 function RemainingLabel({ line: c, spending }: { line: BudgetCategoryLine; spending: boolean }) {
   if (c.remainingCents < 0)
-    return <span className="shrink-0 text-sm font-semibold tabular-nums text-red-600">{formatCents(-c.remainingCents)} over</span>
+    return <span className="shrink-0 text-sm font-semibold tabular-nums text-danger">{formatCents(-c.remainingCents)} over</span>
   if (!spending)
     return c.remainingCents === 0 ? (
-      <span className="shrink-0 text-sm font-semibold text-sky-700">Paid</span>
+      <span className="shrink-0 text-sm font-semibold text-good">Paid</span>
     ) : (
-      <span className="shrink-0 text-sm tabular-nums text-slate-600">{formatCents(c.remainingCents)} to go</span>
+      <span className="shrink-0 text-sm tabular-nums text-ink-soft">{formatCents(c.remainingCents)} to go</span>
     )
   return (
-    <span className={`shrink-0 text-sm font-semibold tabular-nums ${c.health === 'low' ? 'text-amber-600' : 'text-emerald-700'}`}>
+    <span className={`shrink-0 text-sm font-semibold tabular-nums ${c.health === 'low' ? 'text-gold-ink' : 'text-good'}`}>
       {formatCents(c.remainingCents)} left
     </span>
   )
@@ -454,9 +447,9 @@ function RemainingLabel({ line: c, spending }: { line: BudgetCategoryLine; spend
 function CategoryHeader({ line: c }: { line: BudgetCategoryLine }) {
   const spending = c.type === 'Variable'
   return (
-    <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <section className="mt-4 rounded-3xl neu p-4">
       <CategoryRow line={c} spending={spending} />
-      {!spending && <p className="mt-2 text-xs text-slate-400">Not part of Left to Spend</p>}
+      {!spending && <p className="mt-2 text-xs text-ink-faint">Not part of Left to Spend</p>}
     </section>
   )
 }
@@ -536,7 +529,7 @@ function SearchableList({
   const results = searching && found?.key === key ? found : null
   const set = (patch: Partial<SearchFilters>) => setF((x) => ({ ...x, ...patch }))
   const categoryName = categories.find((c) => c.id === f.categoryId)?.name
-  const field = 'block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-base'
+  const field = 'block w-full min-w-0 rounded-xl neu-inset px-2.5 py-2 text-base'
 
   return (
     <>
@@ -547,23 +540,23 @@ function SearchableList({
           onChange={(e) => set({ q: e.target.value })}
           placeholder="Store, description or amount"
           aria-label="Search transactions"
-          className="block min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-base"
+          className="block min-w-0 flex-1 rounded-xl neu-inset px-4 py-2.5 text-base"
         />
         <button
           type="button"
           aria-expanded={open}
           aria-controls="search-filters"
           onClick={() => setOpen(!open)}
-          className={`shrink-0 rounded-xl px-3.5 text-sm font-semibold ring-1 ${open || filterCount > 0 ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-300'}`}
+          className={`shrink-0 rounded-xl px-3.5 text-sm font-semibold ${open || filterCount > 0 ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu-sm text-ink-soft'}`}
         >
           Filters{filterCount > 0 && ` · ${filterCount}`}
         </button>
       </div>
 
       {open && (
-        <div id="search-filters" className="mt-2 space-y-3 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+        <div id="search-filters" className="mt-2 space-y-3 rounded-2xl neu p-3">
           <label className="block">
-            <span className="text-xs font-medium text-slate-600">Category</span>
+            <span className="text-xs font-medium text-ink-soft">Category</span>
             <select value={f.categoryId} onChange={(e) => set({ categoryId: e.target.value })} className={`mt-1 ${field}`}>
               <option value="">Any category</option>
               {groupOrder.map((type) => {
@@ -582,26 +575,26 @@ function SearchableList({
           </label>
 
           <fieldset>
-            <legend className="text-xs font-medium text-slate-600">Amount (charges or refunds)</legend>
+            <legend className="text-xs font-medium text-ink-soft">Amount (charges or refunds)</legend>
             <div className="mt-1 flex items-center gap-2">
               <input aria-label="At least" placeholder="$ min" inputMode="decimal" value={f.min} onChange={(e) => set({ min: e.target.value })}
-                aria-invalid={minBad || amountsBackwards} className={`${field} ${minBad || amountsBackwards ? 'border-red-400' : ''}`} />
-              <span className="text-slate-400">to</span>
+                aria-invalid={minBad || amountsBackwards} className={`${field} ${minBad || amountsBackwards ? 'ring-2 ring-danger' : ''}`} />
+              <span className="text-ink-faint">to</span>
               <input aria-label="At most" placeholder="$ max" inputMode="decimal" value={f.max} onChange={(e) => set({ max: e.target.value })}
-                aria-invalid={maxBad || amountsBackwards} className={`${field} ${maxBad || amountsBackwards ? 'border-red-400' : ''}`} />
+                aria-invalid={maxBad || amountsBackwards} className={`${field} ${maxBad || amountsBackwards ? 'ring-2 ring-danger' : ''}`} />
             </div>
-            {amountsBackwards && <p className="mt-1 text-xs text-red-700">The lowest amount is bigger than the highest.</p>}
-            <p className="mt-1 text-xs text-slate-500">Fill in one for "at least" or "at most", or the same in both for an exact amount.</p>
+            {amountsBackwards && <p className="mt-1 text-xs text-danger">The lowest amount is bigger than the highest.</p>}
+            <p className="mt-1 text-xs text-ink-soft">Fill in one for "at least" or "at most", or the same in both for an exact amount.</p>
           </fieldset>
 
           <fieldset>
-            <legend className="text-xs font-medium text-slate-600">Dates</legend>
+            <legend className="text-xs font-medium text-ink-soft">Dates</legend>
             <div className="mt-1 flex items-center gap-2">
               <input type="date" aria-label="From" value={f.from} max={f.to || undefined} onChange={(e) => set({ from: e.target.value })} className={field} />
-              <span className="text-slate-400">to</span>
+              <span className="text-ink-faint">to</span>
               <input type="date" aria-label="To" value={f.to} min={f.from || undefined} onChange={(e) => set({ to: e.target.value })} className={field} />
             </div>
-            {datesBackwards && <p className="mt-1 text-xs text-red-700">The start date is after the end date.</p>}
+            {datesBackwards && <p className="mt-1 text-xs text-danger">The start date is after the end date.</p>}
             <div className="mt-2 flex flex-wrap gap-1.5">
               {datePresets().map((p) => (
                 <button
@@ -609,7 +602,7 @@ function SearchableList({
                   type="button"
                   onClick={() => set({ from: p.from, to: p.to })}
                   aria-pressed={f.from === p.from && f.to === p.to}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${f.from === p.from && f.to === p.to ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200'}`}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.from === p.from && f.to === p.to ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu text-ink-soft'}`}
                 >
                   {p.label}
                 </button>
@@ -618,10 +611,10 @@ function SearchableList({
           </fieldset>
 
           <div className="flex gap-2">
-            <button type="button" onClick={() => setF({ ...noFilters, q: f.q })} className="flex-1 rounded-lg bg-slate-100 py-2 text-sm font-medium text-slate-700">
+            <button type="button" onClick={() => setF({ ...noFilters, q: f.q })} className="flex-1 rounded-2xl neu py-3 text-sm font-medium text-ink-soft">
               Clear filters
             </button>
-            <button type="button" onClick={() => setOpen(false)} className="flex-1 rounded-lg bg-slate-900 py-2 text-sm font-semibold text-white">
+            <button type="button" onClick={() => setOpen(false)} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink">
               Done
             </button>
           </div>
@@ -638,30 +631,29 @@ function SearchableList({
       )}
 
       {!searching && (
-        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-white px-2 py-1.5 ring-1 ring-slate-200">
-          <button type="button" onClick={() => setBack(back + 1)} disabled={back >= 120} aria-label="Earlier month" className="rounded-lg px-3 py-1.5 text-lg font-semibold text-slate-600 disabled:opacity-30">
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-2xl neu px-2 py-1.5">
+          <button type="button" onClick={() => setBack(back + 1)} disabled={back >= 120} aria-label="Earlier month" className="rounded-lg px-3 py-1.5 text-lg font-semibold text-ink-soft disabled:opacity-30">
             ‹
           </button>
           <span className="text-sm font-semibold" aria-live="polite">
             {label}
           </span>
-          <button type="button" onClick={() => setBack(Math.max(0, back - 1))} disabled={back === 0} aria-label="Later month" className="rounded-lg px-3 py-1.5 text-lg font-semibold text-slate-600 disabled:opacity-30">
+          <button type="button" onClick={() => setBack(Math.max(0, back - 1))} disabled={back === 0} aria-label="Later month" className="rounded-lg px-3 py-1.5 text-lg font-semibold text-ink-soft disabled:opacity-30">
             ›
           </button>
         </div>
       )}
-      {!searching && <p className="mt-2 text-xs text-slate-500">Tap any transaction to change it. Search and filters look through every month.</p>}
       {searching && results === null && <Loading label="Searching" />}
       {searching && results && (
-        <div className="mt-3 flex items-baseline justify-between gap-3 text-xs text-slate-500" aria-live="polite">
+        <div className="mt-3 flex items-baseline justify-between gap-3 text-xs text-ink-soft" aria-live="polite">
           <p>
-            <span className="font-semibold text-slate-700">
+            <span className="font-semibold text-ink-soft">
               {results.total} {results.total === 1 ? 'match' : 'matches'}
             </span>
             {results.total > 0 && ` · ${formatCents(Math.abs(results.netCents))} ${results.netCents < 0 ? 'back' : 'spent'}`}
             {results.total > results.items.length && ` · showing the newest ${results.items.length}`}
           </p>
-          <button type="button" onClick={() => setF(noFilters)} className="shrink-0 font-medium text-slate-700 underline">
+          <button type="button" onClick={() => setF(noFilters)} className="shrink-0 font-medium text-ink-soft underline">
             Clear all
           </button>
         </div>
@@ -707,32 +699,31 @@ function dateLabel(from: string, to: string) {
 
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 py-1 pr-1 pl-2.5 text-xs font-medium text-white">
+    <span className="inline-flex items-center gap-1 rounded-full bg-coral shadow-neu-sm py-1 pr-1 pl-2.5 text-xs font-medium text-coral-ink">
       {label}
-      <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="rounded-full px-1.5 leading-none text-slate-300">
+      <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="rounded-full px-1.5 leading-none text-ink-faint">
         ×
       </button>
     </span>
   )
 }
 
-export function TransactionList({ items, empty, onSelect }: { items: Transaction[]; empty: string; onSelect: (t: Transaction) => void }) {
-  if (items.length === 0)
-    return <p className="mt-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">{empty}</p>
+export function TransactionList({ items, empty, onSelect, className = "mt-4" }: { items: Transaction[]; empty: string; onSelect: (t: Transaction) => void; className?: string }) {
+  if (items.length === 0) return <p className={`neu rounded-3xl ${className} px-5 py-4 text-sm text-ink-soft`}>{empty}</p>
   return (
-    <ul className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+    <ul className={`${className} neu divide-y divide-ink/[0.07] overflow-hidden rounded-3xl`}>
       {items.map((t) => (
         <li key={t.id}>
-          <button type="button" onClick={() => onSelect(t)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
+          <button type="button" onClick={() => onSelect(t)} className="flex w-full items-center gap-3 px-5 py-3 text-left">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{titleCase(t.merchant)}</p>
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs text-ink-faint">
                 {formatDay(t.date)} · {t.accountName}
                 {t.pending && ' · Pending'}
               </p>
             </div>
             <div className="shrink-0 text-right">
-              <p className={`text-sm font-semibold tabular-nums ${t.amountCents < 0 ? 'text-emerald-600' : ''}`}>
+              <p className={`text-sm font-semibold tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>
                 {formatSigned(t.amountCents)}
               </p>
               <Tag t={t} />
@@ -745,24 +736,24 @@ export function TransactionList({ items, empty, onSelect }: { items: Transaction
 }
 
 function Tag({ t }: { t: Transaction }) {
-  if (t.isTransfer) return <span className="text-xs text-slate-400">{t.categoryName ?? 'Transfer'}</span>
+  if (t.isTransfer) return <span className="text-xs text-ink-faint">{t.categoryName ?? 'Transfer'}</span>
   if (t.categoryName && t.needsReview)
     return (
-      <span className={`text-xs ${t.unsure ? 'font-medium text-amber-600' : 'text-slate-500'}`} title="Not confirmed yet">
+      <span className={`text-xs ${t.unsure ? 'font-medium text-gold-ink' : 'text-ink-soft'}`} title="Not confirmed yet">
         {t.categoryName}
-        {t.unsure ? '?' : <span className="text-amber-500"> •</span>}
+        {t.unsure ? '?' : <span className="text-gold"> •</span>}
       </span>
     )
   if (t.categoryName)
     return (
-      <span className="text-xs text-slate-500">
+      <span className="text-xs text-ink-soft">
         {t.categoryName}
-        {t.categorySource === 'BestGuess' && <span className="text-slate-400"> · best guess</span>}
+        {t.categorySource === 'BestGuess' && <span className="text-ink-faint"> · best guess</span>}
       </span>
     )
-  if (t.kind === 'Income') return <span className="text-xs text-emerald-600">Income</span>
-  if (t.kind === 'PartnerContribution') return <span className="text-xs text-emerald-600">Partner</span>
-  return <span className="text-xs font-medium text-amber-600">Needs category</span>
+  if (t.kind === 'Income') return <span className="text-xs text-good">Income</span>
+  if (t.kind === 'PartnerContribution') return <span className="text-xs text-good">Partner</span>
+  return <span className="text-xs font-medium text-gold-ink">Needs category</span>
 }
 
 /**
@@ -773,28 +764,28 @@ function Tag({ t }: { t: Transaction }) {
 function LastMonthCard({ last }: { last: LastMonth }) {
   const pending = last.sweeps.filter((s) => !s.done)
   return (
-    <section aria-labelledby="last-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <section aria-labelledby="last-h" className="mt-4 rounded-3xl neu p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="last-h" className="text-sm font-semibold">
           {last.month.label}
         </h2>
         {/* It closes on its own after a few days, so late transactions still count (DECISIONS.md 149). */}
-        <span className="text-xs text-slate-500">{last.closed ? 'Closed' : `Closes on its own ${formatDay(last.closesOn)}`}</span>
+        <span className="text-xs text-ink-soft">{last.closed ? 'Closed' : `Closes on its own ${formatDay(last.closesOn)}`}</span>
       </div>
 
       {last.deficitCents > 0 ? (
         <p className="mt-1 text-sm">
-          Ended <span className="font-semibold tabular-nums text-red-600">{formatCents(last.deficitCents)} over</span>. That's carried into this
+          Ended <span className="font-semibold tabular-nums text-danger">{formatCents(last.deficitCents)} over</span>. That's carried into this
           month and comes out of Left to Spend.
         </p>
       ) : last.surplusCents > 0 ? (
         <p className="mt-1 text-sm">
-          Ended <span className="font-semibold tabular-nums text-emerald-700">{formatCents(last.surplusCents)} under</span>. Leftover money
+          Ended <span className="font-semibold tabular-nums text-good">{formatCents(last.surplusCents)} under</span>. Leftover money
           isn't added to this month.
           {pending.length > 0 && (
             <>
               {' '}
-              <a href="#/payday" className="font-medium text-slate-700 underline">
+              <a href="#/payday" className="font-medium text-ink-soft underline">
                 Where to send it: your Plan
               </a>
             </>
@@ -804,7 +795,7 @@ function LastMonthCard({ last }: { last: LastMonth }) {
         <p className="mt-1 text-sm">Ended exactly on budget.</p>
       )}
       {/* How the end figure was reached, from the API's own numbers, so nothing in it is a mystery. */}
-      <dl className="mt-2 space-y-0.5 text-xs text-slate-500">
+      <dl className="mt-2 space-y-0.5 text-xs text-ink-soft">
         {(
           [
             ['Left in spending categories', last.totalUnspentCents, 1],
@@ -833,9 +824,11 @@ function LastMonthCard({ last }: { last: LastMonth }) {
 /** On the Budget tab when the automatic budget is off. Its last change and any shortfall are in Budget settings. */
 function AutoBudgetOff() {
   return (
-    <a href="#/budget/plan" className="mt-6 block rounded-2xl bg-white px-4 py-3 text-sm ring-1 ring-slate-200">
-      <span className="font-semibold">Automatic budget is off.</span> <span className="text-slate-500">Limits stay as they are. Turn it on ›</span>
-    </a>
+    <div className="mt-5">
+      <Notice tone="todo" href="#/budget/plan">
+        Automatic budget is off, so limits stay as they are.
+      </Notice>
+    </div>
   )
 }
 
@@ -866,23 +859,22 @@ function IncomeCard({
   const short = a?.on ? a.shortCents : Math.max(0, -s.unallocatedCents)
 
   return (
-    <section aria-labelledby="income-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <section aria-labelledby="income-h" className="mt-4 rounded-3xl neu p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="income-h" className="text-sm font-semibold">
           This month
         </h2>
         {!editing && (
-          <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-slate-600 underline">
+          <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-ink-soft underline">
             Edit income
           </button>
         )}
       </div>
       {a?.on && (
-        <p className="mt-1 text-xs text-slate-500">
-          The automatic budget updates itself when your pay, bills, debt plan, savings or transactions change. A limit you change from its category on
-          the Budget tab stays yours.
+        <p className="mt-1 text-xs text-ink-soft">
+          Updates itself as your pay, bills and spending change. Limits you set yourself stay.
           {a.note && (
-            <span className="mt-1 block text-slate-700">
+            <span className="mt-1 block text-ink-soft">
               <span className="font-medium">Last change{a.noteUtc ? `, ${formatTime(a.noteUtc)}` : ''}:</span> {a.note}
             </span>
           )}
@@ -902,7 +894,7 @@ function IncomeCard({
         >
           <MoneyField label="Your expected income" value={income} onChange={setIncome} />
           {fixed.length > 0 ? (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-ink-soft">
               {partnerLabel}: set on the{' '}
               <a href="#/partner" className="underline">
                 Partner screen
@@ -915,7 +907,7 @@ function IncomeCard({
           <button
             type="submit"
             disabled={incomeCents === null || partnerCents === null}
-            className="w-full rounded-lg bg-slate-900 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="w-full rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-50"
           >
             Save
           </button>
@@ -924,17 +916,17 @@ function IncomeCard({
         <>
           <dl className="mt-3 space-y-1 text-sm">
             <div className="flex justify-between gap-3">
-              <dt className="text-slate-600">Your income</dt>
+              <dt className="text-ink-soft">Your income</dt>
               <dd className="tabular-nums">
-                {formatCents(s.incomeExpectedCents)} <span className="text-xs text-slate-500">· {formatCents(s.incomeReceivedCents)} in so far</span>
+                {formatCents(s.incomeExpectedCents)} <span className="text-xs text-ink-soft">· {formatCents(s.incomeReceivedCents)} in so far</span>
               </dd>
             </div>
             {s.auto?.on && (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-ink-soft">
                 {s.auto.incomeSetByYou ? (
                   <>
                     You set this.{' '}
-                    <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className="font-medium text-sky-700 underline">
+                    <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className="font-medium text-coral underline">
                       Use your paychecks instead
                     </button>
                   </>
@@ -945,9 +937,9 @@ function IncomeCard({
             )}
             {fixed.length === 0 ? (
             <div className="flex justify-between gap-3">
-              <dt className="text-slate-600">{partnerLabel}</dt>
+              <dt className="text-ink-soft">{partnerLabel}</dt>
               <dd className="tabular-nums">
-                {formatCents(s.partnerExpectedCents)} <span className="text-xs text-slate-500">· {formatCents(s.partnerReceivedCents)} in so far</span>
+                {formatCents(s.partnerExpectedCents)} <span className="text-xs text-ink-soft">· {formatCents(s.partnerReceivedCents)} in so far</span>
               </dd>
             </div>
             ) : (
@@ -955,38 +947,38 @@ function IncomeCard({
             )}
           </dl>
           <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-xl bg-slate-50 p-2">
-              <dt className="text-xs text-slate-500">Money in</dt>
+            <div className="rounded-xl neu-inset p-2">
+              <dt className="text-xs text-ink-soft">Money in</dt>
               <dd className="text-sm font-semibold tabular-nums">{formatCents(moneyIn)}</dd>
             </div>
-            <div className="rounded-xl bg-slate-50 p-2">
-              <dt className="text-xs text-slate-500">Planned</dt>
+            <div className="rounded-xl neu-inset p-2">
+              <dt className="text-xs text-ink-soft">Planned</dt>
               <dd className="text-sm font-semibold tabular-nums">{formatCents(s.plannedCents)}</dd>
             </div>
-            <div className={`rounded-xl p-2 ${over ? 'bg-red-50' : 'bg-slate-50'}`}>
-              <dt className="text-xs text-slate-500">{over ? 'Short' : 'Unallocated'}</dt>
-              <dd className={`text-sm font-semibold tabular-nums ${over ? 'text-red-600' : ''}`}>{formatCents(Math.abs(s.unallocatedCents))}</dd>
+            <div className={`rounded-xl p-2 ${over ? 'neu-inset' : 'neu-inset'}`}>
+              <dt className="text-xs text-ink-soft">{over ? 'Short' : 'Unallocated'}</dt>
+              <dd className={`text-sm font-semibold tabular-nums ${over ? 'text-danger' : ''}`}>{formatCents(Math.abs(s.unallocatedCents))}</dd>
             </div>
           </dl>
           {short > 0 && (
-            <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+            <p role="alert" className="mt-3 rounded-lg neu-inset px-3 py-2 text-xs text-danger">
               {a?.on
                 ? `Even with spending squeezed as far as it sensibly goes, this month is ${formatCents(short)} short. Bills and minimums come first; the rest has to come from savings or extra pay.`
                 : `This month plans ${formatCents(short)} more than comes in.`}
             </p>
           )}
           {!s.partnerName && (
-            <p className="mt-2 text-xs text-slate-500">
-              <a href="#/more" className="underline">
+            <p className="mt-2 text-xs text-ink-soft">
+              <a href="#/partner" className="underline">
                 Set your partner's name
               </a>{' '}
-              in More to track her contributions apart from your income.
+              to track her contributions apart from your income.
             </p>
           )}
         </>
       )}
       {s.incomeExpectedCents === 0 && !editing && (
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-ink-soft">
           Set your expected income, or{' '}
           <a href="#/budget/plan" className="underline">
             build a budget from your history
@@ -1001,9 +993,9 @@ function IncomeCard({
 function MoneyField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="block">
-      <span className="text-xs text-slate-500">{label}</span>
-      <div className="mt-0.5 flex items-center rounded-lg border border-slate-300 bg-white px-3">
-        <span className="text-sm text-slate-500">$</span>
+      <span className="text-xs text-ink-soft">{label}</span>
+      <div className="mt-0.5 flex items-center rounded-xl neu-inset px-3">
+        <span className="text-sm text-ink-soft">$</span>
         <input
           aria-label={label}
           value={value}
@@ -1022,25 +1014,25 @@ function MoneyField({ label, value, onChange }: { label: string; value: string; 
 function ContributionRow({ f, who }: { f: ContributionStatus; who: string }) {
   const note =
     f.state === 'received'
-      ? { text: 'received', cls: 'text-emerald-700' }
+      ? { text: 'received', cls: 'text-good' }
       : f.state === 'expected'
-        ? { text: `expected by ${formatDay(f.windowEnd)}`, cls: 'text-slate-500' }
+        ? { text: `expected by ${formatDay(f.windowEnd)}`, cls: 'text-ink-soft' }
         : f.state === 'late'
-          ? { text: 'late: Left to Spend counts without it', cls: 'font-medium text-red-600' }
+          ? { text: 'late: Left to Spend counts without it', cls: 'font-medium text-danger' }
           : {
               text: `${formatCents(f.receivedCents)} came, not ${formatCents(f.expectedCents)}${f.shortfallCents > 0 ? ': Left to Spend counts without the rest' : ''}`,
-              cls: 'font-medium text-amber-600',
+              cls: 'font-medium text-gold-ink',
             }
   return (
     <div className="flex justify-between gap-3">
-      <dt className="text-slate-600">
+      <dt className="text-ink-soft">
         {who} toward {f.categoryName}
       </dt>
       <dd className="text-right tabular-nums">
         {formatCents(f.expectedCents)} <span className={`block text-xs ${note.cls}`}>{note.text}</span>
         {f.state !== 'received' && (
           // Sent before the budget month started? The Partner screen can count it here (DECISIONS.md 166).
-          <a href="#/partner" className="block text-xs font-medium text-sky-700">
+          <a href="#/partner" className="block text-xs font-medium text-coral">
             Sent early? ›
           </a>
         )}

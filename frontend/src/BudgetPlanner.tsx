@@ -38,8 +38,8 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not build a proposal.'))
   }, [reload])
 
-  if (error && !p) return <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>
-  if (!p) return <p className="mt-10 text-center text-slate-400">Looking at your history…</p>
+  if (error && !p) return <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">{error}</p>
+  if (!p) return <p className="mt-10 text-center text-ink-faint">Looking at your history…</p>
 
   if (setup)
     return (
@@ -94,13 +94,13 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
 
   return (
     <div className="pb-6">
-      <p className="mt-2 text-sm text-slate-500">
+      <p className="mt-2 text-sm text-ink-soft">
         {p.monthsUsed === 0
           ? "There isn't a complete month of history yet, so your current limits are kept. Import a few months of CSVs or connect a bank, then come back."
           : `Based on your last ${p.monthsUsed} complete ${p.monthsUsed === 1 ? 'month' : 'months'} (${formatDay(p.months[0].start)} – ${formatDay(p.months[p.months.length - 1].end)}). Every number is editable.`}
       </p>
       {waiting > 0 && (
-        <p className="mt-3 rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-700">
+        <p className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
           {waiting} automatically sorted {waiting === 1 ? 'purchase is' : 'purchases are'} counted here but not confirmed yet
           {p.categorization.guesses > 0 && <> ({p.categorization.guesses} of them rough guesses)</>}. Confirming them in{' '}
           <a href="#/review" className="font-medium underline">
@@ -109,34 +109,34 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
           makes this proposal more accurate.
         </p>
       )}
-      <section className="mt-3 rounded-2xl bg-white p-4 text-sm ring-1 ring-slate-200">
+      <section className="mt-3 rounded-3xl neu p-4 text-sm">
         <p className="font-semibold">The automatic budget is off</p>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-ink-soft">
           Turned on, the budget builds and updates itself from your history, bills, debt plan, savings priorities and paycheck forecast, and squeezes spending when a month brings in less.
         </p>
-        <button type="button" disabled={busy} onClick={() => void setAutomatic(true)} className="mt-2 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={() => void setAutomatic(true)} className="mt-2 rounded-lg bg-coral shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-coral-ink disabled:opacity-50">
           Turn on the automatic budget
         </button>
       </section>
-      <button type="button" onClick={() => setSetup(true)} className="mt-3 text-sm font-medium text-slate-700 underline">
+      <button type="button" onClick={() => setSetup(true)} className="mt-3 text-sm font-medium text-ink-soft underline">
         Find categories from my history
       </button>
       {p.uncategorizedCount > 0 && (
-        <a href="#/review" className="mt-3 block rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
+        <a href="#/review" className="mt-3 block rounded-2xl neu-inset px-4 py-3 text-sm text-gold-ink">
           {p.uncategorizedCount} {p.uncategorizedCount === 1 ? 'purchase' : 'purchases'} in that period had no category and weren't counted. Categorize them for a better proposal ›
         </a>
       )}
 
-      <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      <section className="mt-4 rounded-3xl neu p-4">
         <label className="block">
           <span className="text-sm font-medium">Your expected income this month</span>
           <MoneyInput value={income} onChange={setIncome} label="Your expected income" />
-          <span className="mt-1 block text-xs text-slate-500">{p.incomeExplanation}</span>
+          <span className="mt-1 block text-xs text-ink-soft">{p.incomeExplanation}</span>
         </label>
         <label className="mt-3 block">
           <span className="text-sm font-medium">{p.partnerName ? `From ${p.partnerName.split(' ')[0]}` : 'Partner contributions'}, expected</span>
           <MoneyInput value={partner} onChange={setPartner} label="Partner contributions expected" />
-          <span className="mt-1 block text-xs text-slate-500">
+          <span className="mt-1 block text-xs text-ink-soft">
             {p.partnerFromArrangements
               ? 'Their fixed contributions (More → Partner), counted once as offsets to the bills they go toward.'
               : p.partnerName
@@ -145,26 +145,26 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
           </span>
         </label>
         <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-xl bg-slate-50 p-2">
-            <dt className="text-xs text-slate-500">Money in</dt>
+          <div className="rounded-xl neu-inset p-2">
+            <dt className="text-xs text-ink-soft">Money in</dt>
             <dd className="text-sm font-semibold tabular-nums">{formatCents((incomeCents ?? 0) + (partnerCents ?? 0))}</dd>
           </div>
-          <div className="rounded-xl bg-slate-50 p-2">
-            <dt className="text-xs text-slate-500">Planned</dt>
+          <div className="rounded-xl neu-inset p-2">
+            <dt className="text-xs text-ink-soft">Planned</dt>
             <dd className="text-sm font-semibold tabular-nums">{formatCents(planned)}</dd>
           </div>
-          <div className={`rounded-xl p-2 ${remainder < 0 ? 'bg-red-50' : 'bg-slate-50'}`}>
-            <dt className="text-xs text-slate-500">{remainder < 0 ? 'Over income' : 'Unallocated'}</dt>
-            <dd className={`text-sm font-semibold tabular-nums ${remainder < 0 ? 'text-red-600' : ''}`}>{formatCents(Math.abs(remainder))}</dd>
+          <div className={`rounded-xl p-2 ${remainder < 0 ? 'neu-inset' : 'neu-inset'}`}>
+            <dt className="text-xs text-ink-soft">{remainder < 0 ? 'Over income' : 'Unallocated'}</dt>
+            <dd className={`text-sm font-semibold tabular-nums ${remainder < 0 ? 'text-danger' : ''}`}>{formatCents(Math.abs(remainder))}</dd>
           </div>
         </dl>
         {remainder < 0 && (
-          <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p role="alert" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             This plan spends more than you expect to earn. Trim some limits before using it.
           </p>
         )}
         {remainder > 0 && (
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-ink-soft">
             The unallocated money isn't spendable. Consider putting it toward the rainy-day fund or card payments.
           </p>
         )}
@@ -175,10 +175,10 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         if (rows.length === 0) return null
         return (
           <section key={g.type} className="mt-6" aria-labelledby={`plan-${g.type}`}>
-            <h2 id={`plan-${g.type}`} className="text-sm font-semibold text-slate-700">
+            <h2 id={`plan-${g.type}`} className="px-1 text-sm font-semibold text-ink-soft">
               {g.label}
             </h2>
-            <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+            <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {rows.map(({ c, cents }) => (
                 <li key={c.categoryId} className="px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
@@ -193,7 +193,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
                       />
                     </div>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-ink-soft">
                     {c.explanation}
                     {c.currentLimitCents !== c.proposedCents && ` Currently ${formatCents(c.currentLimitCents)}.`}
                   </p>
@@ -205,7 +205,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
       })}
 
       {error && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
@@ -213,7 +213,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         type="button"
         onClick={apply}
         disabled={busy || invalid}
-        className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50"
+        className="mt-6 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
       >
         {busy ? 'Saving…' : remainder < 0 ? 'Use this budget anyway' : 'Use this budget'}
       </button>
@@ -234,17 +234,17 @@ function AutomaticView({ p, top, busy, error, onTurnOff }: { p: GeneratorProposa
         if (rows.length === 0) return null
         return (
           <section key={g.type} className="mt-6" aria-labelledby={`auto-${g.type}`}>
-            <h2 id={`auto-${g.type}`} className="text-sm font-semibold text-slate-700">
+            <h2 id={`auto-${g.type}`} className="px-1 text-sm font-semibold text-ink-soft">
               {g.label}
             </h2>
-            <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+            <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {rows.map((c) => (
                 <li key={c.categoryId} className="px-4 py-3">
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.name}</span>
                     <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCents(c.proposedCents)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">{c.explanation}</p>
+                  <p className="mt-1 text-xs text-ink-soft">{c.explanation}</p>
                 </li>
               ))}
             </ul>
@@ -252,22 +252,22 @@ function AutomaticView({ p, top, busy, error, onTurnOff }: { p: GeneratorProposa
         )
       })}
       {error && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
-      <button type="button" disabled={busy} onClick={onTurnOff} className="mt-6 w-full rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-700 disabled:opacity-50">
+      <button type="button" disabled={busy} onClick={onTurnOff} className="mt-6 w-full rounded-2xl neu py-3 text-sm font-semibold text-ink-soft disabled:opacity-50">
         Turn off the automatic budget
       </button>
-      <p className="mt-2 text-center text-xs text-slate-500">Off, the limits stay where they are until you change them or build a budget yourself.</p>
+      <p className="mt-2 text-center text-xs text-ink-soft">Off, the limits stay where they are until you change them or build a budget yourself.</p>
     </div>
   )
 }
 
 function MoneyInput({ value, onChange, label, invalid, compact }: { value: string; onChange: (v: string) => void; label: string; invalid?: boolean; compact?: boolean }) {
   return (
-    <div className={`flex items-center rounded-lg border bg-white px-3 ${invalid ? 'border-red-600' : 'border-slate-300'} ${compact ? '' : 'mt-1'}`}>
-      <span className="text-sm text-slate-500">$</span>
+    <div className={`flex items-center rounded-xl neu-inset px-3 ${invalid ? 'ring-2 ring-danger' : ''} ${compact ? '' : 'mt-1'}`}>
+      <span className="text-sm text-ink-soft">$</span>
       <input
         aria-label={label}
         aria-invalid={invalid}

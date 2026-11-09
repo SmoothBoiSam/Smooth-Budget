@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, partnerPlanApi, type Category, type ContributionStatus, type PartnerOverview } from './api'
-import { ErrorNotice, Loading } from './ui'
+import { ErrorNotice, Loading, Page, PageHeader } from './ui'
 import PartnerSetting from './PartnerSetting'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars, titleCase } from './format'
 
@@ -61,18 +61,15 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
   const who = first ?? 'Your partner'
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">
-      <a href="#/more" className="text-sm font-medium text-slate-500">
-        ‹ More
-      </a>
-      <h1 className="mt-1 text-2xl font-bold tracking-tight">Partner</h1>
+    <Page>
+      <PageHeader title="Partner" back={{ href: '#/more', label: 'More' }} />
       <div className="mt-4">
         {/* The name on their transfers, moved here from More → Settings (DECISIONS.md 156). */}
         <PartnerSetting onChanged={() => void load()} />
       </div>
 
       {notice && (
-        <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <p role="status" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
         </p>
       )}
@@ -80,7 +77,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
       {!o && !error && <Loading />}
 
       {o && !o.partnerName && (
-        <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
+        <p className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-gold-ink">
           Set your partner’s name as it shows on their transfers (above) so the app can recognize them.
         </p>
       )}
@@ -88,28 +85,25 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
       {o && (
         <>
           <section aria-labelledby="fixed-h" className="mt-5">
-            <h2 id="fixed-h" className="text-sm font-semibold text-slate-700">
+            <h2 id="fixed-h" className="px-1 text-sm font-semibold text-ink-soft">
               Fixed contributions
             </h2>
-            <p className="text-xs text-slate-500">
-              Money {who} sends every month toward a bill. It counts from the start of the month and is subtracted from that bill’s line; if it’s late, Left to Spend
-              counts without it.
-            </p>
+            <p className="px-1 text-xs text-ink-faint">What {who} sends each month toward a bill.</p>
             {o.contributions.length === 0 ? (
-              <button type="button" onClick={() => setEditing(null)} className="mt-2 w-full rounded-xl bg-white px-4 py-3 text-left text-sm ring-1 ring-slate-200">
+              <button type="button" onClick={() => setEditing(null)} className="mt-2 w-full rounded-2xl neu px-4 py-3 text-left text-sm">
                 <span className="font-medium">+ Add one</span>
-                <span className="block text-xs text-slate-500">For example, $800 a month toward Rent.</span>
+                <span className="block text-xs text-ink-soft">For example, $800 a month toward Rent.</span>
               </button>
             ) : (
               <ul className="mt-2 space-y-2">
                 {o.contributions.map((c) => (
                   <li key={c.id}>
-                    <button type="button" onClick={() => setEditing(c)} className="block w-full rounded-xl bg-white px-4 py-3 text-left ring-1 ring-slate-200">
+                    <button type="button" onClick={() => setEditing(c)} className="block w-full rounded-2xl neu px-4 py-3 text-left">
                       <span className="flex items-baseline justify-between gap-3">
                         <span className="text-sm font-medium">
                           {formatCents(c.amountCents)} toward {c.categoryName}
                         </span>
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-ink-soft">
                           usually the {ordinal(c.windowFromDay)}–{ordinal(c.windowToDay)}
                         </span>
                       </span>
@@ -120,16 +114,16 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
               </ul>
             )}
             {o.contributions.length > 0 && (
-              <button type="button" onClick={() => setEditing(null)} className="mt-2 text-xs font-medium text-slate-600 underline">
+              <button type="button" onClick={() => setEditing(null)} className="mt-2 text-xs font-medium text-ink-soft underline">
                 Add another
               </button>
             )}
             {/* Sent early (DECISIONS.md 166): when she's paid before you, this month's money can land before the month starts. */}
             {o.earlyCandidates.length > 0 && (
-              <div className="mt-3 rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-900 ring-1 ring-sky-200">
+              <div className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-ink">
                 <p className="font-medium">Did {who} send this month’s early?</p>
                 <p className="mt-0.5 text-xs">
-                  Money from {who} that came just before this budget month started can count toward this month instead.
+                  Money from just before this month started can count toward it.
                 </p>
                 <ul className="mt-2 space-y-1.5">
                   {o.earlyCandidates.map((d) => (
@@ -137,7 +131,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
                       <button
                         type="button"
                         onClick={() => void act(() => partnerPlanApi.countEarly(d.id), `The ${formatCents(d.amountCents)} from ${formatDay(d.date)} counts toward this month now.`)}
-                        className="w-full rounded-lg bg-white px-3 py-2 text-left text-sm font-medium ring-1 ring-sky-200"
+                        className="w-full rounded-lg bg-surface px-3 py-2 text-left text-sm font-medium"
                       >
                         Count the {formatCents(d.amountCents)} from {formatDay(d.date)} for this month
                       </button>
@@ -147,12 +141,12 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
               </div>
             )}
             {o.countedEarly.map((d) => (
-              <p key={d.id} className="mt-3 text-xs text-slate-500">
+              <p key={d.id} className="mt-3 text-xs text-ink-soft">
                 The {formatCents(d.amountCents)} from {formatDay(d.date)} was sent early and counts toward this month.{' '}
                 <button
                   type="button"
                   onClick={() => void act(() => partnerPlanApi.undoEarly(d.id), `The ${formatCents(d.amountCents)} from ${formatDay(d.date)} counts in the month it came again.`)}
-                  className="font-medium text-slate-700 underline"
+                  className="font-medium text-ink-soft underline"
                 >
                   Undo
                 </button>
@@ -162,22 +156,22 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
 
           {o.recent.length > 0 && (
             <section aria-labelledby="recent-h" className="mt-6">
-              <h2 id="recent-h" className="text-sm font-semibold text-slate-700">
+              <h2 id="recent-h" className="px-1 text-sm font-semibold text-ink-soft">
                 Recent
               </h2>
-              <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white text-sm ring-1 ring-slate-200">
+              <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu text-sm">
                 {o.recent.map((r) => (
                   <li key={r.id} className="flex items-baseline justify-between gap-3 px-4 py-2.5">
                     <span className="min-w-0 truncate">
                       {formatDay(r.date)} · {purposeLabel[r.purpose]}
-                      {r.categoryName && <span className="text-slate-500"> · {r.categoryName}</span>}
+                      {r.categoryName && <span className="text-ink-soft"> · {r.categoryName}</span>}
                       {r.purpose === 'waiting' && (
-                        <a href="#/review" className="ml-1 text-xs text-amber-600 underline">
+                        <a href="#/review" className="ml-1 text-xs text-gold-ink underline">
                           label it
                         </a>
                       )}
                     </span>
-                    <span className={`shrink-0 tabular-nums ${r.amountCents < 0 ? 'text-emerald-600' : ''}`}>
+                    <span className={`shrink-0 tabular-nums ${r.amountCents < 0 ? 'text-good' : ''}`}>
                       {r.amountCents < 0 ? '+' : ''}
                       {formatCents(Math.abs(r.amountCents))}
                     </span>
@@ -205,27 +199,27 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
           onRemove={editing ? () => act(() => partnerPlanApi.removeContribution(editing.id), 'Removed.') : undefined}
         />
       )}
-    </div>
+    </Page>
   )
 }
 
 function MonthStatus({ s }: { s: ContributionStatus }) {
   const [text, cls] =
     s.state === 'received'
-      ? [`This month: received ${formatCents(s.receivedCents)}.`, 'text-emerald-700']
+      ? [`This month: received ${formatCents(s.receivedCents)}.`, 'text-good']
       : s.state === 'expected'
-        ? [`This month: expected by ${formatDay(s.windowEnd)}. It already counts.`, 'text-slate-500']
+        ? [`This month: expected by ${formatDay(s.windowEnd)}. It already counts.`, 'text-ink-soft']
         : s.state === 'late'
-          ? [`This month: late. Left to Spend counts without ${formatCents(s.shortfallCents)}.`, 'font-medium text-red-600']
+          ? [`This month: late. Left to Spend counts without ${formatCents(s.shortfallCents)}.`, 'font-medium text-danger']
           : [
               `This month: ${formatCents(s.receivedCents)} came, not ${formatCents(s.expectedCents)}${s.shortfallCents > 0 ? `. Left to Spend counts without ${formatCents(s.shortfallCents)}.` : '.'}`,
-              'font-medium text-amber-600',
+              'font-medium text-gold-ink',
             ]
   return <span className={`mt-1 block text-xs ${cls}`}>{text}</span>
 }
 
-const sheetCls = 'max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]'
-const inputCls = 'mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base'
+const sheetCls = 'max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]'
+const inputCls = 'mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base'
 
 function ContributionSheet({
   existing,
@@ -267,7 +261,7 @@ function ContributionSheet({
           {existing ? 'Fixed contribution' : `Add what ${who} sends`}
         </h2>
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Toward</span>
+          <span className="text-sm font-medium text-ink-soft">Toward</span>
           <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={inputCls}>
             {bills.map((c) => (
               <option key={c.id} value={c.id}>
@@ -277,35 +271,35 @@ function ContributionSheet({
           </select>
         </label>
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Amount each month</span>
+          <span className="text-sm font-medium text-ink-soft">Amount each month</span>
           <div className={`${inputCls} flex items-center`}>
-            <span className="text-sm text-slate-500">$</span>
+            <span className="text-sm text-ink-soft">$</span>
             <input aria-label="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className="w-full bg-transparent px-1 text-right outline-none" />
           </div>
         </label>
         <fieldset className="mt-4">
-          <legend className="text-sm font-medium text-slate-700">Usually arrives between</legend>
+          <legend className="text-sm font-medium text-ink-soft">Usually arrives between</legend>
           <div className="mt-1 grid grid-cols-2 gap-3">
             <input aria-label="From day" value={from} onChange={(e) => setFrom(e.target.value)} inputMode="numeric" className={inputCls} />
             <input aria-label="To day" value={to} onChange={(e) => setTo(e.target.value)} inputMode="numeric" className={inputCls} />
           </div>
-          <p className="mt-1 text-xs text-slate-500">The largest transfer from {who} in these days is matched to it. One you tag in Review counts on any day.</p>
+          <p className="mt-1 text-xs text-ink-soft">The largest transfer from {who} in these days counts.</p>
         </fieldset>
         {err && (
-          <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {err}
           </p>
         )}
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-slate-100 py-3 font-semibold text-slate-700">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
             Cancel
           </button>
-          <button type="submit" className="flex-1 rounded-xl bg-slate-900 py-3 font-semibold text-white">
+          <button type="submit" className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink text-sm">
             Save
           </button>
         </div>
         {onRemove && (
-          <button type="button" onClick={onRemove} className="mt-3 w-full py-2 text-sm font-medium text-red-600">
+          <button type="button" onClick={onRemove} className="mt-3 w-full py-2 text-sm font-medium text-danger">
             Remove
           </button>
         )}

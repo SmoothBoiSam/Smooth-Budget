@@ -1,5 +1,49 @@
 @import "tailwindcss";
 
+/*
+  The app's palette, taken from the cat logo (DECISIONS.md 187), as Tailwind colors (bg-surface, text-ink, bg-coral, ...):
+  - surface: the one soft surface everything sits on (neumorphism: cards are the page's own color, raised by shadow);
+  - ink / ink-soft / ink-faint: text, from the cat's charcoal;
+  - coral: the logo's background, for actions and what's selected;
+  - gold: the coin, for the money that matters (Left to Spend's ring, progress);
+  - good / danger: on track, and problems (always with words, never color alone).
+  Dark mode redefines them under :root.dark below.
+*/
+@theme {
+  --color-surface: #e9ebf0;
+  --color-ink: #2a2c33;
+  --color-ink-soft: #626775;
+  --color-ink-faint: #8d93a1;
+  --color-coral: #e05a5a;
+  --color-coral-ink: #ffffff;
+  --color-gold: #f2b53a;
+  --color-gold-ink: #94630a; /* gold as text: dark enough to read on the light surface */
+  --color-good: #23885a;
+  --color-danger: #c93a3a;
+  --color-neu-dark: #c2c7d2;
+  --color-neu-light: #ffffff;
+}
+
+/* Raised: cards, buttons, rows you tap. */
+@utility neu {
+  background-color: var(--color-surface);
+  box-shadow: 6px 6px 14px var(--color-neu-dark), -6px -6px 14px var(--color-neu-light);
+}
+/* Raised, smaller: chips and round icon buttons. */
+@utility neu-sm {
+  background-color: var(--color-surface);
+  box-shadow: 3px 3px 7px var(--color-neu-dark), -3px -3px 7px var(--color-neu-light);
+}
+/* The raised shadow alone, for colored buttons (bg-coral shadow-neu-sm). */
+@utility shadow-neu-sm {
+  box-shadow: 3px 3px 7px var(--color-neu-dark), -3px -3px 7px var(--color-neu-light);
+}
+/* Pressed in: inputs, tracks, the ring's well, a pressed button. */
+@utility neu-inset {
+  background-color: var(--color-surface);
+  box-shadow: inset 4px 4px 9px var(--color-neu-dark), inset -4px -4px 9px var(--color-neu-light);
+}
+
 html,
 body,
 #root {
@@ -7,58 +51,76 @@ body,
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-surface text-ink antialiased;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 /*
-  Dark mode. Every color in the app comes from Tailwind's color tokens (bg-white, text-slate-500,
-  bg-red-50, ...), and Tailwind v4 utilities read those tokens as CSS variables. So instead of adding
-  dark: variants to every component, dark mode redefines the tokens the app uses:
-  - the slate scale and white flip (page, cards, borders, text);
-  - pale tints (the 50-200 shades used for banners and badges) become deep tints;
-  - dark text shades (600-900 of each hue) become light ones, so status text stays readable;
-  - the mid tones used for bars and the amber Left to Spend number (500) stay as they are.
+  Screens not yet moved to the palette above still use Tailwind's slate/white tokens. Light mode maps the page color
+  (slate-50) and primary text (slate-900) onto the palette so they match.
+*/
+:root {
+  --color-slate-50: #e9ebf0;
+  --color-slate-900: #2a2c33;
+}
+
+/*
+  Dark mode: a plain deep grey with no tint, never black (DECISIONS.md 187). Every color in the app comes from CSS
+  variables, so dark mode redefines them instead of adding dark: variants:
+  - the palette above;
+  - the slate scale and white (screens not yet on the palette);
+  - pale tints (50-200, banners and badges) become deep tints, dark text shades (600-900) become light ones.
   The class is set on <html> before first paint by the script in index.html (no flash).
 */
 :root.dark {
   color-scheme: dark; /* native form controls, file pickers and scrollbars */
 
-  /* Neutral grays on true black (no blue tint). */
-  --color-white: #161616;       /* cards, sheets, inputs */
-  --color-slate-50: #000000;    /* page background */
-  --color-slate-100: #222222;   /* subtle fills, dividers */
-  --color-slate-200: #2e2e2e;   /* card outlines, track behind progress bars */
-  --color-slate-300: #444444;   /* input borders, disabled tabs */
-  --color-slate-400: #8a8a8a;   /* faint text */
-  --color-slate-500: #a3a3a3;   /* secondary text */
-  --color-slate-600: #bdbdbd;
-  --color-slate-700: #d4d4d4;
-  --color-slate-900: #f2f2f2;   /* primary text, primary buttons */
+  --color-surface: #303030;
+  --color-ink: #ededed;
+  --color-ink-soft: #a8a8a8;
+  --color-ink-faint: #808080;
+  --color-coral: #e8666a;
+  --color-gold: #f4bd4a;
+  --color-gold-ink: #f4bd4a;
+  --color-good: #4cc38a;
+  --color-danger: #f07a72;
+  --color-neu-dark: #1f1f1f;
+  --color-neu-light: #3e3e3e;
 
-  --color-emerald-50: #0e2a21;
-  --color-emerald-100: #11392b;
-  --color-emerald-600: #34d399;
-  --color-emerald-700: #6ee7b7;
-  --color-emerald-800: #a7f3d0;
-  --color-emerald-900: #d1fae5;
+  --color-white: #353535;       /* cards, sheets, inputs */
+  --color-slate-50: #303030;    /* page background */
+  --color-slate-100: #3b3b3b;   /* subtle fills, dividers */
+  --color-slate-200: #454545;   /* card outlines, track behind progress bars */
+  --color-slate-300: #585858;   /* input borders, disabled tabs */
+  --color-slate-400: #8c8c8c;   /* faint text */
+  --color-slate-500: #a8a8a8;   /* secondary text */
+  --color-slate-600: #c2c2c2;
+  --color-slate-700: #d8d8d8;
+  --color-slate-900: #ededed;   /* primary text, primary buttons */
 
-  --color-amber-50: #2a200e;
-  --color-amber-100: #3a2b0f;
-  --color-amber-200: #5a4314;
-  --color-amber-600: #fbbf24;
-  --color-amber-800: #fde68a;
-  --color-amber-900: #fef3c7;
+  --color-emerald-50: #24372f;
+  --color-emerald-100: #284437;
+  --color-emerald-600: #4cc38a;
+  --color-emerald-700: #74d3a5;
+  --color-emerald-800: #a7e6c6;
+  --color-emerald-900: #d1f4e2;
 
-  --color-red-50: #2d1416;
-  --color-red-100: #431a1d;
-  --color-red-600: #f87171;
-  --color-red-700: #fca5a5;
-  --color-red-800: #fecaca;
+  --color-amber-50: #3a3324;
+  --color-amber-100: #463b22;
+  --color-amber-200: #5c4b25;
+  --color-amber-600: #f4bd4a;
+  --color-amber-800: #fbe2a4;
+  --color-amber-900: #fdf0cc;
+
+  --color-red-50: #3d2a2c;
+  --color-red-100: #4a2d30;
+  --color-red-600: #f07a72;
+  --color-red-700: #f6a39d;
+  --color-red-800: #fac8c4;
 
   /* Review's "Groceries?" label (DECISIONS.md 145). */
-  --color-orange-50: #2b1a0c;
-  --color-orange-200: #5c3512;
+  --color-orange-50: #3b2f24;
+  --color-orange-200: #5e4128;
   --color-orange-700: #fdba74;
 
   --color-sky-700: #7dd3fc;
@@ -66,7 +128,7 @@ body {
 
 /* The sheet backdrop must stay dark, not turn into a light veil. */
 :root.dark .bg-slate-900\/40 {
-  background-color: rgb(0 0 0 / 0.6);
+  background-color: rgb(18 18 18 / 0.6);
 }
 
 /* The tabby easter egg swings gently from the top of the screen while Home syncs (DECISIONS.md 139). */

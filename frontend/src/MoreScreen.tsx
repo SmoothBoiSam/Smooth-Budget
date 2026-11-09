@@ -4,6 +4,7 @@ import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import BankConnections from './BankConnections'
 import { formatCents, formatTime } from './format'
+import { Card, ErrorNotice, Page, PageHeader, Row, Rows, headerActionCls } from './ui'
 
 const accountTypeLabel: Record<Account['type'], string> = { Checking: 'Checking', Savings: 'Savings', CreditCard: 'Credit card' }
 
@@ -50,7 +51,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
     onSignedOut()
   }
 
-  // Merchant rules and CSV imports grow over time, so each has its own page (DECISIONS.md 156).
+  // One menu; each part that grows over time has its own page (DECISIONS.md 156, 187).
   const [sub, setSub] = useState(subFromHash)
   useEffect(() => {
     const onHash = () => {
@@ -61,138 +62,121 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  const shell = 'mx-auto min-h-screen max-w-md space-y-8 bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28'
-  const errorBox = error && (
-    <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
-      {error}
-    </p>
-  )
+  const back = { href: '#/more', label: 'More' }
+  const errorBox = error && <ErrorNotice message={error} onRetry={() => void load()} />
 
-  if (sub === 'imports')
+  if (sub === 'banks')
     return (
-      <div className={shell}>
-        <SubHeader title="CSV imports" />
+      <Page>
+        <PageHeader title="Bank connections" back={back} />
+        <BankConnections onChanged={changed} />
+      </Page>
+    )
+
+  if (sub === 'import')
+    return (
+      <Page>
+        <PageHeader title="Import a CSV" back={back} />
         {errorBox}
-        {batches.length === 0 ? (
-          <p className="text-sm text-slate-500">Nothing imported yet.</p>
-        ) : (
-          <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
-            {batches.map((b) => (
-              <li key={b.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{b.fileName}</p>
-                  <p className="text-xs text-slate-500">
-                    {b.accountName} · {formatTime(b.importedUtc)} · {b.importedCount} new, {b.duplicateCount} already there
-                    {b.errorCount > 0 && `, ${b.errorCount} unreadable`}
-                  </p>
-                </div>
-                {b.importedCount > 0 && (
-                  <button type="button" onClick={() => undo(b)} className="text-sm font-medium text-red-600">
-                    Undo
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+        <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
+        {/* Past files and their undo sit right under the import they came from (DECISIONS.md 184, 187). */}
+        <Card title="Imported files">
+          {batches.length === 0 ? (
+            <p className="px-5 py-4 text-sm text-ink-soft">Nothing imported yet.</p>
+          ) : (
+            <Rows>
+              {batches.map((b) => (
+                <li key={b.id} className="flex items-center gap-3 px-5 py-3.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{b.fileName}</p>
+                    <p className="text-xs text-ink-soft">
+                      {b.accountName} · {formatTime(b.importedUtc)} · {b.importedCount} new
+                      {b.errorCount > 0 && `, ${b.errorCount} unreadable`}
+                    </p>
+                  </div>
+                  {b.importedCount > 0 && (
+                    <button type="button" onClick={() => undo(b)} className={headerActionCls + ' text-danger!'}>
+                      Undo
+                    </button>
+                  )}
+                </li>
+              ))}
+            </Rows>
+          )}
+        </Card>
+      </Page>
     )
 
   if (sub === 'rules')
     return (
-      <div className={shell}>
-        <SubHeader title="Merchant rules" />
+      <Page>
+        <PageHeader title="Merchant rules" back={back} />
         {errorBox}
-        {rules.length === 0 ? (
-          <p className="text-sm text-slate-500">No rules yet. When you recategorize a transaction, tick "Always use this category" to create one.</p>
-        ) : (
-          <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
-            {rules.map((r) => (
-              <li key={r.id} className="flex items-center gap-3 px-4 py-3">
-                <p className="min-w-0 flex-1 text-sm">
-                  <span className="font-medium">{r.pattern}</span> <span className="text-slate-400">→</span> {r.categoryName}
-                </p>
-                <button type="button" onClick={() => removeRule(r)} className="text-sm font-medium text-slate-500">
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+        <Card>
+          {rules.length === 0 ? (
+            <p className="px-5 py-4 text-sm text-ink-soft">None yet. Tick “Always use this category” when you change a transaction’s category.</p>
+          ) : (
+            <Rows>
+              {rules.map((r) => (
+                <li key={r.id} className="flex items-center gap-3 px-5 py-3.5">
+                  <p className="min-w-0 flex-1 text-sm">
+                    <span className="font-medium">{r.pattern}</span> <span className="text-ink-faint">→</span> {r.categoryName}
+                  </p>
+                  <button type="button" onClick={() => removeRule(r)} className={headerActionCls + ' text-ink-soft!'}>
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </Rows>
+          )}
+        </Card>
+      </Page>
     )
 
+  const lastImport = batches[0]
   return (
-    <div className={shell}>
-      <h1 className="text-2xl font-bold tracking-tight">More</h1>
+    <Page>
+      <PageHeader title="More" />
       {errorBox}
 
-      <BankConnections onChanged={changed} />
+      <Card title="Accounts">
+        <Rows>
+          <Row label="Bank connections" href="#/more/banks" />
+          <Row label="Import a CSV" hint={lastImport ? `Last: ${lastImport.fileName}` : undefined} href="#/more/import" />
+          <Row label="Merchant rules" value={rules.length > 0 ? rules.length : undefined} href="#/more/rules" />
+          <Row label="Partner" hint="Contributions, splits, who owes whom" href="#/partner" />
+        </Rows>
+      </Card>
 
-      <div className="space-y-2">
-        <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
-        {/* With the CSV import it belongs to, on its own (DECISIONS.md 184). */}
-        <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
-          <SubLink href="#/more/imports" title="View CSVs" detail={batches.length === 0 ? 'Nothing imported yet' : `${batches.length} ${batches.length === 1 ? 'file' : 'files'}, with undo`} />
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
-        <SubLink href="#/more/rules" title="Merchant rules" detail={rules.length === 0 ? 'None yet' : `${rules.length} ${rules.length === 1 ? 'rule' : 'rules'}`} />
-      </div>
-
-      {/* Under merchant rules (DECISIONS.md 162). */}
-      <a href="#/partner" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
-        <span>
-          <span className="block font-semibold">Partner</span>
-          <span className="block text-sm text-slate-500">Their name on transfers, fixed contributions, split categories, and who owes whom</span>
-        </span>
-        <span aria-hidden className="font-semibold text-slate-400">›</span>
-      </a>
-
-      <section aria-labelledby="settings-h" className="space-y-3">
-        <h2 id="settings-h" className="text-sm font-semibold text-slate-700">
-          Settings
-        </h2>
-        <AppearanceSetting />
-        <NotificationSetting />
-        <div className="flex items-center justify-between rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
-          <span className="truncate text-sm text-slate-500">{me.email}</span>
-          <button type="button" onClick={signOut} className="text-sm font-medium text-slate-700">
-            Sign out
-          </button>
-        </div>
-      </section>
-    </div>
+      <Card title="Settings">
+        <Rows>
+          <li>
+            <AppearanceSetting />
+          </li>
+          <li>
+            <NotificationSetting />
+          </li>
+          <li className="flex items-center gap-3 px-5 py-3.5 text-sm">
+            <span className="min-w-0 flex-1 truncate text-ink-soft">{me.email}</span>
+            <button type="button" onClick={signOut} className={headerActionCls}>
+              Sign out
+            </button>
+          </li>
+        </Rows>
+      </Card>
+    </Page>
   )
 }
 
 const subFromHash = () => {
   const h = window.location.hash
-  return h.startsWith('#/more/rules') ? 'rules' : h.startsWith('#/more/imports') ? 'imports' : null
-}
-
-function SubHeader({ title }: { title: string }) {
-  return (
-    <div>
-      <a href="#/more" className="text-sm font-medium text-slate-500">
-        ‹ More
-      </a>
-      <h1 className="mt-1 text-2xl font-bold tracking-tight">{title}</h1>
-    </div>
-  )
-}
-
-function SubLink({ href, title, detail }: { href: string; title: string; detail: string }) {
-  return (
-    <a href={href} className="flex items-center justify-between gap-3 px-4 py-3.5">
-      <span className="min-w-0">
-        <span className="block font-semibold">{title}</span>
-        <span className="block truncate text-sm text-slate-500">{detail}</span>
-      </span>
-      <span aria-hidden className="font-semibold text-slate-400">›</span>
-    </a>
-  )
+  return h.startsWith('#/more/rules')
+    ? 'rules'
+    : h.startsWith('#/more/import') // #/more/imports, the old list page, lands here too
+      ? 'import'
+      : h.startsWith('#/more/banks')
+        ? 'banks'
+        : null
 }
 
 function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Account[]; onImported: () => void; onAccountAdded: () => void }) {
@@ -224,13 +208,8 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
   }
 
   return (
-    <section aria-labelledby="import-h" className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-      <h2 id="import-h" className="font-semibold">
-        Import a CSV
-      </h2>
-      <p className="mt-1 text-sm text-slate-500">
-        Chase checking, Chase credit card or Apple Card exports. Re-importing an overlapping file is safe.
-      </p>
+    <section aria-label="Import a CSV" className="neu mt-6 rounded-3xl p-5">
+      <p className="text-xs text-ink-soft">Chase checking, savings or credit card, or Apple Card. Overlapping files are safe.</p>
 
       {adding ? (
         <AddAccountForm
@@ -243,14 +222,14 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
           }}
         />
       ) : (
-        <form onSubmit={submit} className="mt-4 space-y-3">
+        <form onSubmit={submit} className="mt-4 space-y-4">
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Account</span>
+            <span className="text-sm font-medium text-ink-soft">Account</span>
             <div className="mt-1 flex gap-2">
               <select
                 value={selectedId}
                 onChange={(e) => setAccountId(e.target.value)}
-                className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-3 text-base"
+                className="min-w-0 flex-1 rounded-xl neu-inset px-3 py-3 text-base"
               >
                 {accounts.length === 0 && <option value="">Add an account first</option>}
                 {accounts.map((a) => (
@@ -260,25 +239,25 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
                   </option>
                 ))}
               </select>
-              <button type="button" onClick={() => setAdding(true)} className="rounded-xl bg-slate-100 px-3 text-sm font-medium">
-                Add
+              <button type="button" onClick={() => setAdding(true)} className="neu-sm rounded-xl px-3.5 text-sm font-semibold text-coral">
+                New
               </button>
             </div>
           </label>
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">File</span>
+            <span className="text-sm font-medium text-ink-soft">File</span>
             <input
               type="file"
               accept=".csv,text/csv"
               required
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="mt-1 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:font-medium"
+              className="mt-1 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-coral file:text-coral-ink file:px-3 file:py-2 file:font-medium"
             />
           </label>
           <button
             type="submit"
             disabled={busy || !file || !selectedId}
-            className="w-full rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50"
+            className="w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
           >
             {busy ? 'Importing…' : 'Import'}
           </button>
@@ -286,12 +265,12 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
       )}
 
       {error && (
-        <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
       {result && (
-        <div role="status" className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <div role="status" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           <p className="font-semibold">
             {result.format}: {result.imported} new, {result.duplicates} already imported
           </p>
@@ -315,7 +294,7 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
             )}
           </p>
           {result.errors.length > 0 && (
-            <ul className="mt-1 text-red-700">
+            <ul className="mt-1 text-danger">
               {result.errors.slice(0, 5).map((e) => (
                 <li key={e.rowNumber}>
                   Row {e.rowNumber}: {e.message}
@@ -346,20 +325,20 @@ function AddAccountForm({ onDone }: { onDone: (a: Account | null) => void }) {
   }
 
   return (
-    <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl bg-slate-50 p-3">
+    <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl neu-inset p-3">
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
         required
         maxLength={100}
         placeholder="Name, e.g. Chase Checking"
-        className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+        className="block w-full rounded-xl neu-inset px-3 py-2"
       />
       <div className="flex gap-2">
         <select
           value={type}
           onChange={(e) => setType(e.target.value as Account['type'])}
-          className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2"
+          className="flex-1 rounded-xl neu-inset px-3 py-2"
         >
           <option value="Checking">Checking</option>
           <option value="Savings">Savings</option>
@@ -371,15 +350,15 @@ function AddAccountForm({ onDone }: { onDone: (a: Account | null) => void }) {
           inputMode="numeric"
           placeholder="Last 4"
           aria-label="Last 4 digits (optional)"
-          className="w-24 rounded-lg border border-slate-300 bg-white px-3 py-2"
+          className="w-24 rounded-xl neu-inset px-3 py-2"
         />
       </div>
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
-        <button type="button" onClick={() => onDone(null)} className="flex-1 rounded-lg bg-white py-2 text-sm font-medium ring-1 ring-slate-300">
+        <button type="button" onClick={() => onDone(null)} className="neu flex-1 rounded-2xl py-3 text-sm font-semibold">
           Cancel
         </button>
-        <button type="submit" className="flex-1 rounded-lg bg-slate-900 py-2 text-sm font-semibold text-white">
+        <button type="submit" className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink">
           Add account
         </button>
       </div>

@@ -32,8 +32,8 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not look at your history.'))
   }, [])
 
-  if (error && !d) return <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>
-  if (!d) return <p className="mt-10 text-center text-slate-400">Looking at your transactions…</p>
+  if (error && !d) return <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">{error}</p>
+  if (!d) return <p className="mt-10 text-center text-ink-faint">Looking at your transactions…</p>
 
   const toAdd = d.proposed.filter((p) => p.status !== 'exists')
   const kept = d.proposed.filter((p) => p.status === 'exists')
@@ -65,7 +65,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
   return (
     <div className="pb-6">
       <h2 className="mt-2 text-base font-semibold">{firstTime ? 'Set up your categories' : 'Categories from your history'}</h2>
-      <p className="mt-1 text-sm text-slate-500">
+      <p className="mt-1 text-sm text-ink-soft">
         {nothingFound
           ? 'There isn’t enough history yet to find your categories. Import a few months of CSVs or connect a bank, then come back.'
           : `From your last ${d.monthsAnalyzed} ${d.monthsAnalyzed === 1 ? 'month' : 'months'} of transactions. Only what you actually spend on is listed; you can add, rename or hide categories any time.`}
@@ -73,10 +73,10 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
 
       {toAdd.length > 0 && (
         <section className="mt-4" aria-labelledby="setup-add">
-          <h3 id="setup-add" className="text-sm font-semibold text-slate-700">
+          <h3 id="setup-add" className="text-sm font-semibold text-ink-soft">
             {firstTime ? 'Categories that fit your spending' : 'Worth adding'}
           </h3>
-          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+          <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
             {toAdd.map((p) => (
               <li key={p.name}>
                 <label className="flex cursor-pointer gap-3 px-4 py-3">
@@ -84,21 +84,21 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
                     type="checkbox"
                     checked={create.has(p.name)}
                     onChange={() => setCreate(toggle(create, p.name))}
-                    className="mt-1 h-4 w-4 shrink-0 accent-slate-900"
+                    className="mt-1 h-4 w-4 shrink-0 accent-coral"
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2">
                       <span className="truncate text-sm font-medium">
                         {p.name}
                         {p.custom && <span className="ml-2 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">Just for you</span>}
-                        {p.status === 'hidden' && <span className="ml-2 text-xs font-normal text-slate-400">(archived now)</span>}
+                        {p.status === 'hidden' && <span className="ml-2 text-xs font-normal text-ink-faint">(archived now)</span>}
                       </span>
-                      <span className="shrink-0 text-sm tabular-nums text-slate-600">~{formatCents(p.monthlyCents)}/mo</span>
+                      <span className="shrink-0 text-sm tabular-nums text-ink-soft">~{formatCents(p.monthlyCents)}/mo</span>
                     </span>
-                    <span className="mt-0.5 block text-xs text-slate-500">
+                    <span className="mt-0.5 block text-xs text-ink-soft">
                       {typeLabels[p.type]} · {p.reason}
                     </span>
-                    {p.examples.length > 0 && <span className="mt-0.5 block truncate text-xs text-slate-400">{p.examples.join(', ')}</span>}
+                    {p.examples.length > 0 && <span className="mt-0.5 block truncate text-xs text-ink-faint">{p.examples.join(', ')}</span>}
                   </span>
                 </label>
               </li>
@@ -109,16 +109,16 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
 
       {d.unused.length > 0 && (
         <section className="mt-6" aria-labelledby="setup-hide">
-          <h3 id="setup-hide" className="text-sm font-semibold text-slate-700">Categories you don’t use</h3>
-          <p className="mt-1 text-xs text-slate-500">Checked ones are archived. Archived categories keep their history and can come back from Budget → Categories → Archived.</p>
-          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+          <h3 id="setup-hide" className="text-sm font-semibold text-ink-soft">Categories you don’t use</h3>
+          <p className="mt-1 text-xs text-ink-soft">Checked ones are archived. Archived categories keep their history and can come back from Budget → Categories → Archived.</p>
+          <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
             {d.unused.map((u) => (
               <li key={u.id}>
                 <label className="flex cursor-pointer gap-3 px-4 py-3">
-                  <input type="checkbox" checked={hide.has(u.id)} onChange={() => setHide(toggle(hide, u.id))} className="mt-1 h-4 w-4 shrink-0 accent-slate-900" />
+                  <input type="checkbox" checked={hide.has(u.id)} onChange={() => setHide(toggle(hide, u.id))} className="mt-1 h-4 w-4 shrink-0 accent-coral" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium">Hide {u.name}</span>
-                    <span className="block text-xs text-slate-500">{u.reason}</span>
+                    <span className="block text-xs text-ink-soft">{u.reason}</span>
                   </span>
                 </label>
               </li>
@@ -128,18 +128,18 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
       )}
 
       {kept.length > 0 && (
-        <p className="mt-6 text-xs text-slate-500">
+        <p className="mt-6 text-xs text-ink-soft">
           Already set up and in use: {kept.map((p) => p.name).join(', ')}.
         </p>
       )}
       {d.unmatched > 0 && (
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-ink-soft">
           {d.unmatched} {d.unmatched === 1 ? 'purchase' : 'purchases'} didn’t fit a pattern. You can file those yourself in To review.
         </p>
       )}
 
       {error && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
@@ -147,16 +147,16 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
         type="button"
         onClick={apply}
         disabled={busy || (changes === 0 && !firstTime) || nothingFound}
-        className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50"
+        className="mt-6 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
       >
         {busy ? 'Sorting your transactions…' : changes === 0 ? 'Nothing to change' : firstTime ? 'Create these and sort my transactions' : 'Apply'}
       </button>
       {onCancel && (
-        <button type="button" onClick={onCancel} className="mt-2 w-full py-2 text-sm text-slate-500">
+        <button type="button" onClick={onCancel} className="mt-2 w-full py-2 text-sm text-ink-soft">
           {firstTime ? 'Skip for now' : 'Back to the budget'}
         </button>
       )}
-      <p className="mt-3 text-center text-xs text-slate-400">Transactions are sorted into these right away, and each one waits in To review for you to confirm.</p>
+      <p className="mt-3 text-center text-xs text-ink-faint">Transactions are sorted into these right away, and each one waits in To review for you to confirm.</p>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
 import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading } from './ui'
+import { Caret, ErrorNotice, Loading, Page, PageHeader } from './ui'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -64,10 +64,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
   if (!saved) {
     return (
       <Page>
-        <a href="#/payday" className="text-sm font-medium text-slate-500">
-          ‹ Plan
-        </a>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Debt</h1>
+        <PageHeader title="Debt" back={{ href: '#/payday', label: 'Plan' }} />
         {error ? <ErrorNotice message={error} onRetry={() => void load()} /> : <Loading />}
       </Page>
     )
@@ -100,37 +97,34 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
 
   return (
     <Page>
-      <a href="#/payday" className="text-sm font-medium text-slate-500">
-        ‹ Plan
-      </a>
-      <h1 className="mt-1 text-2xl font-bold tracking-tight">Debt</h1>
+      <PageHeader title="Debt" back={{ href: '#/payday', label: 'Plan' }} />
 
       {notice && (
-        <p role="status" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <p role="status" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
         </p>
       )}
       {error && <Alert text={error} />}
 
-      <section aria-label="Summary" className="mt-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-        <p className="text-sm text-slate-500">You owe</p>
+      <section aria-label="Summary" className="mt-4 rounded-3xl neu p-5">
+        <p className="text-sm text-ink-soft">You owe</p>
         <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.owedCents)}</p>
         {plan ? (
           plan.neverPaysOff ? (
-            <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+            <p role="alert" className="mt-2 text-sm font-medium text-danger">
               At {formatCents(plan.monthlyPaymentCents)} a month the interest outruns the payments. Raise the extra below.
             </p>
           ) : (
-            <p className="mt-2 text-sm text-slate-700">
+            <p className="mt-2 text-sm text-ink-soft">
               Debt-free by <span className="font-semibold">{formatMonth(plan.debtFreeBy!)}</span>
-              <span className="text-slate-500">
+              <span className="text-ink-soft">
                 {' '}
                 · {plural(plan.months, 'month')} · {formatCents(plan.totalInterestCents)} in interest
               </span>
             </p>
           )
         ) : (
-          s.owedCents > 0 && <p className="mt-2 text-sm text-slate-500">Add each card’s APR and minimum to see your debt-free date.</p>
+          s.owedCents > 0 && <p className="mt-2 text-sm text-ink-soft">Add each card’s APR and minimum to see your debt-free date.</p>
         )}
         {s.startingCents > 0 && <Progress summary={s} />}
       </section>
@@ -160,7 +154,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
       {s.history && s.history.length > 0 && <PastPayments history={s.history} />}
 
       {plan && (
-        <section aria-labelledby="plan-h" className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+        <section aria-labelledby="plan-h" className="mt-4 rounded-3xl neu p-4">
           <h2 id="plan-h" className="text-sm font-semibold">
             Your plan
           </h2>
@@ -174,10 +168,10 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
                 role="radio"
                 aria-checked={currentStrategy === st}
                 onClick={() => whatIf(currentExtra, st)}
-                className={`rounded-xl px-3 py-2 text-left ring-1 ${currentStrategy === st ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white ring-slate-200'}`}
+                className={`rounded-xl px-3 py-2 text-left ${currentStrategy === st ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu'}`}
               >
                 <span className="block text-sm font-semibold">{st}</span>
-                <span className={`block text-xs ${currentStrategy === st ? 'text-slate-300' : 'text-slate-500'}`}>
+                <span className={`block text-xs ${currentStrategy === st ? 'text-ink-faint' : 'text-ink-soft'}`}>
                   {st === 'Avalanche' ? 'Highest APR first · least interest' : 'Smallest balance first · quick wins'}
                 </span>
               </button>
@@ -199,27 +193,27 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
               value={currentExtra}
               onChange={(e) => whatIf(Number(e.target.value), currentStrategy)}
               aria-valuetext={`${formatCents(currentExtra)} extra a month`}
-              className="mt-2 w-full accent-slate-900"
+              className="mt-2 w-full accent-coral"
             />
           </label>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-ink-soft">
             Minimums {formatCents(plan.minimumsCents)} + extra {formatCents(currentExtra)} = <span className="font-medium">{formatCents(plan.monthlyPaymentCents)} a month</span>.
             {plan.firstTarget && ` Extra goes to ${plan.firstTarget} first.`}
-            {!changed && savedPlan?.extraSource === 'budget' && ' Right now the extra is whatever your budget has left over after bills, spending and your savings priorities. Set an amount and the budget follows it.'}
-            {!changed && savedPlan?.extraSource === 'you' && ' Your budget plans this extra each month, as far as the month’s money goes.'}
+            {!changed && savedPlan?.extraSource === 'budget' && ' Now: whatever your budget has left over.'}
+            {!changed && savedPlan?.extraSource === 'you' && ' Your budget plans this each month.'}
           </p>
           {changed ? (
             <div className="mt-3 flex gap-2">
-              <button type="button" onClick={() => void load()} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-sm font-semibold text-slate-700">
+              <button type="button" onClick={() => void load()} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
                 Reset
               </button>
-              <button type="button" disabled={busy} onClick={() => void savePlan(currentExtra)} className="flex-1 rounded-xl bg-slate-900 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              <button type="button" disabled={busy} onClick={() => void savePlan(currentExtra)} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-50">
                 Save as my plan
               </button>
             </div>
           ) : (
             savedPlan?.extraSource === 'you' && (
-              <button type="button" disabled={busy} onClick={() => void savePlan(null)} className="mt-2 text-xs font-medium text-slate-600 underline">
+              <button type="button" disabled={busy} onClick={() => void savePlan(null)} className="mt-2 text-xs font-medium text-ink-soft underline">
                 Use whatever’s left over each month instead
               </button>
             )
@@ -228,15 +222,15 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
       )}
 
       <section aria-labelledby="debts-h" className="mt-6">
-        <h2 id="debts-h" className="text-sm font-semibold text-slate-700">
+        <h2 id="debts-h" className="px-1 text-sm font-semibold text-ink-soft">
           Cards and loans
         </h2>
         {visible.length === 0 ? (
-          <p className="mt-2 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
+          <p className="mt-2 rounded-2xl neu px-4 py-3 text-sm text-ink-soft">
             No debts yet. Credit cards show up here once they’re connected or imported.
           </p>
         ) : (
-          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+          <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
             {visible.map((d) => (
               <li key={d.id}>
                 <DebtRow d={d} onOpen={() => setEditing(d)} />
@@ -244,11 +238,11 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
             ))}
           </ul>
         )}
-        <button type="button" onClick={() => setEditing(null)} className="mt-3 w-full rounded-xl bg-white py-3 text-sm font-medium ring-1 ring-slate-200">
+        <button type="button" onClick={() => setEditing(null)} className="mt-3 w-full rounded-2xl neu py-3 text-sm font-medium">
           + Add a loan or other debt
         </button>
         {hidden.length > 0 && (
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-ink-soft">
             Hidden from the plan:{' '}
             {hidden.map((d, i) => (
               <span key={d.id}>
@@ -278,13 +272,9 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
   )
 }
 
-function Page({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto min-h-screen max-w-md bg-slate-50 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-28">{children}</div>
-}
-
 function Alert({ text }: { text: string }) {
   return (
-    <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
+    <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
       {text}
     </p>
   )
@@ -295,11 +285,11 @@ function Progress({ summary: s }: { summary: DebtSummary }) {
   const done = s.startingCents > 0 ? Math.min(1, s.paidDownCents / s.startingCents) : 0
   return (
     <div className="mt-4">
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden>
-        <div className="h-full rounded-full bg-emerald-600" style={{ width: `${done * 100}%` }} />
+      <div className="h-2 overflow-hidden rounded-full neu-inset" aria-hidden>
+        <div className="h-full rounded-full bg-good" style={{ width: `${done * 100}%` }} />
       </div>
-      <p className="mt-1.5 text-xs text-slate-500">
-        <span className="font-medium text-slate-700">{formatCents(s.paidDownCents)} paid down</span> since {started ? formatDay(started) : 'you started'} (
+      <p className="mt-1.5 text-xs text-ink-soft">
+        <span className="font-medium text-ink-soft">{formatCents(s.paidDownCents)} paid down</span> since {started ? formatDay(started) : 'you started'} (
         {formatCents(s.startingCents)} then)
       </p>
     </div>
@@ -308,12 +298,12 @@ function Progress({ summary: s }: { summary: DebtSummary }) {
 
 function NeedsDetails({ count, busy, onFromBank }: { count: number; busy: boolean; onFromBank: () => void }) {
   return (
-    <section className="mt-4 rounded-2xl bg-amber-50 p-4 text-amber-900 ring-1 ring-amber-200">
+    <section className="mt-4 rounded-2xl neu-inset p-4 text-gold-ink">
       <p className="text-sm font-semibold">
         {count === 1 ? '1 card needs' : `${count} cards need`} an APR and minimum payment
       </p>
       <p className="mt-0.5 text-xs">They’re on your statement. Until then they aren’t in the plan below.</p>
-      <button type="button" disabled={busy} onClick={onFromBank} className="mt-3 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 ring-1 ring-amber-200 disabled:opacity-50">
+      <button type="button" disabled={busy} onClick={onFromBank} className="mt-3 rounded-full bg-surface px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-50">
         {busy ? 'Asking your bank…' : 'Fill in from my bank'}
       </button>
     </section>
@@ -324,16 +314,16 @@ function Comparison({ plan, cmp }: { plan: NonNullable<DebtSummary['plan']>; cmp
   if (plan.neverPaysOff || cmp.neverPaysOff) return null
   const saves = cmp.interestDifferenceCents
   const months = cmp.monthsDifference
-  if (saves === 0 && months === 0) return <p className="mt-2 text-xs text-slate-500">Highest APR first or smallest balance first comes out the same for your debts, so there’s nothing to choose.</p>
+  if (saves === 0 && months === 0) return <p className="mt-2 text-xs text-ink-soft">Highest APR or smallest balance first: same result for your debts.</p>
   return (
-    <p className="mt-2 text-xs text-slate-500">
+    <p className="mt-2 text-xs text-ink-soft">
       {saves >= 0 ? (
         <>
-          {plan.strategy} saves <span className="font-semibold text-slate-700">{formatCents(saves)}</span> in interest
+          {plan.strategy} saves <span className="font-semibold text-ink-soft">{formatCents(saves)}</span> in interest
         </>
       ) : (
         <>
-          {plan.strategy} costs <span className="font-semibold text-slate-700">{formatCents(-saves)}</span> more interest
+          {plan.strategy} costs <span className="font-semibold text-ink-soft">{formatCents(-saves)}</span> more interest
         </>
       )}
       {months > 0 ? ` and finishes ${plural(months, 'month')} sooner` : months < 0 ? `, but takes ${plural(-months, 'month')} longer,` : ''} compared with {cmp.strategy}.
@@ -343,35 +333,35 @@ function Comparison({ plan, cmp }: { plan: NonNullable<DebtSummary['plan']>; cmp
 
 function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
   return (
-    <button type="button" onClick={onOpen} className="block w-full px-4 py-3 text-left hover:bg-slate-50">
+    <button type="button" onClick={onOpen} className="block w-full px-4 py-3 text-left">
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate text-sm font-medium">
           {d.name}
-          {d.mask && <span className="text-slate-400"> ••{d.mask}</span>}
+          {d.mask && <span className="text-ink-faint"> ••{d.mask}</span>}
         </span>
         <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCents(d.balanceCents)}</span>
       </div>
       {d.needsDetails ? (
-        <p className="mt-0.5 text-xs font-medium text-amber-600">Add the APR and minimum ›</p>
+        <p className="mt-0.5 text-xs font-medium text-gold-ink">Add the APR and minimum ›</p>
       ) : d.balanceCents === 0 ? (
-        <p className="mt-0.5 text-xs text-emerald-700">Paid off</p>
+        <p className="mt-0.5 text-xs text-good">Paid off</p>
       ) : (
-        <p className="mt-0.5 text-xs text-slate-500">
+        <p className="mt-0.5 text-xs text-ink-soft">
           {d.aprBps !== null && `${formatApr(d.aprBps)} APR`}
           {d.minimumCents !== null && ` · ${formatCents(d.minimumCents)} min`}
           {d.nextDueDate && ` · due ${formatDay(d.nextDueDate)}${d.dueDay === 31 ? " (last day)" : ""}`}
-          {d.paidOffBy && <span className="text-slate-700"> · paid off {formatMonth(d.paidOffBy)}</span>}
+          {d.paidOffBy && <span className="text-ink-soft"> · paid off {formatMonth(d.paidOffBy)}</span>}
         </p>
       )}
       {d.utilizationPercent !== null && d.isCard && (
         <div className="mt-2 flex items-center gap-2">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100" aria-hidden>
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full neu-inset" aria-hidden>
             <div
-              className={`h-full rounded-full ${d.utilizationPercent > 30 ? 'bg-amber-500' : 'bg-emerald-600'}`}
+              className={`h-full rounded-full ${d.utilizationPercent > 30 ? 'bg-gold' : 'bg-good'}`}
               style={{ width: `${Math.min(100, d.utilizationPercent)}%` }}
             />
           </div>
-          <span className="shrink-0 text-[11px] tabular-nums text-slate-500">{d.utilizationPercent}% of limit used</span>
+          <span className="shrink-0 text-[11px] tabular-nums text-ink-soft">{d.utilizationPercent}% of limit used</span>
         </div>
       )}
     </button>
@@ -387,26 +377,26 @@ function PastPayments({ history }: { history: { month: string; owedCents: number
   const [open, setOpen] = useRemembered('debt.past', false)
   const paid = history.reduce((sum, h) => sum + h.paidCents, 0)
   return (
-    <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <section className="mt-4 rounded-3xl neu p-4">
       <h2>
         <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
           <span className="flex items-center gap-1 text-sm font-semibold">
             <Caret open={open} />
             Past payments
           </span>
-          <span className="text-xs tabular-nums text-slate-500">{formatCents(paid)} paid in {history.length} months</span>
+          <span className="text-xs tabular-nums text-ink-soft">{formatCents(paid)} paid in {history.length} months</span>
         </button>
       </h2>
       {open && (
         <table className="mt-2 w-full text-sm tabular-nums">
           <thead>
-            <tr className="text-xs text-slate-500">
+            <tr className="text-xs text-ink-soft">
               <th className="py-1 text-left font-normal">Month</th>
               <th className="py-1 text-right font-normal">Paid</th>
               <th className="py-1 text-right font-normal">Owed at the end</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-ink/[0.07]">
             {[...history].reverse().map((h) => (
               <tr key={h.month}>
                 <td className="py-1.5">{formatMonth(h.month)}</td>
@@ -450,11 +440,11 @@ function PayoffChart({ past, points: plan }: { past: { month: string; balanceCen
   }
 
   return (
-    <figure className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+    <figure className="mt-4 rounded-3xl neu p-4">
       <figcaption className="flex items-baseline justify-between gap-3">
         <span className="text-sm font-semibold">{past.length > 0 ? 'Owed: the last year, then your plan' : 'Total owed under your plan'}</span>
-        <span className="text-xs tabular-nums text-slate-500" aria-live="polite">
-          {h ? `${formatMonth(h.month)}: ${formatCents(h.balanceCents)}` : 'Hover or touch for a month'}
+        <span className="text-xs tabular-nums text-ink-soft" aria-live="polite">
+          {h ? `${formatMonth(h.month)}: ${formatCents(h.balanceCents)}` : ''}
         </span>
       </figcaption>
       <svg
@@ -495,7 +485,7 @@ function PayoffChart({ past, points: plan }: { past: { month: string; balanceCen
           </g>
         )}
       </svg>
-      <details className="mt-1 text-xs text-slate-500">
+      <details className="mt-1 text-xs text-ink-soft">
         <summary className="cursor-pointer">Month by month</summary>
         <table className="mt-2 w-full tabular-nums">
           <tbody>
@@ -601,12 +591,12 @@ function DebtSheet({
         aria-labelledby="debt-sheet-h"
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <h2 id="debt-sheet-h" className="text-lg font-semibold">
           {isNew ? 'Add a debt' : debt.name}
         </h2>
-        {!isNew && debt.fromBank && <p className="text-xs text-slate-500">APR and minimum came from your bank. Change them if they’re off.</p>}
+        {!isNew && debt.fromBank && <p className="text-xs text-ink-soft">APR and minimum came from your bank. Change them if they’re off.</p>}
 
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Car loan" />
@@ -616,15 +606,15 @@ function DebtSheet({
             <Money value={balance} onChange={setBalance} label="Balance" />
           </Field>
         ) : (
-          <p className="mt-4 text-sm text-slate-600">
-            Owed now: <span className="font-semibold">{formatCents(debt!.balanceCents)}</span> <span className="text-xs text-slate-400">(from your bank)</span>
+          <p className="mt-4 text-sm text-ink-soft">
+            Owed now: <span className="font-semibold">{formatCents(debt!.balanceCents)}</span> <span className="text-xs text-ink-faint">(from your bank)</span>
           </p>
         )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="APR">
             <div className={`${inputCls} flex items-center`}>
               <input value={apr} onChange={(e) => setApr(e.target.value)} inputMode="decimal" aria-label="APR percent" placeholder="24.99" className="w-full bg-transparent text-right outline-none" />
-              <span className="pl-1 text-sm text-slate-500">%</span>
+              <span className="pl-1 text-sm text-ink-soft">%</span>
             </div>
           </Field>
           <Field label="Minimum payment">
@@ -650,25 +640,25 @@ function DebtSheet({
           <Money value={starting} onChange={setStarting} label="Starting balance" />
         </Field>
         {!isNew && (
-          <label className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
+          <label className="mt-4 flex items-center gap-3 rounded-xl neu-inset px-4 py-3">
             <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} className="size-5" />
             <span className="text-sm">
               Leave out of the plan
-              <span className="block text-xs text-slate-500">For a card you pay in full every month.</span>
+              <span className="block text-xs text-ink-soft">For a card you pay in full every month.</span>
             </span>
           </label>
         )}
 
         {err && (
-          <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {err}
           </p>
         )}
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-slate-100 py-3 font-semibold text-slate-700">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
             Cancel
           </button>
-          <button type="submit" disabled={busy} className="flex-1 rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50">
+          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm">
             {busy ? 'Saving…' : 'Save'}
           </button>
         </div>
@@ -684,7 +674,7 @@ function DebtSheet({
                 onError(ex)
               }
             }}
-            className="mt-3 w-full py-2 text-sm font-medium text-red-600"
+            className="mt-3 w-full py-2 text-sm font-medium text-danger"
           >
             Remove this debt
           </button>
@@ -694,12 +684,12 @@ function DebtSheet({
   )
 }
 
-const inputCls = 'mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base'
+const inputCls = 'mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="mt-4 block">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className="text-sm font-medium text-ink-soft">{label}</span>
       {children}
     </label>
   )
@@ -708,7 +698,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Money({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
   return (
     <div className={`${inputCls} flex items-center`}>
-      <span className="text-sm text-slate-500">$</span>
+      <span className="text-sm text-ink-soft">$</span>
       <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" className="w-full bg-transparent px-1 text-right tabular-nums outline-none" />
     </div>
   )

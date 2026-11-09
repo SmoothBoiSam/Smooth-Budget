@@ -47,9 +47,9 @@ export default function PartnerSetting({ onChanged }: { onChanged: () => void })
   if (saved === undefined) return null
 
   return (
-    <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
-      <p className="text-sm font-medium">Partner contributions</p>
-      <p className="text-xs text-slate-500">Her name as it appears on transfers (like "Zelle payment from …"). Her money is then kept apart from your income.</p>
+    <div className="rounded-3xl neu px-5 py-4">
+      <p className="text-sm font-semibold">Name on her transfers</p>
+      <p className="text-xs text-ink-soft">As your bank shows it, like “Zelle payment from …”.</p>
       <form onSubmit={submit} className="mt-3 flex gap-2">
         <input
           value={name}
@@ -57,15 +57,15 @@ export default function PartnerSetting({ onChanged }: { onChanged: () => void })
           maxLength={100}
           placeholder="Name on her transfers"
           aria-label="Partner's name on transfers"
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          className="min-w-0 flex-1 rounded-2xl neu-inset px-4 py-3 text-sm"
         />
-        <button type="submit" disabled={busy || (name.trim() || null) === saved} className="rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-50">
+        <button type="submit" disabled={busy || (name.trim() || null) === saved} className="rounded-lg bg-coral shadow-neu-sm px-4 text-sm font-semibold text-coral-ink disabled:opacity-50">
           Save
         </button>
       </form>
       {!saved && suggestions.length > 0 && (
         <div className="mt-2">
-          <p className="text-xs text-slate-500">People who sent you money this year:</p>
+          <p className="text-xs text-ink-soft">People who sent you money this year:</p>
           <div className="mt-1 flex flex-wrap gap-2">
             {suggestions.map((s) => (
               <button
@@ -73,7 +73,7 @@ export default function PartnerSetting({ onChanged }: { onChanged: () => void })
                 type="button"
                 disabled={busy}
                 onClick={() => save(s.name)}
-                className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                className="rounded-full neu-sm px-3 py-1 text-xs font-medium text-ink-soft"
               >
                 {s.name} · {s.count}× · {formatCents(s.totalCents)}
               </button>
@@ -82,12 +82,12 @@ export default function PartnerSetting({ onChanged }: { onChanged: () => void })
         </div>
       )}
       {saved && (
-        <button type="button" disabled={busy} onClick={() => save(null)} className="mt-2 text-xs font-medium text-slate-600 underline">
+        <button type="button" disabled={busy} onClick={() => save(null)} className="mt-2 text-xs font-medium text-ink-soft underline">
           Clear
         </button>
       )}
       {message && (
-        <p role="status" className="mt-2 text-xs text-emerald-700">
+        <p role="status" className="mt-2 text-xs text-good">
           {message}
         </p>
       )}

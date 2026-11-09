@@ -34,12 +34,12 @@ export default function SweepSetting() {
   if (target === null) return null
 
   return (
-    <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
+    <div className="rounded-2xl neu px-4 py-3">
       <p id="sweep-label" className="text-sm font-medium">
         Leftover money goes to
       </p>
-      <p className="text-xs text-slate-500">When a month ends under budget, the app suggests where to send what's left.</p>
-      <div role="radiogroup" aria-labelledby="sweep-label" className="mt-3 grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+      <p className="text-xs text-ink-soft">When a month ends under budget, the app suggests where to send what's left.</p>
+      <div role="radiogroup" aria-labelledby="sweep-label" className="mt-3 grid grid-cols-3 gap-1 rounded-lg neu-inset p-1">
         {options.map((o) => (
           <button
             key={o.value}
@@ -47,7 +47,7 @@ export default function SweepSetting() {
             role="radio"
             aria-checked={target === o.value}
             onClick={() => save(o.value, percent)}
-            className={`rounded-md py-2 text-sm font-medium ${target === o.value ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'}`}
+            className={`rounded-md py-2 text-sm font-medium ${target === o.value ? 'neu text-ink' : 'text-ink-soft'}`}
           >
             {o.label}
           </button>
@@ -74,8 +74,8 @@ export default function SweepSetting() {
           />
         </label>
       )}
-      {target === 'Debt' && <p className="mt-2 text-xs text-slate-500">Goes to the card with the largest balance.</p>}
-      {saved && <p role="status" className="mt-2 text-xs text-emerald-700">Saved. Applies to months that close from now on.</p>}
+      {target === 'Debt' && <p className="mt-2 text-xs text-ink-soft">Goes to the card with the largest balance.</p>}
+      {saved && <p role="status" className="mt-2 text-xs text-good">Saved. Applies to months that close from now on.</p>}
     </div>
   )
 }

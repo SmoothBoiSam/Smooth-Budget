@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, api, budgetApi, needsLook, recurringApi, type Me } from './api'
+import { ApiError, api, budgetApi, needsLook, openPlanItems, paydayApi, recurringApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
@@ -16,7 +16,7 @@ import { OfflineBar } from './ui'
 
 // Back from a bank's own sign-in (Plaid OAuth, DECISIONS.md 185): open More, where Bank connections picks Plaid up again.
 // The path and ?oauth_state_id stay in the address for Plaid to read.
-if (window.location.pathname.startsWith('/plaid-oauth') && !window.location.hash.startsWith('#/more')) window.location.hash = '#/more'
+if (window.location.pathname.startsWith('/plaid-oauth') && !window.location.hash.startsWith('#/more/banks')) window.location.hash = '#/more/banks'
 
 function currentRoute(): Route {
   const hash = window.location.hash.replace(/^#\/?/, '')
@@ -79,6 +79,17 @@ export default function App() {
       .catch(() => undefined)
   }, [me])
 
+  // Plan's badge: payday steps still to do on the check you're on (DECISIONS.md 188). Checked as you move around, since a
+  // sync can tick steps off on its own; Plan reports its own count while it's open.
+  const [planCount, setPlanCount] = useState(0)
+  useEffect(() => {
+    if (!me || route === 'payday') return
+    paydayApi
+      .summary()
+      .then((s) => setPlanCount(openPlanItems(s)))
+      .catch(() => undefined)
+  }, [me, route])
+
   // Review passes the count it already has, so the badge doesn't ask the server again.
   const reviewChanged = useCallback((known?: number) => (typeof known === 'number' ? setInboxCount(known) : refreshInbox()), [refreshInbox])
 
@@ -94,7 +105,7 @@ export default function App() {
 
   if (me === undefined) {
     return (
-      <div role="status" className="flex min-h-screen items-center justify-center text-slate-400">
+      <div role="status" className="flex min-h-screen items-center justify-center text-ink-faint">
         Loading…
       </div>
     )
@@ -110,11 +121,11 @@ export default function App() {
       {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} billsCount={billsCount} onBillsCount={setBillsCount} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
-      {route === 'payday' && <PaydayScreen onSignedOut={signedOut} />}
+      {route === 'payday' && <PaydayScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
       {route === 'partner' && <PartnerScreen onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
-      <BottomNav route={route} inboxCount={inboxCount + billsCount} />
+      <BottomNav route={route} badges={{ review: inboxCount + billsCount, payday: planCount }} />
     </>
   )
 }

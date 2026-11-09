@@ -95,29 +95,29 @@ export default function NotificationSetting() {
   }
 
   return (
-    <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
+    <div className="px-5 py-3.5">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p id="notify-label" className="text-sm font-medium">
+          <p id="notify-label" className="text-sm">
             Notifications
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-soft">
             {state.kind === 'ready' && state.on
-              ? 'On for this phone. Choose which kinds below. Never at night.'
-              : 'Paydays, bills, overspending, low cash, price rises and more. Turn on to choose which. Never at night.'}
+              ? 'On for this phone. Never at night.'
+              : 'Paydays, bills, overspending and more.'}
           </p>
         </div>
         {state.kind === 'ready' && <Switch on={state.on} disabled={busy} onClick={toggle} labelledBy="notify-label" />}
       </div>
-      {state.kind === 'unavailable' && <p className="mt-2 text-xs text-slate-500">{state.why}</p>}
+      {state.kind === 'unavailable' && <p className="mt-2 text-xs text-ink-soft">{state.why}</p>}
       {state.kind === 'ready' && state.on && <NotificationTypes />}
       {state.kind === 'ready' && state.on && (
-        <button type="button" onClick={test} className="mt-2 text-sm font-medium text-emerald-700">
+        <button type="button" onClick={test} className="mt-2 text-sm font-medium text-good">
           Send a test
         </button>
       )}
       {message && (
-        <p role="status" className="mt-2 text-xs text-slate-600">
+        <p role="status" className="mt-2 text-xs text-ink-soft">
           {message}
         </p>
       )}
@@ -134,7 +134,7 @@ function Switch({ on, disabled, onClick, labelledBy, small }: { on: boolean; dis
       aria-labelledby={labelledBy}
       disabled={disabled}
       onClick={onClick}
-      className={`relative shrink-0 rounded-full transition-colors disabled:opacity-60 ${small ? 'h-6 w-10' : 'h-7 w-12'} ${on ? 'bg-emerald-600' : 'bg-slate-300'}`}
+      className={`relative shrink-0 rounded-full transition-colors disabled:opacity-60 ${small ? 'h-6 w-10' : 'h-7 w-12'} ${on ? 'bg-good' : 'bg-ink/15'}`}
     >
       <span
         aria-hidden
@@ -172,22 +172,22 @@ function NotificationTypes() {
     }
   }
 
-  if (error && !types) return <p className="mt-2 text-xs text-red-700">{error}</p>
+  if (error && !types) return <p className="mt-2 text-xs text-danger">{error}</p>
   if (!types) return null
   return (
-    <ul className="mt-3 divide-y divide-slate-100 border-t border-slate-100" aria-label="Kinds of notifications">
+    <ul className="mt-3 divide-y divide-ink/[0.07] border-t border-ink/10" aria-label="Kinds of notifications">
       {types.map((t) => (
         <li key={t.id} className="flex items-center gap-3 py-2.5">
           <div className="min-w-0 flex-1">
             <p id={`notify-${t.id}`} className="text-sm">
               {t.title}
             </p>
-            <p className="text-xs text-slate-500">{t.detail}</p>
+            <p className="text-xs text-ink-soft">{t.detail}</p>
           </div>
           <Switch on={t.on} onClick={() => void flip(t)} labelledBy={`notify-${t.id}`} small />
         </li>
       ))}
-      {error && <li className="py-2 text-xs text-red-700">{error}</li>}
+      {error && <li className="py-2 text-xs text-danger">{error}</li>}
     </ul>
   )
 }

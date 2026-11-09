@@ -105,29 +105,29 @@ export default function CategoryEditSheet({
         aria-labelledby="cat-sheet-h"
         onSubmit={save}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <h2 id="cat-sheet-h" className="text-lg font-semibold">
           {isNew ? 'Add a category' : `Edit ${line.name}`}
         </h2>
 
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Name</span>
+          <span className="text-sm font-medium text-ink-soft">Name</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
             maxLength={100}
-            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base"
+            className="mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base"
           />
         </label>
 
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Type</span>
+          <span className="text-sm font-medium text-ink-soft">Type</span>
           <select
             value={type}
             onChange={(e) => setType(e.target.value as Category['type'])}
-            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base"
+            className="mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base"
           >
             {(Object.keys(typeLabels) as Category['type'][]).map((t) => (
               <option key={t} value={t}>
@@ -138,9 +138,9 @@ export default function CategoryEditSheet({
         </label>
 
         <label className="mt-4 block">
-          <span className="text-sm font-medium text-slate-700">Monthly limit</span>
-          <div className="mt-1 flex items-center rounded-xl border border-slate-300 bg-white px-4">
-            <span className="text-slate-500">$</span>
+          <span className="text-sm font-medium text-ink-soft">Monthly limit</span>
+          <div className="mt-1 flex items-center rounded-xl neu-inset px-4">
+            <span className="text-ink-soft">$</span>
             <input
               value={limit}
               onChange={(e) => setLimit(e.target.value)}
@@ -151,16 +151,16 @@ export default function CategoryEditSheet({
             />
           </div>
           {!isNew && line.hasMonthOverride && usualLimitCents !== undefined && (
-            <span className="mt-1 block text-xs text-slate-500">This month only. Usually ${centsToInput(usualLimitCents)}.</span>
+            <span className="mt-1 block text-xs text-ink-soft">This month only. Usually ${centsToInput(usualLimitCents)}.</span>
           )}
         </label>
 
         {!isNew && auto?.on && (
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-ink-soft">
             {auto.setByYou ? (
               <>
                 You set this limit, so the automatic budget leaves it alone.{' '}
-                <button type="button" disabled={busy} onClick={() => void backToAutomatic()} className="font-medium text-sky-700 underline">
+                <button type="button" disabled={busy} onClick={() => void backToAutomatic()} className="font-medium text-coral underline">
                   Back to automatic
                 </button>
               </>
@@ -173,7 +173,7 @@ export default function CategoryEditSheet({
         {!isNew && (
           <fieldset className="mt-3">
             <legend className="sr-only">Apply the limit to</legend>
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-lg neu-inset p-1">
               {(['month', 'permanent'] as const).map((v) => (
                 <button
                   key={v}
@@ -181,7 +181,7 @@ export default function CategoryEditSheet({
                   role="radio"
                   aria-checked={applyTo === v}
                   onClick={() => setApplyTo(v)}
-                  className={`rounded-md py-2 text-sm font-medium ${applyTo === v ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'}`}
+                  className={`rounded-md py-2 text-sm font-medium ${applyTo === v ? 'neu text-ink' : 'text-ink-soft'}`}
                 >
                   {v === 'month' ? 'This month only' : 'From now on'}
                 </button>
@@ -192,8 +192,8 @@ export default function CategoryEditSheet({
 
         {type === 'Variable' && (
           <fieldset className="mt-4">
-            <legend className="text-sm font-medium text-slate-700">Priority</legend>
-            <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+            <legend className="text-sm font-medium text-ink-soft">Priority</legend>
+            <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg neu-inset p-1">
               {(['High', 'Medium', 'Low'] as const).map((p) => (
                 <button
                   key={p}
@@ -201,29 +201,29 @@ export default function CategoryEditSheet({
                   role="radio"
                   aria-checked={priority === p}
                   onClick={() => setPriority(p)}
-                  className={`rounded-md px-1 py-2 text-sm font-medium ${priority === p ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'}`}
+                  className={`rounded-md px-1 py-2 text-sm font-medium ${priority === p ? 'neu text-ink' : 'text-ink-soft'}`}
                 >
                   {priorityLabels[p]}
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-ink-soft">
               When money is short, Nice to have is trimmed first, then Important, then Must have (never below 80% of usual).
             </p>
           </fieldset>
         )}
 
         {error && (
-          <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {error}
           </p>
         )}
 
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-slate-100 py-3 font-semibold text-slate-700">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
             Cancel
           </button>
-          <button type="submit" disabled={busy} className="flex-1 rounded-xl bg-slate-900 py-3 font-semibold text-white disabled:opacity-50">
+          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm">
             {busy ? 'Saving…' : isNew ? 'Add' : 'Save'}
           </button>
         </div>
@@ -232,10 +232,10 @@ export default function CategoryEditSheet({
           <div className="mt-4 flex items-center justify-between text-sm">
             {onMove ? (
               <div className="flex gap-4">
-                <button type="button" disabled={busy} onClick={() => onMove(-1)} className="font-medium text-slate-600">
+                <button type="button" disabled={busy} onClick={() => onMove(-1)} className="font-medium text-ink-soft">
                   ↑ Move up
                 </button>
-                <button type="button" disabled={busy} onClick={() => onMove(1)} className="font-medium text-slate-600">
+                <button type="button" disabled={busy} onClick={() => onMove(1)} className="font-medium text-ink-soft">
                   ↓ Move down
                 </button>
               </div>
@@ -248,7 +248,7 @@ export default function CategoryEditSheet({
               onClick={() => {
                 if (window.confirm(`Archive ${line.name}? It leaves the budget; its history stays, and you can restore it from Budget → Categories.`)) void archive()
               }}
-              className="font-medium text-red-600"
+              className="font-medium text-danger"
             >
               Archive category
             </button>

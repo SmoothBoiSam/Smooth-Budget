@@ -15,33 +15,35 @@ const tabs: { label: string; route: Route; icon: ReactNode; also: Route[] }[] = 
   { label: 'More', route: 'more', icon: icons.more, also: ['partner'] },
 ]
 
-export default function BottomNav({ route, inboxCount }: { route: Route; inboxCount: number }) {
+/** A count in a red bubble on a tab: Review (what to look at) and Plan (payday steps still to do). */
+export default function BottomNav({ route, badges }: { route: Route; badges: Partial<Record<Route, number>> }) {
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-10 rounded-t-3xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-[0_-6px_16px_var(--color-neu-dark)]"
     >
-      <ul className="mx-auto flex max-w-md justify-between px-2">
+      <ul className="mx-auto flex max-w-md justify-between px-3 pt-2">
         {tabs.map((tab) => {
           const active = tab.route === route || tab.also.includes(route)
+          const count = badges[tab.route] ?? 0
           return (
             <li key={tab.label} className="flex-1">
               <a
                 href={`#/${tab.route === 'home' ? '' : tab.route}`}
                 aria-current={active ? 'page' : undefined}
-                aria-label={tab.route === 'review' && inboxCount > 0 ? `${tab.label}, ${inboxCount} to review` : tab.label}
-                className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 ${active ? 'text-slate-900' : 'text-slate-400'}`}
+                aria-label={count > 0 ? `${tab.label}, ${count} ${tab.route === 'review' ? 'to review' : 'to do'}` : tab.label}
+                className={`flex flex-col items-center gap-1 pb-2 ${active ? "text-coral" : "text-ink-faint"}`}
               >
-                <span className="relative">
-                  <span className={active ? '' : 'opacity-55'}>{tab.icon}</span>
-                  {tab.route === 'review' && inboxCount > 0 && (
+                <span className={`relative rounded-2xl px-3.5 py-1.5 ${active ? "neu-inset" : ""}`}>
+                  <span className={active ? "" : "opacity-60"}>{tab.icon}</span>
+                  {count > 0 && (
                     <span
                       aria-hidden
-                      className="absolute -top-1 left-1/2 ml-1 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4"
+                      className="absolute top-0 left-1/2 ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4"
                       // A strong red so the white number stands out; fixed colors so the dark theme doesn't swap them.
                       style={{ backgroundColor: '#DC2626', color: '#fff' }}
                     >
-                      {inboxCount > 99 ? '99+' : inboxCount}
+                      {count > 99 ? '99+' : count}
                     </span>
                   )}
                 </span>
