@@ -21,7 +21,8 @@ public record ScheduleMonthDto(int Year, int Month, string Source, bool Reserve,
 public record ScheduleChoicesRequest(bool Reserve, List<string> Overtime, List<string> PaidEntries, List<string>? Dropped = null);
 /// <param name="HireDate">When set, years of service follow from it and YearsOfService is ignored.</param>
 public record ProfileRequest(int YearsOfService, bool FullTime, bool HolidayPay, int FlatNetPercent, DateOnly? HireDate = null);
-public record ChecklistRequest(bool Done);
+/// <param name="Skipped">Set to skip (or un-skip) "Pay off what you charged" for that check (DECISIONS.md 195).</param>
+public record ChecklistRequest(bool Done, bool? Skipped = null);
 
 /// <param name="Prediction">What the app had predicted for this check, if it had.</param>
 public record StubReviewDto(PayStubData Stub, IReadOnlyList<string> Checks, IReadOnlyList<string> Problems, bool Replaces);
@@ -48,6 +49,21 @@ public static class PaydayEndpoints
         g.MapPut("/plan/{payDate}/{key}", async (DateOnly payDate, string key, ChecklistRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
+            if (req.Skipped is { } skip)
+            {
+                if (!key.StartsWith("cardspend:", StringComparison.Ordinal))
+                    return Results.ValidationProblem(new Dictionary<string, string[]> { ["skipped"] = ["Only paying off what you charged can be skipped."] });
+                var skipKey = PaydayService.SkipPrefix + key[..Math.Min(key.Length, 190)];
+                var skipRow = await db.PaydayChecklistItems.SingleOrDefaultAsync(x => x.HouseholdId == householdId && x.PayDate == payDate && x.Key == skipKey, ct);
+                if (skip && skipRow is null)
+                    db.PaydayChecklistItems.Add(new PaydayChecklistItem { Id = Guid.NewGuid(), HouseholdId = householdId, PayDate = payDate, Key = skipKey, CreatedUtc = clock.GetUtcNow().UtcDateTime });
+                else if (!skip && skipRow is not null)
+                    db.PaydayChecklistItems.Remove(skipRow);
+                if (skip && await db.PaydayChecklistItems.SingleOrDefaultAsync(x => x.HouseholdId == householdId && x.PayDate == payDate && x.Key == key, ct) is { } doneRow)
+                    db.PaydayChecklistItems.Remove(doneRow);
+                await db.SaveChangesAsync(ct);
+                return Results.NoContent();
+            }
             var row = await db.PaydayChecklistItems.SingleOrDefaultAsync(x => x.HouseholdId == householdId && x.PayDate == payDate && x.Key == key, ct);
             if (req.Done && row is null)
                 db.PaydayChecklistItems.Add(new PaydayChecklistItem { Id = Guid.NewGuid(), HouseholdId = householdId, PayDate = payDate, Key = key[..Math.Min(key.Length, 200)], CreatedUtc = clock.GetUtcNow().UtcDateTime });

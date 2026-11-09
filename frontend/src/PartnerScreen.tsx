@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, partnerPlanApi, type Category, type ContributionStatus, type PartnerOverview } from './api'
-import { ErrorNotice, Loading, Page, PageHeader } from './ui'
+import { ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
 import PartnerSetting from './PartnerSetting'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars, titleCase } from './format'
 
@@ -114,7 +114,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
               </ul>
             )}
             {o.contributions.length > 0 && (
-              <button type="button" onClick={() => setEditing(null)} className="mt-2 text-xs font-medium text-ink-soft underline">
+              <button type="button" onClick={() => setEditing(null)} className={`${smallBtn} mt-2 text-ink`}>
                 Add another
               </button>
             )}
@@ -146,7 +146,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
                 <button
                   type="button"
                   onClick={() => void act(() => partnerPlanApi.undoEarly(d.id), `The ${formatCents(d.amountCents)} from ${formatDay(d.date)} counts in the month it came again.`)}
-                  className="font-medium text-ink-soft underline"
+                  className={`${smallBtn} py-1! text-danger`}
                 >
                   Undo
                 </button>
@@ -166,7 +166,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
                       {formatDay(r.date)} · {purposeLabel[r.purpose]}
                       {r.categoryName && <span className="text-ink-soft"> · {r.categoryName}</span>}
                       {r.purpose === 'waiting' && (
-                        <a href="#/review" className="ml-1 text-xs text-gold-ink underline">
+                        <a href="#/review" className={`${smallBtn} ml-1 py-1! text-gold-ink`}>
                           label it
                         </a>
                       )}

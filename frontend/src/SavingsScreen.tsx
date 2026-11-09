@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
 import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading, Page, PageHeader } from './ui'
+import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
 import { centsToInput, formatCents, formatDay, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -212,7 +212,7 @@ function BalanceEditor({ cents, onSave }: { cents: number; onSave: (cents: numbe
   const [value, setValue] = useState(centsToInput(cents))
   if (!open)
     return (
-      <button type="button" onClick={() => setOpen(true)} className="shrink-0 text-sm font-semibold tabular-nums underline decoration-dotted">
+      <button type="button" onClick={() => setOpen(true)} className={`${smallBtn} shrink-0 text-sm! tabular-nums text-ink`}>
         {formatCents(cents)}
       </button>
     )

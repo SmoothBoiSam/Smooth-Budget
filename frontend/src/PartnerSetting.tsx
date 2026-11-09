@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { partnerApi } from './api'
 import { formatCents } from './format'
+import { smallBtn } from './ui'
 
 /**
  * Settings → Partner: the name on her transfers ("Zelle payment from …"). Money in from that name is
@@ -82,7 +83,7 @@ export default function PartnerSetting({ onChanged }: { onChanged: () => void })
         </div>
       )}
       {saved && (
-        <button type="button" disabled={busy} onClick={() => save(null)} className="mt-2 text-xs font-medium text-ink-soft underline">
+        <button type="button" disabled={busy} onClick={() => save(null)} className={`${smallBtn} mt-2 text-danger`}>
           Clear
         </button>
       )}

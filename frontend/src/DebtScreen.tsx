@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
 import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading, Page, PageHeader } from './ui'
+import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -171,7 +171,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
                 className={`rounded-xl px-3 py-2 text-left ${currentStrategy === st ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu'}`}
               >
                 <span className="block text-sm font-semibold">{st}</span>
-                <span className={`block text-xs ${currentStrategy === st ? 'text-ink-faint' : 'text-ink-soft'}`}>
+                <span className={`block text-xs ${currentStrategy === st ? 'text-primary-ink/85' : 'text-ink-soft'}`}>
                   {st === 'Avalanche' ? 'Highest APR first · least interest' : 'Smallest balance first · quick wins'}
                 </span>
               </button>
@@ -213,7 +213,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
             </div>
           ) : (
             savedPlan?.extraSource === 'you' && (
-              <button type="button" disabled={busy} onClick={() => void savePlan(null)} className="mt-2 text-xs font-medium text-ink-soft underline">
+              <button type="button" disabled={busy} onClick={() => void savePlan(null)} className={`${smallBtn} mt-2 text-ink`}>
                 Use whatever’s left over each month instead
               </button>
             )
@@ -247,7 +247,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
             {hidden.map((d, i) => (
               <span key={d.id}>
                 {i > 0 && ', '}
-                <button type="button" onClick={() => setEditing(d)} className="underline">
+                <button type="button" onClick={() => setEditing(d)} className={`${smallBtn} py-1! text-ink`}>
                   {d.name}
                 </button>
               </span>

@@ -15,8 +15,10 @@ public record LineDto(string Name, long Cents, string Note);
 public record AmountDto(string Name, long Cents);
 /// <param name="Done">Checked off by you, or done according to your accounts (<paramref name="Auto"/>).</param>
 /// <param name="Status">For the check you're on now: what the app sees ("Sent $100 of $150 so far.").</param>
+/// <param name="Skippable">"Pay off what you charged" can be skipped (DECISIONS.md 195); <paramref name="Skipped"/> when you did.</param>
 public record PlanItemDto(string Key, string Kind, string Label, long Cents, string Destination, string Why, bool Done,
-    bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null, long ShortCents = 0);
+    bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null, long ShortCents = 0,
+    bool Skippable = false, bool Skipped = false);
 public record PlanBillDto(string Name, long Cents, DateOnly Due);
 public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents);
 
@@ -62,6 +64,13 @@ public sealed record PayContext(
 /// </summary>
 public class PaydayService(AppDbContext db, BudgetMonthService months, RecurringService recurring, TimeProvider clock)
 {
+    /// <summary>A checklist row with this before a plan item's key means you skipped that item for that check.</summary>
+    public const string SkipPrefix = "skip:";
+
+    /// <summary>The payday before a check's: where its "Pay off what you charged" window starts.</summary>
+    public static DateOnly PaydayBefore(DateOnly pay, PayRules rules) =>
+        PayCalendar.From(pay.AddDays(-45), rules).TakeWhile(p => p.PayDate < pay).Select(p => p.PayDate).LastOrDefault(pay.AddDays(-14));
+
     public const int ChecksShown = 3;
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
@@ -306,8 +315,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var charged = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && t.Date >= since && !t.IsTransfer && t.Kind != TransactionKind.CardPayment)
             .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
-        DateOnly PaydayBefore(DateOnly pay) =>
-            PayCalendar.From(pay.AddDays(-45), c.Rules).TakeWhile(p => p.PayDate < pay).Select(p => p.PayDate).LastOrDefault(pay.AddDays(-14));
+        DateOnly PaydayBefore(DateOnly pay) => PaydayService.PaydayBefore(pay, c.Rules);
 
         var result = new List<PlanDto?>();
         for (var i = 0; i < checks.Count; i++)
@@ -464,8 +472,11 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             {
                 var (auto, status) = Status(x);
                 var manual = done.Any(d => d.PayDate == pay && d.Key == x.Key);
-                return new PlanItemDto(x.Key, x.Kind, x.Label, x.Cents, x.Destination, x.Why, manual || auto, auto, status,
-                    x.Bills?.Select(b => new PlanBillDto(b.Name, b.Cents, b.Due)).ToList(), ShortBy(x));
+                // Skipping "Pay off what you charged" leaves those charges on the card as debt (DECISIONS.md 195).
+                var skippable = x.Kind == "cardspend" && current;
+                var skipped = skippable && !auto && done.Any(d => d.PayDate == pay && d.Key == SkipPrefix + x.Key);
+                return new PlanItemDto(x.Key, x.Kind, x.Label, x.Cents, x.Destination, x.Why, !skipped && (manual || auto), auto, skipped ? "Skipped: these charges stay on the card." : status,
+                    x.Bills?.Select(b => new PlanBillDto(b.Name, b.Cents, b.Due)).ToList(), ShortBy(x), skippable, skipped);
             }).ToList(), plan.ShortCents));
         }
         return result;

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { budgetEditApi, priorityLabels, type BudgetCategoryLine, type Category, type Priority } from './api'
 import { centsToInput, parseDollars } from './format'
+import { smallBtn } from './ui'
 
 const typeLabels: Record<Category['type'], string> = {
   Variable: 'Spending (counts toward Left to Spend)',
@@ -160,7 +161,7 @@ export default function CategoryEditSheet({
             {auto.setByYou ? (
               <>
                 You set this limit, so the automatic budget leaves it alone.{' '}
-                <button type="button" disabled={busy} onClick={() => void backToAutomatic()} className="font-medium text-danger underline">
+                <button type="button" disabled={busy} onClick={() => void backToAutomatic()} className={`${smallBtn} py-1! text-danger`}>
                   Back to automatic
                 </button>
               </>

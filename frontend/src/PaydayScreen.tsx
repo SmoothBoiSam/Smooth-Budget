@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ApiError, debtApi, openPlanItems, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type PlanItem, type SavingsSummary } from './api'
 import { icons } from './icons'
 import { useRemembered } from './offline'
-import { Caret, Card, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows } from './ui'
+import { Card, Caret, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay } from './format'
 
 const weekday = (iso: string) => {
@@ -48,9 +48,10 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
     void load()
   }, [load])
 
-  async function toggle(check: PayCheck, item: PlanItem) {
+  async function toggle(check: PayCheck, item: PlanItem, skip?: boolean) {
     try {
-      await paydayApi.setDone(check.payDate, item.key, !item.done)
+      if (skip !== undefined) await paydayApi.setSkipped(check.payDate, item.key, skip)
+      else await paydayApi.setDone(check.payDate, item.key, !item.done)
       await load()
     } catch (e) {
       fail(e)
@@ -85,7 +86,7 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
               .filter((c) => !finished(c))
               .map((c) => (
                 <li key={c.payDate}>
-                  <CheckCard c={c} onToggle={(item) => void toggle(c, item)} />
+                  <CheckCard c={c} onToggle={(item, skip) => void toggle(c, item, skip)} />
                 </li>
               ))}
           </ul>
@@ -104,7 +105,7 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
                 <ul className="mt-2 space-y-3">
                   {s.checks.filter(finished).map((c) => (
                     <li key={c.payDate}>
-                      <CheckCard c={c} onToggle={(item) => void toggle(c, item)} />
+                      <CheckCard c={c} onToggle={(item, skip) => void toggle(c, item, skip)} />
                     </li>
                   ))}
                 </ul>
@@ -189,7 +190,7 @@ const monthYear = (iso: string) => {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
-function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) => void }) {
+function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, skip?: boolean) => void }) {
   const [open, setOpen] = useState(false)
   const [planOpen, setPlanOpen] = useState(c.isCurrent)
   // Future checks start folded to one line (DECISIONS.md 154); the one you're on starts open.
@@ -246,7 +247,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
           <p className="text-sm text-ink-soft">
             {c.landedNetCents !== null
               ? `Landed${c.hasSchedule ? ` · forecast was ${formatCents(c.netCents)}` : ''}`
-              : `Likely take-home · range ${formatCents(c.lowNetCents)}–${formatCents(c.highNetCents)} · gross ${formatCents(c.grossCents)}`}
+              : `Likely take-home${c.lowNetCents === c.highNetCents ? '' : ` · range ${formatCents(c.lowNetCents)}–${formatCents(c.highNetCents)}`} · gross ${formatCents(c.grossCents)}`}
           </p>
           {c.lowConfidence && c.landedNetCents === null && (
             <p className="mt-2 rounded-lg neu-inset px-3 py-2 text-xs text-gold-ink">
@@ -284,7 +285,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
               <button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex w-full items-center justify-between text-sm font-semibold">
                 Payday plan
                 <span className="text-xs font-normal text-ink-soft">
-                  {c.plan.items.filter((i) => i.done).length} of {c.plan.items.length} done
+                  {c.plan.items.filter((i) => i.done || i.skipped).length} of {c.plan.items.length} done
                 </span>
               </button>
               {planOpen && (
@@ -297,7 +298,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
                   <ul className="mt-2 space-y-1">
                     {c.plan.items.map((item) => (
                       <li key={item.key}>
-                        <PlanRow item={item} onToggle={() => onToggle(item)} />
+                        <PlanRow item={item} onToggle={() => onToggle(item)} onSkip={(skip) => onToggle(item, skip)} />
                       </li>
                     ))}
                   </ul>
@@ -312,12 +313,12 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
 }
 
 /** One part of the payday plan: check it off, or it's done on its own from your accounts. */
-function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
+function PlanRow({ item, onToggle, onSkip }: { item: PlanItem; onToggle: () => void; onSkip: (skip: boolean) => void }) {
   const [billsOpen, setBillsOpen] = useState(false)
   const body = (
     <span className="min-w-0 flex-1">
-      <span className={`block text-sm ${item.done ? 'text-ink-faint line-through' : ''}`}>{planText(item)}</span>
-      {item.status && <span className={`block text-xs ${item.done ? 'text-good' : 'text-gold-ink'}`}>{item.status}</span>}
+      <span className={`block text-sm ${item.done || item.skipped ? 'text-ink-faint line-through' : ''}`}>{planText(item)}</span>
+      {item.status && <span className={`block text-xs ${item.done ? 'text-good' : item.skipped ? 'text-ink-soft' : 'text-gold-ink'}`}>{item.status}</span>}
       <span className="block text-xs text-ink-soft">{item.why}</span>
     </span>
   )
@@ -327,13 +328,21 @@ function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
         <input
           type="checkbox"
           checked={item.done}
-          disabled={item.auto}
+          disabled={item.auto || item.skipped}
           onChange={onToggle}
           aria-label={item.auto ? `${planText(item)}: done, from your accounts` : planText(item)}
           className="mt-1 size-4 shrink-0 accent-primary"
         />
         {body}
       </label>
+      {item.skippable && !item.done && (
+        <div className="ml-7 mt-1">
+          <button type="button" onClick={() => onSkip(!item.skipped)} className={item.skipped ? smallBtnOn : `${smallBtn} text-danger`}>
+            {item.skipped ? 'Pay it off after all' : 'Skip this time'}
+          </button>
+          {!item.skipped && <span className="ml-1 text-xs text-ink-faint">The charges stay on the card as debt.</span>}
+        </div>
+      )}
       {item.bills && item.bills.length > 0 && (
         <div className="ml-7">
           <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-primary">

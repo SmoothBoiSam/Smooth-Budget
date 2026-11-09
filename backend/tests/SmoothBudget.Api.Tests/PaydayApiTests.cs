@@ -255,6 +255,17 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         var soFar = withCard.Checks[1].Plan!.Items.Single(i => i.Kind == "cardspend");
         Assert.Equal(("Charged so far", 25_00L), (soFar.Label, soFar.Cents));
 
+        // DECISIONS.md 195: paying off what you charged can be skipped on the check you're on (and only that line).
+        Assert.Equal((true, false), (spend.Skippable, soFar.Skippable));
+        var skipUrl = $"/api/payday/plan/{withCard.Checks[0].PayDate:yyyy-MM-dd}/{Uri.EscapeDataString(spend.Key)}";
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync(skipUrl, new { done = false, skipped = true }, Json)).StatusCode);
+        var skipped = (await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend");
+        Assert.Equal((true, false), (skipped.Skipped, skipped.Done));
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PutAsJsonAsync($"/api/payday/plan/{withCard.Checks[0].PayDate:yyyy-MM-dd}/savings", new { done = false, skipped = true }, Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync(skipUrl, new { done = false, skipped = false }, Json)).StatusCode);
+        Assert.False((await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend").Skipped);
+
         // The card's own account shows the payment: that line is done.
         using (var scope = app.Services.CreateScope())
         {

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { budgetEditApi, type Category, type GeneratorProposal } from './api'
 import CategorySetup from './CategorySetup'
 import { centsToInput, formatCents, formatDay, parseDollars } from './format'
+import { smallBtn } from './ui'
 
 const groups: { type: Category['type']; label: string }[] = [
   { type: 'Variable', label: 'Spending' },
@@ -103,7 +104,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         <p className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
           {waiting} automatically sorted {waiting === 1 ? 'purchase is' : 'purchases are'} counted here but not confirmed yet
           {p.categorization.guesses > 0 && <> ({p.categorization.guesses} of them rough guesses)</>}. Confirming them in{' '}
-          <a href="#/review" className="font-medium underline">
+          <a href="#/review" className={`${smallBtn} py-1! text-ink`}>
             To review
           </a>{' '}
           makes this proposal more accurate.
@@ -118,7 +119,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
           Turn on the automatic budget
         </button>
       </section>
-      <button type="button" onClick={() => setSetup(true)} className="mt-3 text-sm font-medium text-ink-soft underline">
+      <button type="button" onClick={() => setSetup(true)} className={`${smallBtn} mt-3 text-ink`}>
         Find categories from my history
       </button>
       {p.uncategorizedCount > 0 && (

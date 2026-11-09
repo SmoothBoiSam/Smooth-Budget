@@ -103,6 +103,43 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Any_two_bills_can_be_joined_split_apart_again_or_turned_into_spending()
+    {
+        // DECISIONS.md 197. Joining two bills the app never suggested (here the $2.99 one into the $11.99 one): the latest
+        // charges don't share a price, so it's planned at the median of its last 6 charges and isn't a price change.
+        var c = await AppStoreAsync();
+        var s = (await Bills(c))!;
+        var small = s.Items.Single(i => i.AmountCents == 2_99);
+        var newer = s.Items.Single(i => i.AmountCents == 11_99);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(small.Key, MergeInto: newer.Key), Json)).StatusCode);
+        var joined = (await Bills(c))!.Items.Single(i => i.Key == newer.Key);
+        Assert.Equal((1, true, "active", 7_49L, (long?)null), (joined.MergedCount, joined.Varies, joined.Status, joined.AmountCents, joined.PreviousAmountCents));
+        Assert.Equal(14, joined.Charges.Count);
+
+        // Split apart: both are bills of their own again, and the app doesn't suggest joining them again.
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(newer.Key, Split: true), Json)).StatusCode);
+        var split = (await Bills(c))!;
+        Assert.Equal(3, split.Items.Count);
+        Assert.Equal((0, false, 11_99L), (split.Items.Single(i => i.Key == newer.Key).MergedCount, split.Items.Single(i => i.Key == newer.Key).Varies,
+            split.Items.Single(i => i.Key == newer.Key).AmountCents));
+
+        // Not a bill: its charges go to the spending category you pick, and it leaves the bills.
+        Guid shopping, rent;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var me = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+            shopping = await db.Categories.Where(x => x.HouseholdId == me && x.Type == SmoothBudget.Core.Budgeting.CategoryType.Variable).Select(x => x.Id).FirstAsync();
+            rent = await db.Categories.Where(x => x.HouseholdId == me && x.Type == SmoothBudget.Core.Budgeting.CategoryType.FixedBill).Select(x => x.Id).FirstAsync();
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/recurring/not-a-bill", new NotABillRequest(small.Key, rent), Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync("/api/recurring/not-a-bill", new NotABillRequest(small.Key, shopping), Json)).StatusCode);
+        var after = (await Bills(c))!;
+        Assert.DoesNotContain(after.Items, i => i.Key == small.Key);
+        Assert.Contains(after.Dismissed, i => i.Key == small.Key && i.CategoryId == shopping);
+    }
+
+    [Fact]
     public async Task Saying_two_bills_are_different_stops_the_question()
     {
         var c = await AppStoreAsync();

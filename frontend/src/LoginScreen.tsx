@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, type Me } from './api'
+import { smallBtn } from './ui'
 
 export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -83,7 +84,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
             setMode(mode === 'login' ? 'register' : 'login')
             setError(null)
           }}
-          className="mt-4 text-sm text-ink-soft underline underline-offset-2"
+          className={`${smallBtn} mt-4 px-4! py-2! text-sm! text-ink`}
         >
           {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}
         </button>

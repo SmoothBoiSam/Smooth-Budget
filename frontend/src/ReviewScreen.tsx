@@ -11,7 +11,7 @@ import {
   type TransactionContext,
 } from './api'
 import BillsSection from './BillsSection'
-import { ErrorNotice, Loading, Page, PageHeader } from './ui'
+import { ErrorNotice, Loading, Page, PageHeader, smallBtnOn } from './ui'
 import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
@@ -101,12 +101,16 @@ export default function ReviewScreen({
     window.history.replaceState(null, '', p === 'bills' ? '#/review/bills' : '#/review')
   }
 
-  /** After one card: drop it locally (no jumpy reload), refresh the counts and the badge. */
-  async function done(id: string, message: string) {
+  /**
+   * After one card: drop it locally (no jumpy reload), refresh the counts and the badge. A new merchant rule may have
+   * filed other cards still waiting, so then the list is fetched again to show them with the rule's category.
+   */
+  async function done(id: string, message: string, reload = false) {
     setNotice(message)
     setError(null)
     setQueue((q) => q?.filter((t) => t.id !== id) ?? null)
     try {
+      if (reload) await loadQueue(scope)
       onChanged(await loadSide())
     } catch (e) {
       fail(e)
@@ -199,7 +203,7 @@ export default function ReviewScreen({
                     setQueue(null)
                     setNotice(null)
                   }}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu text-ink-soft'}`}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-primary text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
                   {n != null && n > 0 && <span className="ml-1 opacity-70">{n}</span>}
@@ -255,7 +259,7 @@ export default function ReviewScreen({
             {scope === 'todo' ? 'Everything this month has a category you confirmed.' : scope === 'earlier' ? 'Nothing from these months is waiting.' : 'Nothing older is waiting.'}
           </p>
           {scope === 'todo' && (summary?.earlier.total ?? 0) > 0 && (
-            <button type="button" onClick={() => setScope('earlier')} className="mt-4 text-sm font-medium text-ink-soft underline">
+            <button type="button" onClick={() => setScope('earlier')} className={`${smallBtnOn} mt-4`}>
               Review {summary!.earlier.total} from earlier months
             </button>
           )}
@@ -271,7 +275,7 @@ export default function ReviewScreen({
               <button
                 type="button"
                 onClick={() => void bulk(() => budgetApi.confirmLikely(reviewScope))}
-                className="shrink-0 text-xs font-medium text-ink-soft underline"
+                className={`${smallBtnOn} shrink-0`}
               >
                 Confirm {likely} likely
               </button>
@@ -284,7 +288,7 @@ export default function ReviewScreen({
               t={current}
               categories={categories}
               partnerName={partnerName}
-              onDone={(message) => void done(current.id, message)}
+              onDone={(message, reload) => void done(current.id, message, reload)}
               older={!!summary && current.date < summary.windowStart}
               onSkip={() => setQueue((q) => (q && q.length > 1 ? [...q.slice(1), q[0]] : q))}
               onCategoryCreated={loadCategories}
@@ -345,7 +349,7 @@ function ReviewCard({
   partnerName: string | null
   /** Before the months the budget is built from. */
   older?: boolean
-  onDone: (message: string) => void
+  onDone: (message: string, reload?: boolean) => void
   onSkip: () => void
   onCategoryCreated: () => Promise<void>
   onError: (e: unknown) => void
@@ -414,12 +418,14 @@ function ReviewCard({
       if (!categoryId) return
       const r = await budgetApi.updateTransaction(t.id, categoryId, false, rule && !t.isPartnerTransfer ? t.merchant : null)
       const moved = r.billChargesMoved > 0 ? ` ${r.billChargesMoved} earlier ${r.billChargesMoved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
+      const others = r.ruleAppliedTo > 0 ? ` ${r.ruleAppliedTo} more from ${titleCase(t.merchant)} ${r.ruleAppliedTo === 1 ? 'is' : 'are'} filed there now, waiting for your ✓.` : ''
       onDone(
         partnerIn
           ? `Counted as paying you back for ${selected?.name}: it comes off that category.`
           : partnerOut
             ? `Counted as your share of ${selected?.name}.`
-            : `${selected?.name ?? 'Saved'}${rule ? `. Future ${titleCase(t.merchant)} purchases go there too, for you to confirm` : ''}.${moved}`,
+            : `${selected?.name ?? 'Saved'}${rule ? `. Future ${titleCase(t.merchant)} purchases go there too, for you to confirm` : ''}.${others}${moved}`,
+        r.ruleAppliedTo > 0 || r.billChargesMoved > 0,
       )
     } catch (e) {
       onError(e)
@@ -487,7 +493,7 @@ function ReviewCard({
                 <input type="radio" name={`purpose-${t.id}`} checked={mode === value} onChange={() => setMode(value)} className="sr-only" />
                 <span>
                   <span className="block text-sm font-semibold">{label}</span>
-                  <span className={`block text-xs ${mode === value ? 'text-ink-faint' : 'text-ink-soft'}`}>{hint}</span>
+                  <span className={`block text-xs ${mode === value ? 'text-primary-ink/85' : 'text-ink-soft'}`}>{hint}</span>
                 </span>
               </label>
             ))}
@@ -510,7 +516,7 @@ function ReviewCard({
                   aria-pressed={group === g.type}
                   aria-label={g.label}
                   onClick={() => chooseGroup(g.type)}
-                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu text-ink-soft'}`}
+                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-primary text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {g.short}
                 </button>
@@ -527,7 +533,7 @@ function ReviewCard({
                   type="button"
                   aria-pressed={c.id === categoryId}
                   onClick={() => setCategoryId(c.id)}
-                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-primary shadow-neu-sm font-semibold text-primary-ink' : 'neu text-ink-soft'}`}
+                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-primary font-semibold text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {c.name}
                 </button>
@@ -535,7 +541,7 @@ function ReviewCard({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="neu-sm rounded-full px-3 py-1 text-sm font-semibold text-primary"
+                className="rounded-full bg-ink/[0.06] px-3 py-1 text-sm font-semibold text-primary"
               >
                 + New category
               </button>

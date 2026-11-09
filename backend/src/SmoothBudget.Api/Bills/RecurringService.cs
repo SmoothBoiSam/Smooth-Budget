@@ -15,7 +15,10 @@ public record RecurringItemDto(
     DateOnly LastDate, DateOnly NextExpected, int? DueDay, int Occurrences, string AccountName,
     Guid? CategoryId, string? CategoryName, bool InBillCategory, bool Confirmed, bool PossibleDuplicate, bool MerchantWide,
     IReadOnlyList<BillChargeDto> Charges,
-    SameBillDto? SameAs = null, string? ReplacedBy = null);
+    SameBillDto? SameAs = null, string? ReplacedBy = null,
+    // Bills you joined (DECISIONS.md 197): how many were joined into this one (Split apart undoes it), and whether the
+    // price varies from charge to charge, so it's planned at its usual amount instead of flagged as a price change.
+    int MergedCount = 0, bool Varies = false);
 
 /// <summary>
 /// On the newer of two bills that may be one bill whose price changed (DECISIONS.md 181): the older one. That one carries
@@ -35,10 +38,14 @@ public record UpcomingBillDto(string Name, long AmountCents, DateOnly Date);
 /// <param name="AcknowledgePrice">"Got it" on a price change: the flag clears until the price changes again.</param>
 /// <param name="MergeInto">This bill is the same as that one (its price changed): its charges join it (DECISIONS.md 181).</param>
 /// <param name="NotSameAs">This bill isn't the same as that one: stop asking.</param>
+/// <param name="Split">Undo joining: every bill joined into this one is its own again, and isn't suggested again.</param>
 public record RecurringUpdateRequest(
     string Key, string? Name = null, RecurringKind? Kind = null, int? DueDay = null, bool ClearDueDay = false,
     bool? Confirmed = null, bool? Dismissed = null, bool? Canceled = null, bool AcknowledgePrice = false,
-    string? MergeInto = null, string? NotSameAs = null);
+    string? MergeInto = null, string? NotSameAs = null, bool Split = false);
+
+/// <summary>"Not a bill" (DECISIONS.md 197): its charges go to this spending category and it's no longer expected.</summary>
+public record NotABillRequest(string Key, Guid CategoryId);
 
 public record TrackAsBillRequest(string Key);
 public record MoveBillRequest(string Key, Guid CategoryId);
@@ -119,10 +126,41 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
             row.MergedIntoKey = into;
             row.NotSameAsKey = null;
         }
+        if (req.Split)
+        {
+            var joined = await db.RecurringItems.Where(r => r.HouseholdId == householdId && r.MergedIntoKey == req.Key).ToListAsync(ct);
+            foreach (var j in joined)
+            {
+                j.MergedIntoKey = null;
+                j.NotSameAsKey = req.Key; // you said they're different: don't suggest joining them again
+                j.UpdatedUtc = row.UpdatedUtc;
+            }
+        }
         await db.SaveChangesAsync(ct);
         if (req.MergeInto is not null)
             await KeepBillsTogetherAsync(householdId, ct); // the old charges follow the bill line you filed it under
         return true;
+    }
+
+    /// <summary>
+    /// "Not a bill" (DECISIONS.md 197): it never was one. Its charges move to the spending category you pick (with a
+    /// merchant rule for future ones, as when filing a bill), and it leaves the bills: nothing expects it any more.
+    /// It's listed under "Not bills", where Restore brings it back.
+    /// </summary>
+    public async Task<string?> NotABillAsync(Guid householdId, string key, Guid categoryId, CancellationToken ct)
+    {
+        var cat = await db.Categories.SingleOrDefaultAsync(c => c.Id == categoryId && c.HouseholdId == householdId, ct);
+        if (cat is null || cat.Type != CategoryType.Variable) return null;
+        var item = (await ItemsAsync(householdId, ct)).FirstOrDefault(i => i.Dto.Key == key);
+        if (item is null) return null;
+        cat.IsHidden = false;
+        await db.SaveChangesAsync(ct);
+        await FileUnderAsync(householdId, item, cat.Id, $"Not a bill: you filed it under {cat.Name}.", ct);
+        var row = await db.RecurringItems.SingleAsync(r => r.HouseholdId == householdId && r.Key == key, ct);
+        row.Dismissed = true;
+        row.UpdatedUtc = clock.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(ct);
+        return cat.Name;
     }
 
     /// <summary>
@@ -254,8 +292,8 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
     {
         var txns = await RecentAsync(householdId, ct);
         var rows = await db.RecurringItems.AsNoTracking().Where(r => r.HouseholdId == householdId).ToDictionaryAsync(r => r.Key, ct);
-        var series = ApplyMerges(RecurringDetector.Detect(txns, await TodayAsync(householdId, ct)), rows);
         var byId = txns.ToDictionary(t => t.Id);
+        var (series, joined) = ApplyMerges(RecurringDetector.Detect(txns, await TodayAsync(householdId, ct)), rows, byId);
 
         // Two bills that may be one whose price changed: ask on the newer one, and hold the older one's own question.
         var sameAs = new Dictionary<string, RecurringSeries>();
@@ -297,7 +335,8 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
                 sameAs.GetValueOrDefault(s.Key) is { } old
                     ? new SameBillDto(old.Key, rows.GetValueOrDefault(old.Key)?.Name ?? old.Name, old.AmountCents, old.FirstDate, old.LastDate, old.Occurrences)
                     : null,
-                replacedBy.GetValueOrDefault(s.Key));
+                replacedBy.GetValueOrDefault(s.Key),
+                joined.GetValueOrDefault(s.Key).Count, joined.GetValueOrDefault(s.Key).Varies);
             return new Item(s, dto, r?.Dismissed ?? false);
         }).ToList();
     }
@@ -305,9 +344,13 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
     /// <summary>
     /// Bills you said are one bill (DECISIONS.md 181) become one: the newest keeps its key, takes every charge, starts
     /// at the first, and shows the old price as the one before. A chain (a second price change) joins up the same way.
+    /// When the latest charges don't share a price (a bill whose amount varies), it's planned at the median of its last 6
+    /// charges and never flagged as a price change (DECISIONS.md 197).
     /// </summary>
-    private static List<RecurringSeries> ApplyMerges(IReadOnlyList<RecurringSeries> detected, IReadOnlyDictionary<string, RecurringItem> rows)
+    private static (List<RecurringSeries> Series, Dictionary<string, (int Count, bool Varies)> Joined) ApplyMerges(
+        IReadOnlyList<RecurringSeries> detected, IReadOnlyDictionary<string, RecurringItem> rows, IReadOnlyDictionary<Guid, RecurringTxn> byId)
     {
+        var joined = new Dictionary<string, (int Count, bool Varies)>();
         var byKey = detected.ToDictionary(s => s.Key);
         string Root(string key)
         {
@@ -329,17 +372,32 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
             }
             var before = others.MaxBy(s => s.LastDate)!;
             var previous = target.PreviousAmountCents ?? (before.AmountCents != target.AmountCents ? before.AmountCents : null);
+            var ids = group.SelectMany(s => s.TransactionIds).Distinct().ToList();
+            var amounts = ids.Select(byId.GetValueOrDefault).OfType<RecurringTxn>().OrderByDescending(t => t.Date).Select(t => t.AmountCents).ToList();
+            var latest = amounts.Count > 0 ? amounts[0] : target.AmountCents;
+            var varies = amounts.Count >= 3 && amounts.Take(3).Any(a => Math.Abs(a - latest) > Math.Max(50, latest / 50));
+            var usual = varies ? Median(amounts.Take(6).ToList()) : target.AmountCents;
+            joined[target.Key] = (others.Count, varies);
             result.Add(target with
             {
                 FirstDate = group.Min(s => s.FirstDate),
                 Occurrences = group.Sum(s => s.Occurrences),
-                TransactionIds = group.SelectMany(s => s.TransactionIds).Distinct().ToList(),
-                PreviousAmountCents = previous,
-                PriceChangedOn = target.PriceChangedOn ?? (previous is null ? null : target.FirstDate),
+                TransactionIds = ids,
+                AmountCents = usual,
+                MonthlyCents = varies ? RecurringDetector.MonthlyCents(usual, target.Frequency) : target.MonthlyCents,
+                Status = varies && target.Status == RecurringStatus.PriceChanged ? RecurringStatus.Active : target.Status,
+                PreviousAmountCents = varies ? null : previous,
+                PriceChangedOn = varies ? null : target.PriceChangedOn ?? (previous is null ? null : target.FirstDate),
                 CategoryId = target.CategoryId ?? before.CategoryId,
             });
         }
-        return result.OrderBy(s => s.NextExpected).ThenBy(s => s.Name, StringComparer.Ordinal).ToList();
+        return (result.OrderBy(s => s.NextExpected).ThenBy(s => s.Name, StringComparer.Ordinal).ToList(), joined);
+    }
+
+    private static long Median(List<long> xs)
+    {
+        var s = xs.OrderBy(x => x).ToList();
+        return s.Count % 2 == 1 ? s[s.Count / 2] : (s[s.Count / 2 - 1] + s[s.Count / 2]) / 2;
     }
 
     private async Task<IReadOnlyList<RecurringSeries>> DetectAsync(Guid householdId, CancellationToken ct) =>

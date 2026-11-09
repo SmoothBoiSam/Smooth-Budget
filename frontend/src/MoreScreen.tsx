@@ -4,7 +4,7 @@ import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import BankConnections from './BankConnections'
 import { formatCents, formatTime } from './format'
-import { Card, ErrorNotice, Page, PageHeader, Row, Rows, headerActionCls } from './ui'
+import { Card, ErrorNotice, headerActionCls, Page, PageHeader, Row, Rows, smallBtn } from './ui'
 
 const accountTypeLabel: Record<Account['type'], string> = { Checking: 'Checking', Savings: 'Savings', CreditCard: 'Credit card' }
 
@@ -287,7 +287,7 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
               <>
                 {' '}
                 ·{' '}
-                <a href="#/budget" className="font-semibold underline">
+                <a href="#/budget" className={`${smallBtn} py-1! text-ink`}>
                   Review
                 </a>
               </>

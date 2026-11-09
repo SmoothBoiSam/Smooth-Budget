@@ -136,6 +136,34 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
                      - c.BillsStillDueCents - c.CardsToPayCents - c.SavingsStillToMoveCents - c.LeftoverToMoveCents, c.AvailableCents);
         Assert.Equal(100_00, c.CheckingCents);
 
+        // DECISIONS.md 195: a card purchase before the last payday is held back from checking to pay the card off, unless
+        // you skipped paying it off on the payday plan: then it stays on the card as debt and checking doesn't hold it.
+        var cardId = Guid.NewGuid();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Data.AppDbContext>();
+            db.Accounts.Add(new SmoothBudget.Api.Data.Account
+            {
+                Id = cardId, HouseholdId = household, Name = "Test Card", Mask = "4444", Type = SmoothBudget.Api.Data.AccountType.CreditCard,
+                Source = SmoothBudget.Api.Data.DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            db.Transactions.Add(new SmoothBudget.Api.Data.Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, AccountId = cardId, Date = new DateOnly(2026, 11, 1), AmountCents = 50_00, Merchant = "TEST SHOP",
+                Description = "TEST", Kind = SmoothBudget.Core.Transactions.TransactionKind.Purchase, Source = SmoothBudget.Api.Data.DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var held = (await SummaryAsync(client)).Cash!.CardsToPayCents;
+        var plan = await client.GetFromJsonAsync<SmoothBudget.Api.Payday.PaydayDto>("/api/payday", Json);
+        var current = plan!.Checks.Single(x => x.IsCurrent);
+        var spend = current.Plan!.Items.Single(i => i.Kind == "cardspend" && i.Key == $"cardspend:{cardId}");
+        Assert.Equal(50_00, spend.Cents);
+        (await client.PutAsJsonAsync($"/api/payday/plan/{current.PayDate:yyyy-MM-dd}/{Uri.EscapeDataString(spend.Key)}", new { done = false, skipped = true }, Json)).EnsureSuccessStatusCode();
+        var afterSkip = await SummaryAsync(client);
+        Assert.Equal(held - 50_00, afterSkip.Cash!.CardsToPayCents);
+        poor = afterSkip;
+
         // DECISIONS.md 192: nothing short, no flight hours. With a latest stub that took home 75% of gross, the hours to pick up
         // are the shortfall over the rate's take-home, rounded up.
         Assert.Null(rich.PickUp);

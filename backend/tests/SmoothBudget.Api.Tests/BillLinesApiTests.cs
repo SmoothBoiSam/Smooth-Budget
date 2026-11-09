@@ -80,6 +80,9 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         var s = await Summary(c);
         var line = s.Groups.SelectMany(g => g.Categories).Single(x => x.Name == "Card interest");
         Assert.Equal("FixedBill", line.Type);
+        // Still a bill line underneath, but listed with the debt payments (DECISIONS.md 196).
+        Assert.Contains(s.Groups.Single(g => g.Type == "DebtPayment").Categories, x => x.Name == "Card interest");
+        Assert.DoesNotContain(s.Groups.Where(g => g.Type == "FixedBill").SelectMany(g => g.Categories), x => x.Name == "Card interest");
         Assert.Equal(41_65, line.LimitCents); // $2,000 at 24.99% ÷ 12, not what interest used to be
         using (var scope = app.Services.CreateScope())
         {

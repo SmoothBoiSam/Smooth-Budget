@@ -129,7 +129,7 @@ export default function CategoriesPage({
             <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {list.map((c) => (
                 <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <a href={`#/budget/c/${c.id}`} className="min-w-0 flex-1">
+                  <a href={`#/budget/categories/${c.id}`} className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{c.name}</span>
                     <span className="text-xs text-ink-soft tabular-nums">
                       {c.type === 'Variable' && `${priorityLabels[c.priority]} · `}

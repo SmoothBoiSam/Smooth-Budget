@@ -29,6 +29,12 @@ public static class RecurringEndpoints
                 ? Results.Ok(new { r.CategoryId, r.Name })
                 : Results.NotFound());
 
+        // "Not a bill" (DECISIONS.md 197): its charges become spending in the category you pick.
+        g.MapPost("/not-a-bill", async (NotABillRequest req, HttpContext ctx, RecurringService svc, CancellationToken ct) =>
+            await svc.NotABillAsync(ctx.User.HouseholdId(), req.Key ?? "", req.CategoryId, ct) is { } name
+                ? Results.Ok(new { Name = name })
+                : Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = ["Pick one of your spending categories."] }));
+
         // File a bill under a different category (DECISIONS.md 146).
         g.MapPost("/category", async (MoveBillRequest req, HttpContext ctx, RecurringService svc, CancellationToken ct) =>
             await svc.MoveToCategoryAsync(ctx.User.HouseholdId(), req.Key ?? "", req.CategoryId, ct) is { } r

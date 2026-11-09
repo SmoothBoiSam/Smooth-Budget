@@ -731,6 +731,9 @@ export interface RecurringItem {
   sameAs: { key: string; name: string; amountCents: number; firstDate: string; lastDate: string; occurrences: number } | null
   /** While that's being asked: the newer bill this one may have become. */
   replacedBy: string | null
+  /** How many bills you joined into this one (Split apart undoes it), and whether its price varies (DECISIONS.md 197). */
+  mergedCount?: number
+  varies?: boolean
 }
 
 export interface ArchivedCategory {
@@ -763,6 +766,8 @@ export interface RecurringUpdate {
   mergeInto?: string
   /** This bill isn't the same as that one: stop asking. */
   notSameAs?: string
+  /** Undo joining: the bills joined into this one are their own again. */
+  split?: boolean
 }
 
 export const recurringApi = {
@@ -771,6 +776,8 @@ export const recurringApi = {
   trackAsBill: (key: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/track-as-bill', { key }),
   /** File a bill's charges (past and future) under another category. */
   moveToCategory: (key: string, categoryId: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/category', { key, categoryId }),
+  /** "Not a bill": its charges become spending in this category, and nothing expects it any more (DECISIONS.md 197). */
+  notABill: (key: string, categoryId: string) => request<{ name: string }>('POST', '/recurring/not-a-bill', { key, categoryId }),
 }
 
 export interface ContributionStatus {
@@ -903,6 +910,9 @@ export interface PlanItem {
   status: string | null
   /** For "keep": the bills it covers. */
   bills: { name: string; cents: number; due: string }[] | null
+  /** "Pay off what you charged" on the check you're on can be skipped; the charges then stay on the card (DECISIONS.md 195). */
+  skippable?: boolean
+  skipped?: boolean
 }
 export interface PayCheck {
   payDate: string
@@ -1099,12 +1109,14 @@ function fileForm(file: File, extra?: Record<string, string>) {
 
 /** Payday plan steps still to do on the check you're on now: the Plan tab's badge (DECISIONS.md 188). */
 export const openPlanItems = (s: PaydaySummary) =>
-  s.checks.filter((c) => c.isCurrent && c.plan).reduce((n, c) => n + c.plan!.items.filter((i) => !i.done).length, 0)
+  s.checks.filter((c) => c.isCurrent && c.plan).reduce((n, c) => n + c.plan!.items.filter((i) => !i.done && !i.skipped).length, 0)
 
 export const paydayApi = {
   summary: () => request<PaydaySummary>('GET', '/payday'),
   setDone: (payDate: string, key: string, done: boolean) =>
     request<void>('PUT', `/payday/plan/${payDate}/${encodeURIComponent(key)}`, { done }),
+  setSkipped: (payDate: string, key: string, skipped: boolean) =>
+    request<void>('PUT', `/payday/plan/${payDate}/${encodeURIComponent(key)}`, { done: false, skipped }),
   setProfile: (p: Omit<PayProfile, 'rateCents' | 'nextRaiseOn' | 'nextRaiseRateCents'>) => request<void>('PUT', '/payday/profile', p),
   rules: () => request<{ rules: PayRules; edited: boolean }>('GET', '/payday/rules'),
   setRules: (r: PayRules) => request<void>('PUT', '/payday/rules', r),

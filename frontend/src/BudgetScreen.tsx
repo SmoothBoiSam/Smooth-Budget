@@ -17,7 +17,7 @@ import {
   type Transaction,
 } from './api'
 import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading, Notice, Page, PageHeader, headerActionCls } from './ui'
+import { Caret, ErrorNotice, headerActionCls, Loading, Notice, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
@@ -32,12 +32,14 @@ import TransactionSheet from './TransactionSheet'
 //   #/budget/c/<id>     one category's transactions
 //   #/budget/plan       budget settings and the budget generator
 //   #/budget/categories add or delete categories
-type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'categories' } | { kind: 'category'; id: string }
+//   #/budget/categories/<id>  one category, opened from Categories (its back button returns there)
+type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'categories' } | { kind: 'category'; id: string; from?: 'categories' }
 
 function viewFromHash(): View {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
   if (parts[0] === 'transactions' || parts[1] === 'all') return { kind: 'all' }
   if (parts[1] === 'plan') return { kind: 'plan' }
+  if (parts[1] === 'categories' && parts[2]) return { kind: 'category', id: parts[2], from: 'categories' }
   if (parts[1] === 'categories') return { kind: 'categories' }
   if (parts[1] === 'c' && parts[2]) return { kind: 'category', id: parts[2] }
   return { kind: 'overview' }
@@ -147,7 +149,15 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
                   : (line?.name ?? 'Category')
         }
         sub={view.kind === 'overview' && summary ? `${summary.budgetMonth.label} · ${formatDay(summary.budgetMonth.start)} – ${formatDay(summary.budgetMonth.end)}` : undefined}
-        back={view.kind === 'overview' ? undefined : view.kind === 'all' ? { href: '#/', label: 'Home' } : { href: '#/budget', label: 'Budget' }}
+        back={
+          view.kind === 'overview'
+            ? undefined
+            : view.kind === 'all'
+              ? { href: '#/', label: 'Home' }
+              : view.kind === 'category' && view.from === 'categories'
+                ? { href: '#/budget/categories', label: 'Categories' }
+                : { href: '#/budget', label: 'Budget' }
+        }
         action={
           view.kind === 'category' && line ? (
             <button type="button" onClick={() => setEditing(line)} className={headerActionCls}>
@@ -229,7 +239,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           usualLimitCents={editing ? categories.find((c) => c.id === editing.id)?.monthlyLimitCents : undefined}
           onClose={() => setEditing(undefined)}
           onSaved={(message) => {
-            if (editing && message.includes(' is archived.')) window.location.hash = '#/budget'
+            if (editing && message.includes(' is archived.')) window.location.hash = view.kind === 'category' && view.from ? '#/budget/categories' : '#/budget'
             saved(message)
           }}
           onMove={editing ? (d) => move(editing, d) : undefined}
@@ -242,6 +252,8 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
 function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; bills: RecurringItem[]; unusedCount: number }) {
   // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
+  const trimmed = !!s.auto?.on && s.auto.shortCents > 0
+  const short = Math.max(s.overplannedCents, trimmed ? s.auto!.shortCents : 0)
   return (
     <>
       <p className="mt-3 text-sm text-ink-soft">
@@ -261,16 +273,12 @@ function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; 
         </a>
       </div>
 
-      {(s.overplannedCents > 0 || (s.auto?.on && s.auto.shortCents > 0) || unusedCount > 0) && (
+      {(short > 0 || unusedCount > 0) && (
         <div className="mt-5 space-y-3">
-          {s.overplannedCents > 0 && (
+          {/* One note for a plan beyond the month's money, whether or not the automatic budget already trimmed it (DECISIONS.md 194). */}
+          {short > 0 && (
             <Notice tone="danger" href="#/budget/plan">
-              The plan is {formatCents(s.overplannedCents)} more than this month’s money.
-            </Notice>
-          )}
-          {s.auto?.on && s.auto.shortCents > 0 && (
-            <Notice tone="danger" href="#/budget/plan">
-              {formatCents(s.auto.shortCents)} short this month, even with spending trimmed.
+              The plan is {formatCents(short)} more than this month’s money{trimmed ? ', even with spending trimmed' : ''}.
             </Notice>
           )}
           {unusedCount > 0 && (
@@ -335,6 +343,9 @@ function Group({
             <li key={c.id}>
               <a href={`#/budget/c/${c.id}`} className="block px-4 py-3">
                 <CategoryRow line={c} spending={spending} />
+                {c.type === 'FixedBill' && g.type === 'DebtPayment' && (
+                  <span className="mt-1 block text-xs text-ink-faint">Planned from your card balances at their APRs</span>
+                )}
               </a>
               {items.length > 0 && <BillItems lineId={c.id} items={items} month={month} today={today} />}
             </li>
@@ -602,7 +613,7 @@ function SearchableList({
                   type="button"
                   onClick={() => set({ from: p.from, to: p.to })}
                   aria-pressed={f.from === p.from && f.to === p.to}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.from === p.from && f.to === p.to ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu text-ink-soft'}`}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.from === p.from && f.to === p.to ? 'bg-primary text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {p.label}
                 </button>
@@ -653,7 +664,7 @@ function SearchableList({
             {results.total > 0 && ` · ${formatCents(Math.abs(results.netCents))} ${results.netCents < 0 ? 'back' : 'spent'}`}
             {results.total > results.items.length && ` · showing the newest ${results.items.length}`}
           </p>
-          <button type="button" onClick={() => setF(noFilters)} className="shrink-0 font-medium text-ink-soft underline">
+          <button type="button" onClick={() => setF(noFilters)} className={`${smallBtn} shrink-0 text-danger`}>
             Clear all
           </button>
         </div>
@@ -699,7 +710,7 @@ function dateLabel(from: string, to: string) {
 
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary shadow-neu-sm py-1 pr-1 pl-2.5 text-xs font-medium text-primary-ink">
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary py-1 pr-1 pl-2.5 text-xs font-medium text-primary-ink">
       {label}
       <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="rounded-full px-1.5 leading-none text-ink-faint">
         ×
@@ -785,7 +796,7 @@ function LastMonthCard({ last }: { last: LastMonth }) {
           {pending.length > 0 && (
             <>
               {' '}
-              <a href="#/payday" className="font-medium text-ink-soft underline">
+              <a href="#/payday" className={`${smallBtn} py-1! text-ink`}>
                 Where to send it: your Plan
               </a>
             </>
@@ -865,7 +876,7 @@ function IncomeCard({
           This month
         </h2>
         {!editing && (
-          <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-ink-soft underline">
+          <button type="button" onClick={() => setEditing(true)} className={`${smallBtn} text-ink`}>
             Edit income
           </button>
         )}
@@ -896,7 +907,7 @@ function IncomeCard({
           {fixed.length > 0 ? (
             <p className="text-xs text-ink-soft">
               {partnerLabel}: set on the{' '}
-              <a href="#/partner" className="underline">
+              <a href="#/partner" className={`${smallBtn} py-1! text-ink`}>
                 Partner screen
               </a>
               .
@@ -926,7 +937,7 @@ function IncomeCard({
                 {s.auto.incomeSetByYou ? (
                   <>
                     You set this.{' '}
-                    <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className="font-medium text-primary underline">
+                    <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className={`${smallBtnOn} py-1!`}>
                       Use your paychecks instead
                     </button>
                   </>
@@ -969,7 +980,7 @@ function IncomeCard({
           )}
           {!s.partnerName && (
             <p className="mt-2 text-xs text-ink-soft">
-              <a href="#/partner" className="underline">
+              <a href="#/partner" className={`${smallBtn} py-1! text-ink`}>
                 Set your partner's name
               </a>{' '}
               to track her contributions apart from your income.
@@ -980,7 +991,7 @@ function IncomeCard({
       {s.incomeExpectedCents === 0 && !editing && (
         <p className="mt-2 text-xs text-ink-soft">
           Set your expected income, or{' '}
-          <a href="#/budget/plan" className="underline">
+          <a href="#/budget/plan" className={`${smallBtn} py-1! text-ink`}>
             build a budget from your history
           </a>
           .

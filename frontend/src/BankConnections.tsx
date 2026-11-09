@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { usePlaidLink } from 'react-plaid-link'
 import { plaidApi, type AccountMapping, type LinkResult, type PlaidConfig, type PlaidItem, type SyncResult } from './api'
 import { formatTime } from './format'
+import { smallBtn } from './ui'
 
 const chip = 'neu-sm rounded-full px-3.5 py-1.5 text-ink'
 
@@ -266,7 +267,7 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
               </button>
             )}
             {config.sandboxShortcut && (
-              <button type="button" disabled={busy !== null} onClick={sandbox} className="text-xs font-medium text-ink-soft underline disabled:opacity-50">
+              <button type="button" disabled={busy !== null} onClick={sandbox} className={`${smallBtn} text-ink-soft`}>
                 Add Plaid's sandbox test bank (dev only)
               </button>
             )}

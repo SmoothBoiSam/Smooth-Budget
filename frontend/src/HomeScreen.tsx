@@ -132,7 +132,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
         )}
       </header>
 
-      <main className="flex-1 px-5 pb-32">
+      <main className="flex-1 px-5 pb-[calc(7rem+env(safe-area-inset-bottom))]">
         {error && (
           <div className="mt-6">
             <Notice tone="danger">
@@ -437,7 +437,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
               label={`Payday ${formatDay(s.nextPayday.payDate)}`}
               hint={
                 s.nextPayday.hasSchedule
-                  ? `${formatCents(s.nextPayday.lowNetCents)}–${formatCents(s.nextPayday.highNetCents)}${s.nextPayday.lowConfidence ? ' · rough guess' : ''}`
+                  ? `${s.nextPayday.lowNetCents === s.nextPayday.highNetCents ? 'Forecast' : `${formatCents(s.nextPayday.lowNetCents)}–${formatCents(s.nextPayday.highNetCents)}`}${s.nextPayday.lowConfidence ? ' · rough guess' : ''}`
                   : 'Import your schedule to forecast it'
               }
               value={s.nextPayday.hasSchedule ? `≈ ${formatCents(s.nextPayday.netCents)}` : undefined}

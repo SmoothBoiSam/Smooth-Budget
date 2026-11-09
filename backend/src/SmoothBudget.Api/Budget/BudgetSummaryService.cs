@@ -117,7 +117,12 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         var groups = GroupOrder
             .Select(g =>
             {
-                var items = data.Categories.Where(c => c.Type == g.Type).Select(c =>
+                // Card interest is a bill line planned from your card balances (DECISIONS.md 159), but it's the cost of the
+                // debt, so it's listed with the debt payments (DECISIONS.md 196). Only where it's listed changes.
+                static CategoryType ListedAs(MonthCategory c) =>
+                    c.Type == CategoryType.FixedBill && string.Equals(c.Name.Trim(), Core.Transactions.CardInterest.CategoryName, StringComparison.OrdinalIgnoreCase)
+                        ? CategoryType.DebtPayment : c.Type;
+                var items = data.Categories.Where(c => ListedAs(c) == g.Type).Select(c =>
                 {
                     var l = lines[c.Id];
                     return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.Priority, l.LimitCents, c.HasMonthOverride,

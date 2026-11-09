@@ -170,19 +170,33 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
         // The cards' window starts at the payday before this month's first one, like the payday plan's "Pay off what you
         // charged" (DECISIONS.md 179); without pay dates, at the month's start.
         var cardsFrom = range.Start;
+        SmoothBudget.Core.Pay.PayRules? rules = null;
         if (await db.ScheduleMonths.AnyAsync(m => m.HouseholdId == householdId, ct) || await db.PayStubs.AnyAsync(s => s.HouseholdId == householdId, ct))
         {
             var profile = await db.PayProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.HouseholdId == householdId, ct);
-            var rules = profile is null ? SmoothBudget.Core.Pay.PayRules.Default : Payday.PaydayService.RulesOf(profile);
-            var firstPay = SmoothBudget.Core.Pay.PayCalendar.From(range.Start, rules).First().PayDate;
-            var before = SmoothBudget.Core.Pay.PayCalendar.From(firstPay.AddDays(-45), rules).TakeWhile(p => p.PayDate < firstPay)
-                .Select(p => p.PayDate).LastOrDefault(firstPay.AddDays(-14));
+            rules = profile is null ? SmoothBudget.Core.Pay.PayRules.Default : Payday.PaydayService.RulesOf(profile);
+            var before = Payday.PaydayService.PaydayBefore(SmoothBudget.Core.Pay.PayCalendar.From(range.Start, rules).First().PayDate, rules);
             if (before < cardsFrom) cardsFrom = before;
         }
-        var charged = cardIds.Count == 0 ? 0 : await db.Transactions.AsNoTracking()
+        var cardCharges = cardIds.Count == 0 ? [] : await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && !t.IsTransfer && t.Kind != TransactionKind.CardPayment
                         && t.Date >= cardsFrom && t.Date <= today)
-            .SumAsync(t => t.AmountCents, ct);
+            .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
+        var charged = cardCharges.Sum(t => t.AmountCents);
+        // A skipped "Pay off what you charged" (DECISIONS.md 195): those charges stay on the card as debt, so checking
+        // doesn't hold money back for them. They're still spending in their categories.
+        if (rules is not null && cardCharges.Count > 0)
+        {
+            var skips = await db.PaydayChecklistItems.AsNoTracking()
+                .Where(x => x.HouseholdId == householdId && x.Key.StartsWith(Payday.PaydayService.SkipPrefix + "cardspend:") && x.PayDate > cardsFrom && x.PayDate <= today)
+                .Select(x => new { x.PayDate, x.Key }).ToListAsync(ct);
+            foreach (var skip in skips)
+            {
+                if (!Guid.TryParse(skip.Key[(Payday.PaydayService.SkipPrefix + "cardspend:").Length..], out var cardId)) continue;
+                var from = Payday.PaydayService.PaydayBefore(skip.PayDate, rules);
+                charged -= cardCharges.Where(t => t.AccountId == cardId && t.Date >= from && t.Date < skip.PayDate).Sum(t => t.AmountCents);
+            }
+        }
         var paid = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && checkingIds.Contains(t.AccountId) && t.Kind == TransactionKind.CardPayment && t.AmountCents > 0
                         && t.Date >= range.Start && t.Date <= today)

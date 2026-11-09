@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 
 /** Every screen's frame: one width, one gutter, room above the bottom nav. */
 export function Page({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`mx-auto min-h-screen max-w-md px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-28 ${className}`}>{children}</div>
+  return <div className={`mx-auto min-h-screen max-w-md px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[calc(7rem+env(safe-area-inset-bottom))] ${className}`}>{children}</div>
 }
 
 /** Every screen's title. A sub-page gets a back pill above it; `action` sits on the right (a small button or link). */
@@ -27,6 +27,13 @@ export function PageHeader({ title, sub, back, action }: { title: ReactNode; sub
     </header>
   )
 }
+
+/**
+ * A small button (DECISIONS.md 198): flat, not raised, so a row of them close together doesn't blur into overlapping
+ * shadows. Colored ones (smallBtnOn) get the shared gradient from index.css.
+ */
+export const smallBtn = 'inline-flex items-center justify-center gap-1 rounded-full bg-ink/[0.07] px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50'
+export const smallBtnOn = 'inline-flex items-center justify-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-ink transition-colors disabled:opacity-50'
 
 /** A small raised pill button for a header's action ("Add", "Edit"). */
 export const headerActionCls = 'neu-sm shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-primary'
