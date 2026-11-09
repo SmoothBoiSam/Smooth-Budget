@@ -134,10 +134,10 @@ export function Notice({ tone, href, children }: { tone: keyof typeof noticeDot;
   )
 }
 
-/** A small rounded label, e.g. "On track". */
+/** A small rounded label, e.g. "On track". Flat, like other small things (DECISIONS.md 198, 204): too small for a bevel. */
 export function Pill({ tone, children }: { tone?: 'good' | 'danger' | 'todo'; children: ReactNode }) {
   const color = tone === 'good' ? 'text-good' : tone === 'danger' ? 'text-danger' : tone === 'todo' ? 'text-gold-ink' : 'text-ink-soft'
-  return <span className={`neu-inset inline-block rounded-full px-3 py-1 text-xs font-semibold transition-colors duration-300 ${color}`}>{children}</span>
+  return <span className={`inline-block rounded-full bg-ink/[0.06] px-3 py-1 text-xs font-semibold transition-colors duration-300 ${color}`}>{children}</span>
 }
 
 /** The one main button style (green) and the one secondary style (raised). */

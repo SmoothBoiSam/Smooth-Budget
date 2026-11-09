@@ -617,9 +617,9 @@ const groups: { type: Category['type']; label: string; short: string; pick: stri
 function StatusTag({ t }: { t: Transaction }) {
   const name = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Money from your partner' : null)
   return name ? (
-    <span className="inline-block rounded-full neu-inset px-2.5 py-0.5 text-xs font-semibold text-gold-ink">{name}?</span>
+    <span className="inline-block rounded-full bg-ink/[0.06] px-2.5 py-0.5 text-xs font-semibold text-gold-ink">{name}?</span>
   ) : (
-    <span className="inline-block rounded-full neu-inset px-2.5 py-0.5 text-xs font-semibold text-danger">No category</span>
+    <span className="inline-block rounded-full bg-ink/[0.06] px-2.5 py-0.5 text-xs font-semibold text-danger">No category</span>
   )
 }
 

@@ -223,7 +223,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, sk
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
           {c.isCurrent ? `Paid ${weekday(c.payDate)}` : weekday(c.payDate)}
-          {c.isCurrent && <span className="whitespace-nowrap rounded-full neu-inset px-2 py-0.5 text-xs font-medium text-good">You're on this check</span>}
+          {c.isCurrent && <span className="whitespace-nowrap rounded-full bg-ink/[0.06] px-2 py-0.5 text-xs font-medium text-good">You're on this check</span>}
         </h2>
         <span className="shrink-0 text-xs text-ink-soft">
           Covers {formatDay(c.periodStart)}–{formatDay(c.periodEnd)}

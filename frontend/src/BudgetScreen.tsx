@@ -429,7 +429,7 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
       </div>
       <p className="mt-1 text-xs tabular-nums text-ink-soft">
         {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
-        {c.hasMonthOverride && <span className="ml-1 rounded neu-sm px-1.5 py-0.5 text-[10px] font-medium text-ink-soft">this month only</span>}
+        {c.hasMonthOverride && <span className="ml-1 rounded bg-ink/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-ink-soft">this month only</span>}
       </p>
       {c.partnerOffsetCents > 0 && (
         <p className="mt-0.5 text-xs tabular-nums text-ink-soft">
