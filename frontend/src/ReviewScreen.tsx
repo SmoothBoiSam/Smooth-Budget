@@ -160,7 +160,7 @@ export default function ReviewScreen({
         }
       />
       {/* Two parts (DECISIONS.md 152): transactions to confirm, and bills the app found or that changed. */}
-      <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1 rounded-2xl neu-inset p-1 text-sm font-semibold">
+      <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1.5 rounded-2xl neu-inset p-1 text-sm font-semibold">
         {(['transactions', 'bills'] as const).map((p) => {
           const n = p === 'transactions' ? todoCount : billsCount
           return (
@@ -439,7 +439,7 @@ function ReviewCard({
   const reason = context && context.history.length > 0 ? null : t.categoryReason
 
   return (
-    <article aria-label={`Review ${titleCase(t.merchant)}`} className="animate-rise-in mt-2 rounded-3xl neu p-4">
+    <article aria-label={`Review ${titleCase(t.merchant)}`} className="animate-rise-in mt-3 rounded-3xl neu p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">{titleCase(t.merchant)}</h2>
@@ -479,7 +479,7 @@ function ReviewCard({
       {partnerIn && (
         <fieldset className="mt-3">
           <legend className="text-sm font-medium text-ink-soft">What was this from {first}?</legend>
-          <div className="mt-2 grid gap-2">
+          <div className="mt-2 grid gap-3">
             {(
               [
                 ['payback', 'Paying you back for something', 'Pick what it was for below. It comes off that category, like a refund.'],
@@ -589,7 +589,7 @@ function ReviewCard({
                 ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
                 : 'Pick a category'}
       </button>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className="mt-3 grid grid-cols-2 gap-3">
         <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-2xl neu py-2 text-sm font-medium text-ink-soft">
           I don’t remember
         </button>
@@ -649,7 +649,7 @@ function NewCategory({
           className="mt-1 block w-full rounded-xl neu-inset px-3 py-2 text-base"
         />
       </label>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex gap-3">
         <button type="button" onClick={onCancel} className="flex-1 rounded-2xl neu py-2 text-sm font-medium text-danger">
           Cancel
         </button>

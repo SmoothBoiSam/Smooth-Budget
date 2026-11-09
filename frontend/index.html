@@ -23,7 +23,7 @@
         var dark = choice === 'dark' || (choice !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
         if (dark) {
           document.documentElement.classList.add('dark')
-          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#303030')
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#282828')
         }
       })()
     </script>

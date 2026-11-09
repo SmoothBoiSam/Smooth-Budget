@@ -203,7 +203,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
             {!changed && savedPlan?.extraSource === 'you' && ' Your budget plans this each month.'}
           </p>
           {changed ? (
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 flex gap-3">
               <button type="button" onClick={() => void load()} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
                 Reset
               </button>

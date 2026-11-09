@@ -565,7 +565,7 @@ function SearchableList({
       </div>
 
       {open && (
-        <div id="search-filters" className="mt-2 space-y-3 rounded-2xl neu p-3">
+        <div id="search-filters" className="mt-3 space-y-3 rounded-2xl neu p-3">
           <label className="block">
             <span className="text-xs font-medium text-ink-soft">Category</span>
             <select value={f.categoryId} onChange={(e) => set({ categoryId: e.target.value })} className={`mt-1 ${field}`}>
@@ -621,7 +621,7 @@ function SearchableList({
             </div>
           </fieldset>
 
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <button type="button" onClick={() => setF({ ...noFilters, q: f.q })} className="flex-1 rounded-2xl neu py-3 text-sm font-medium text-ink-soft">
               Clear filters
             </button>

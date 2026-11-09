@@ -95,7 +95,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
                 <span className="block text-xs text-ink-soft">For example, $800 a month toward Rent.</span>
               </button>
             ) : (
-              <ul className="mt-2 space-y-2">
+              <ul className="mt-2 space-y-3">
                 {o.contributions.map((c) => (
                   <li key={c.id}>
                     <button type="button" onClick={() => setEditing(c)} className="block w-full rounded-2xl neu px-4 py-3 text-left">
@@ -114,7 +114,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
               </ul>
             )}
             {o.contributions.length > 0 && (
-              <button type="button" onClick={() => setEditing(null)} className={`${smallBtn} mt-2 text-ink`}>
+              <button type="button" onClick={() => setEditing(null)} className={`${smallBtn} mt-3 text-ink`}>
                 Add another
               </button>
             )}

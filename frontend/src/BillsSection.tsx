@@ -471,7 +471,7 @@ function BillCard({
         </div>
       )}
       <ChargeHistory item={i} />
-      <div className="mt-4 grid grid-cols-2 gap-2 text-sm font-semibold">
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm font-semibold">
         {confirmable && (
           <button type="button" onClick={() => onUpdate({ key: i.key, confirmed: true }, `${i.name} looks right.`)} className="col-span-2 rounded-xl bg-primary py-2.5 text-primary-ink shadow-neu-sm">
             Looks right

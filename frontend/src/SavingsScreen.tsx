@@ -122,14 +122,14 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
             <h2 id="goals-h" className="px-1 text-sm font-semibold text-ink-soft">
               Goals
             </h2>
-            <ul className="mt-2 space-y-2">
+            <ul className="mt-2 space-y-3">
               {s.goals.map((g) => (
                 <li key={g.id}>
                   <GoalCard g={g} onOpen={() => setEditing(g)} />
                 </li>
               ))}
             </ul>
-            <button type="button" onClick={() => setEditing(null)} className="mt-2 w-full rounded-2xl neu py-3 text-sm font-medium">
+            <button type="button" onClick={() => setEditing(null)} className="mt-3 w-full rounded-2xl neu py-3 text-sm font-medium">
               + Add a goal
             </button>
           </section>

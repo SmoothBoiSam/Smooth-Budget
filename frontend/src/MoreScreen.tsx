@@ -354,7 +354,7 @@ function AddAccountForm({ onDone }: { onDone: (a: Account | null) => void }) {
         />
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}
-      <div className="flex gap-2">
+      <div className="flex gap-3">
         <button type="button" onClick={() => onDone(null)} className="neu flex-1 rounded-2xl py-3 text-sm font-semibold text-danger">
           Cancel
         </button>

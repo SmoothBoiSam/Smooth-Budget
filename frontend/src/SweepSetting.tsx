@@ -39,7 +39,7 @@ export default function SweepSetting() {
         Leftover money goes to
       </p>
       <p className="text-xs text-ink-soft">When a month ends under budget, the app suggests where to send what's left.</p>
-      <div role="radiogroup" aria-labelledby="sweep-label" className="mt-3 grid grid-cols-3 gap-1 rounded-lg neu-inset p-1">
+      <div role="radiogroup" aria-labelledby="sweep-label" className="mt-3 grid grid-cols-3 gap-1.5 rounded-lg neu-inset p-1">
         {options.map((o) => (
           <button
             key={o.value}
@@ -47,7 +47,7 @@ export default function SweepSetting() {
             role="radio"
             aria-checked={target === o.value}
             onClick={() => save(o.value, percent)}
-            className={`rounded-md py-2 text-sm font-medium ${target === o.value ? 'neu text-ink' : 'text-ink-soft'}`}
+            className={`rounded-md py-2 text-sm font-medium ${target === o.value ? 'neu-sm text-ink' : 'text-ink-soft'}`}
           >
             {o.label}
           </button>

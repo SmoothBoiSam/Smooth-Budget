@@ -174,7 +174,7 @@ export default function CategoryEditSheet({
         {!isNew && (
           <fieldset className="mt-3">
             <legend className="sr-only">Apply the limit to</legend>
-            <div className="grid grid-cols-2 gap-1 rounded-lg neu-inset p-1">
+            <div className="grid grid-cols-2 gap-1.5 rounded-lg neu-inset p-1">
               {(['month', 'permanent'] as const).map((v) => (
                 <button
                   key={v}
@@ -182,7 +182,7 @@ export default function CategoryEditSheet({
                   role="radio"
                   aria-checked={applyTo === v}
                   onClick={() => setApplyTo(v)}
-                  className={`rounded-md py-2 text-sm font-medium ${applyTo === v ? 'neu text-ink' : 'text-ink-soft'}`}
+                  className={`rounded-md py-2 text-sm font-medium ${applyTo === v ? 'neu-sm text-ink' : 'text-ink-soft'}`}
                 >
                   {v === 'month' ? 'This month only' : 'From now on'}
                 </button>
@@ -194,7 +194,7 @@ export default function CategoryEditSheet({
         {type === 'Variable' && (
           <fieldset className="mt-4">
             <legend className="text-sm font-medium text-ink-soft">Priority</legend>
-            <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg neu-inset p-1">
+            <div className="mt-2 grid grid-cols-3 gap-1.5 rounded-lg neu-inset p-1">
               {(['High', 'Medium', 'Low'] as const).map((p) => (
                 <button
                   key={p}
@@ -202,7 +202,7 @@ export default function CategoryEditSheet({
                   role="radio"
                   aria-checked={priority === p}
                   onClick={() => setPriority(p)}
-                  className={`rounded-md px-1 py-2 text-sm font-medium ${priority === p ? 'neu text-ink' : 'text-ink-soft'}`}
+                  className={`rounded-md px-1 py-2 text-sm font-medium ${priority === p ? 'neu-sm text-ink' : 'text-ink-soft'}`}
                 >
                   {priorityLabels[p]}
                 </button>

@@ -28,16 +28,16 @@
 /* Raised: cards, buttons, rows you tap. */
 @utility neu {
   background-color: var(--color-surface);
-  box-shadow: 6px 6px 14px var(--color-neu-dark), -6px -6px 14px var(--color-neu-light);
+  box-shadow: 4px 4px 9px var(--color-neu-dark), -4px -4px 9px var(--color-neu-light);
 }
 /* Raised, smaller: chips and round icon buttons. */
 @utility neu-sm {
   background-color: var(--color-surface);
-  box-shadow: 3px 3px 7px var(--color-neu-dark), -3px -3px 7px var(--color-neu-light);
+  box-shadow: 2px 2px 5px var(--color-neu-dark), -2px -2px 5px var(--color-neu-light);
 }
 /* The raised shadow alone, for colored buttons (bg-primary shadow-neu-sm). */
 @utility shadow-neu-sm {
-  box-shadow: 3px 3px 7px var(--color-neu-dark), -3px -3px 7px var(--color-neu-light);
+  box-shadow: 2px 2px 5px var(--color-neu-dark), -2px -2px 5px var(--color-neu-light);
 }
 /* Pressed in: inputs, tracks, the ring's well, a pressed button. */
 @utility neu-inset {
@@ -76,7 +76,7 @@ body {
 :root.dark {
   color-scheme: dark; /* native form controls, file pickers and scrollbars */
 
-  --color-surface: #303030;
+  --color-surface: #282828;
   --color-ink: #ededed;
   --color-ink-soft: #a8a8a8;
   --color-ink-faint: #808080;
@@ -85,14 +85,14 @@ body {
   --color-gold-ink: #f4bd4a;
   --color-good: #4cc38a;
   --color-danger: #ef4444;
-  --color-neu-dark: #1f1f1f;
-  --color-neu-light: #3e3e3e;
+  --color-neu-dark: #171717;
+  --color-neu-light: #363636;
 
-  --color-white: #353535;       /* cards, sheets, inputs */
-  --color-slate-50: #303030;    /* page background */
-  --color-slate-100: #3b3b3b;   /* subtle fills, dividers */
-  --color-slate-200: #454545;   /* card outlines, track behind progress bars */
-  --color-slate-300: #585858;   /* input borders, disabled tabs */
+  --color-white: #2d2d2d;       /* cards, sheets, inputs */
+  --color-slate-50: #282828;    /* page background */
+  --color-slate-100: #333333;   /* subtle fills, dividers */
+  --color-slate-200: #3d3d3d;   /* card outlines, track behind progress bars */
+  --color-slate-300: #505050;   /* input borders, disabled tabs */
   --color-slate-400: #8c8c8c;   /* faint text */
   --color-slate-500: #a8a8a8;   /* secondary text */
   --color-slate-600: #c2c2c2;

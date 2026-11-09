@@ -118,7 +118,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
           </p>
           <p className="text-xs text-ink-soft">Check the trips, then confirm.</p>
           <MonthBody m={preview.month} />
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex gap-3">
             <button type="button" onClick={() => setPreview(null)} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
               Cancel
             </button>
@@ -412,7 +412,7 @@ function StubReviewCard({ r, busy, onCancel, onSave }: { r: StubReview; busy: bo
           </li>
         ))}
       </ul>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex gap-3">
         <button type="button" onClick={onCancel} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
           Cancel
         </button>
