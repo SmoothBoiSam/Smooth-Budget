@@ -8,8 +8,9 @@ namespace SmoothBudget.Api.Shared;
 /// <summary>
 /// Someone you share costs with. Linked: they have their own account, linked to yours, since then. Otherwise just a name.
 /// InviteExpiresUtc: an invite you sent them that hasn't been used yet (the link itself is only shown when it's made).
+/// TransferName: their name on their bank transfers, for the one friend whose transfers are tracked (DECISIONS.md 207).
 /// </summary>
-public record FriendDto(Guid Id, string Name, bool Linked, DateTime? LinkedSince, DateTime? InviteExpiresUtc);
+public record FriendDto(Guid Id, string Name, bool Linked, DateTime? LinkedSince, DateTime? InviteExpiresUtc, string? TransferName = null);
 
 /// <summary>The Shared page's friends list, and your name as your friends see it.</summary>
 public record SharedOverviewDto(string? YourName, IReadOnlyList<FriendDto> Friends);
@@ -36,7 +37,7 @@ public record SharedResult(bool Found = true, string? Problem = null)
 /// one-time invite for a friend; they open it and sign up (sign-up is otherwise closed), or sign in and join. The two
 /// accounts are then linked: each keeps its own budget, and only what you send each other is shared.
 /// </summary>
-public class SharedService(AppDbContext db, TimeProvider clock)
+public class SharedService(AppDbContext db, TimeProvider clock, Transactions.CategorizationService categorization)
 {
     public static readonly TimeSpan InviteLifetime = TimeSpan.FromDays(7);
     public const int MaxName = 60;
@@ -54,7 +55,7 @@ public class SharedService(AppDbContext db, TimeProvider clock)
         var list = friends
             .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
             .Select(f => new FriendDto(f.Id, f.Name, f.LinkId is not null, f.LinkId is { } l ? since[l] : null,
-                f.LinkId is null ? invites.Where(i => i.FriendId == f.Id).Select(i => (DateTime?)i.ExpiresUtc).Max() : null))
+                f.LinkId is null ? invites.Where(i => i.FriendId == f.Id).Select(i => (DateTime?)i.ExpiresUtc).Max() : null, f.TransferName))
             .ToList();
         return new SharedOverviewDto(me, list);
     }
@@ -91,14 +92,91 @@ public class SharedService(AppDbContext db, TimeProvider clock)
         return SharedResult.Ok;
     }
 
-    /// <summary>Removes a friend from your list. If they're linked, the link ends for both of you first.</summary>
+    /// <summary>
+    /// Removes a friend from your list. If they're linked, the link ends for both of you first. If their transfers were
+    /// tracked, that stops: their money counts as your income again and their fixed contributions go with them.
+    /// </summary>
     public async Task<bool> RemoveFriendAsync(Guid householdId, Guid friendId, CancellationToken ct)
     {
         var friend = await db.Friends.AsNoTracking().SingleOrDefaultAsync(f => f.Id == friendId && f.HouseholdId == householdId, ct);
         if (friend is null) return false;
         if (friend.LinkId is { } linkId) await EndLinkAsync(linkId, ct);
-        await db.Friends.Where(f => f.Id == friendId).ExecuteDeleteAsync(ct); // their unused invites go with them
+        // Their unused invites and fixed contributions go with them; their transfers are no longer anyone's.
+        await db.Friends.Where(f => f.Id == friendId).ExecuteDeleteAsync(ct);
+        if (friend.TransferName is not null)
+            await categorization.RunAsync(householdId, ct);
         return true;
+    }
+
+    /// <summary>
+    /// Sets the name on one friend's transfers (DECISIONS.md 207, 211). Any number of friends can have one, but no two the
+    /// same, or their money couldn't be told apart. Labeling their transfers starts today. Null name: theirs stop being
+    /// tracked. No friend given (older clients): the only friend already tracked, else one by that first name, else a new
+    /// friend made from the name ("JANE DOE" → "Jane"); with no friend and no name, nobody's are tracked. Saves; the caller
+    /// re-runs categorization.
+    /// </summary>
+    public async Task<string?> SetTransferNameAsync(Guid householdId, Guid? friendId, string? name, CancellationToken ct)
+    {
+        var friends = await db.Friends.Where(f => f.HouseholdId == householdId).ToListAsync(ct);
+        var holders = friends.Where(f => f.TransferName is not null).ToList();
+        Friend? target;
+        if (friendId is { } id)
+        {
+            target = friends.FirstOrDefault(f => f.Id == id);
+            if (target is null) return "That friend isn't on your list.";
+        }
+        else if (name is null)
+        {
+            foreach (var f in holders) f.TransferName = null;
+            await db.SaveChangesAsync(ct);
+            return null;
+        }
+        else
+            target = (holders.Count == 1 ? holders[0] : null)
+                     ?? friends.FirstOrDefault(f => string.Equals(f.Name, FirstName(name), StringComparison.OrdinalIgnoreCase));
+
+        if (name is not null && holders.FirstOrDefault(f => f != target && string.Equals(f.TransferName, name, StringComparison.OrdinalIgnoreCase)) is { } other)
+            return $"That's already the name on {other.Name}'s transfers.";
+        if (target is null)
+        {
+            target = new Friend { Id = Guid.NewGuid(), HouseholdId = householdId, Name = FirstName(name!), CreatedUtc = clock.GetUtcNow().UtcDateTime };
+            db.Friends.Add(target);
+        }
+        target.TransferName = name;
+        // Labeling starts today, today included: money from them before today is their contribution, as it always was (DECISIONS.md 92, 100).
+        if (name is not null && target.LabelsStartAfter is null)
+        {
+            var zone = await db.Households.Where(h => h.Id == householdId).Select(h => h.TimeZoneId).SingleAsync(ct);
+            target.LabelsStartAfter = Home.HomeSummaryService.TodayIn(zone, clock).AddDays(-1);
+        }
+        await db.SaveChangesAsync(ct);
+        return null;
+    }
+
+    /// <summary>The friends whose transfers are tracked, as a phrase ("Jane", "Jane and Alex", "Jane, Alex and Pat"); null for none.</summary>
+    public static async Task<string?> TrackedNamesAsync(AppDbContext db, Guid householdId, CancellationToken ct) =>
+        JoinNames(await db.Friends.AsNoTracking().Where(f => f.HouseholdId == householdId && f.TransferName != null)
+            .OrderBy(f => f.CreatedUtc).ThenBy(f => f.Name).Select(f => f.Name).ToListAsync(ct));
+
+    public static string? JoinNames(IReadOnlyList<string> names) => names.Count switch
+    {
+        0 => null,
+        1 => names[0],
+        _ => string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1],
+    };
+
+    /// <summary>Who sends each fixed contribution: arrangement id → the friend's id and name (DECISIONS.md 211).</summary>
+    public static async Task<Dictionary<Guid, (Guid FriendId, string Name)>> SendersAsync(AppDbContext db, Guid householdId, CancellationToken ct) =>
+        (await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId)
+            .Select(a => new { a.Id, a.FriendId, a.Friend.Name }).ToListAsync(ct))
+        .ToDictionary(a => a.Id, a => (a.FriendId, a.Name));
+
+    /// <summary>"JANE DOE" → "Jane": a friend's name from the name on their transfers.</summary>
+    public static string FirstName(string transferName)
+    {
+        var first = transferName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "Friend";
+        var name = char.ToUpperInvariant(first[0]) + first[1..].ToLowerInvariant();
+        return name.Length > MaxName ? name[..MaxName] : name;
     }
 
     /// <summary>A new one-time invite for this friend; an older unused one stops working. Not once they're linked, or before you've said your name.</summary>

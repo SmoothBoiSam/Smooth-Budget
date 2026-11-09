@@ -209,7 +209,7 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
     }
 }
 
-public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, Bills.RecurringService recurring, Payday.PaydayService payday, Budget.AutoBudgetService autoBudget)
+public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, Bills.RecurringService recurring, Payday.PaydayService payday, Budget.AutoBudgetService autoBudget, Data.AppDbContext db)
 {
     public async Task<HomeSummaryDto> GetAsync(Guid householdId, CancellationToken ct = default)
     {
@@ -237,7 +237,7 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             PendingSweeps: data.PendingSweeps,
             ReviewCount: data.ReviewCount,
             UpcomingBills: await recurring.UpcomingAsync(householdId, 3, ct),
-            Contributions: Budget.ContributionStatusDto.From(data.Contributions, data.Categories),
+            Contributions: Budget.ContributionStatusDto.From(data.Contributions, data.Categories, await Shared.SharedService.SendersAsync(db, householdId, ct)),
             PartnerShortfallCents: data.PartnerShortfallCents,
             NextPayday: await payday.NextAsync(householdId, ct) is { } n
                 ? new NextPaydayDto(n.Period.PayDate, n.HasSchedule, n.NetCents, n.LowNetCents, n.HighNetCents, n.LowConfidence)

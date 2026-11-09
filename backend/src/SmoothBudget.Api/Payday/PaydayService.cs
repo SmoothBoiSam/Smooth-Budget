@@ -305,7 +305,9 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             .Where(i => i.Status is not ("possiblyCanceled" or "canceled") && !cards.Contains(i.AccountName)).ToList();
         var sweeps = await db.SweepTasks.AsNoTracking().Where(s => s.HouseholdId == householdId)
             .OrderByDescending(s => s.BudgetMonth.StartDate).ToListAsync(ct);
-        var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId).ToListAsync(ct);
+        var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId).Include(a => a.Friend).ToListAsync(ct);
+        var allSenders = arrangements.Select(a => a.Friend.Name).Distinct().ToList();
+        var everyoneSends = $"{Shared.SharedService.JoinNames(allSenders) ?? "your friend"} {(allSenders.Count > 1 ? "send" : "sends")}";
         var done = await db.PaydayChecklistItems.AsNoTracking().Where(x => x.HouseholdId == householdId).Select(x => new { x.PayDate, x.Key }).ToListAsync(ct);
         // What you put on each card lately (purchases less refunds, not payments): it already counts in its spending or bill
         // category, so the plan pays it off from the spending money left in checking, or the card would grow (DECISIONS.md 179).
@@ -336,15 +338,16 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             // charged, since their money lands there too (DECISIONS.md 165); only your share comes out of this check.
             var from = current ? c.Today : pay;
             var offsetUsed = new HashSet<Guid>();
-            // The name as it shows on their transfers ("ALEX RIVERA"): just the first name, in normal case.
-            var partner = c.Household.PartnerName?.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() is { } pn
-                ? char.ToUpperInvariant(pn[0]) + pn[1..].ToLowerInvariant() : "Your partner";
             var bills = items.Where(b => b.NextExpected >= from && b.NextExpected < next).OrderBy(b => b.NextExpected).Select(b =>
             {
-                var covered = b.CategoryId is { } cat && offsetUsed.Add(cat)
-                    ? Math.Min(b.AmountCents, arrangements.Where(a => a.CategoryId == cat && a.StartsOn <= b.NextExpected).Sum(a => a.AmountCents)) : 0;
+                var toward = b.CategoryId is { } cat && offsetUsed.Add(cat)
+                    ? arrangements.Where(a => a.CategoryId == cat && a.StartsOn <= b.NextExpected).ToList() : [];
+                var covered = Math.Min(b.AmountCents, toward.Sum(a => a.AmountCents));
+                // Whoever sends toward it (DECISIONS.md 211): "Jane sends", "Jane and Alex send".
+                var senders = toward.Select(a => a.Friend.Name).Distinct().ToList();
+                var who = $"{Shared.SharedService.JoinNames(senders) ?? "Your friend"} {(senders.Count > 1 ? "send" : "sends")}";
                 return new PlanBill($"bill:{b.Key}", b.Name, b.AmountCents, b.NextExpected, b.AccountName,
-                    covered > 0 ? $"{b.Name} counts in full: {partner} sends {PayEngine.Dollars(covered)} of it to this account, so {PayEngine.Dollars(b.AmountCents - covered)} is yours from this check." : null,
+                    covered > 0 ? $"{b.Name} counts in full: {who} {PayEngine.Dollars(covered)} of it to this account, so {PayEngine.Dollars(b.AmountCents - covered)} is yours from this check." : null,
                     covered);
             }).ToList();
             var debtShare = PaydayPlan.Share(debtMonthly, inMonth.Count, index);
@@ -427,7 +430,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                         return acct.CurrentBalanceCents >= x.Cents
                             ? (true, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}, enough for these.")
                             : (false, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}: {PayEngine.Dollars(x.Cents - acct.CurrentBalanceCents)} short for these."
-                                      + (x.FromOthersCents > 0 ? $" That counts the {PayEngine.Dollars(x.FromOthersCents)} {partner} sends, if it hasn't arrived yet." : ""));
+                                      + (x.FromOthersCents > 0 ? $" That counts the {PayEngine.Dollars(x.FromOthersCents)} {everyoneSends}, if it hasn't arrived yet." : ""));
                     case "debt" when x.Key.StartsWith("debt:", StringComparison.Ordinal):
                         if (x.Cents <= 0) return (true, null);
                         var card = debts.FirstOrDefault(d => x.Key == $"debt:{d.Id}");

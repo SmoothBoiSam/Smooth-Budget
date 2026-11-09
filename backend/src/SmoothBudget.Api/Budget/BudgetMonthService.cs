@@ -147,27 +147,31 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
     }
 
     /// <summary>
-    /// The partner's fixed contributions in one budget month, matched to her deposits (DECISIONS.md 97). Only
-    /// arrangements that had started by then apply, so setting one up never rewrites earlier months.
+    /// Friends' fixed contributions in one budget month, each matched to that friend's own deposits (DECISIONS.md 97, 211).
+    /// Only arrangements that had started by then apply, so setting one up never rewrites earlier months.
     /// </summary>
     public async Task<List<ContributionStatus>> ContributionsAsync(Guid householdId, BudgetMonthRange range, CancellationToken ct)
     {
         var arrangements = await db.PartnerArrangements.AsNoTracking()
             .Where(a => a.HouseholdId == householdId && a.StartsOn <= range.End)
             .OrderBy(a => a.CreatedUtc)
-            .Select(a => new ContributionArrangement(a.Id, a.CategoryId, a.AmountCents, a.WindowFromDay, a.WindowToDay))
+            .Select(a => new { a.FriendId, Arrangement = new ContributionArrangement(a.Id, a.CategoryId, a.AmountCents, a.WindowFromDay, a.WindowToDay) })
             .ToListAsync(ct);
         if (arrangements.Count == 0)
             return [];
         var deposits = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer
                         && ((t.Date >= range.Start && t.Date <= range.End) || t.CountsForMonthStart == range.Start))
-            .Select(t => new PartnerDeposit(t.Id, t.Date, -t.AmountCents,
+            .Select(t => new { t.FriendId, Deposit = new PartnerDeposit(t.Id, t.Date, -t.AmountCents,
                 t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
-                t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution, t.CountsForMonthStart))
+                t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution, t.CountsForMonthStart) })
             .ToListAsync(ct);
         var (_, today, _) = await ContextAsync(householdId, ct);
-        return PartnerContributions.Match(arrangements, range, deposits, today).ToList();
+        var matched = arrangements.GroupBy(a => a.FriendId).SelectMany(g => PartnerContributions.Match(
+            g.Select(a => a.Arrangement).ToList(), range,
+            deposits.Where(d => d.FriendId == g.Key).Select(d => d.Deposit).ToList(), today)).ToList();
+        // In the order they were set up, whoever sends them.
+        return arrangements.Select(a => matched.First(s => s.ArrangementId == a.Arrangement.Id)).ToList();
     }
 
     /// <summary>The most recent month that has ended, with its result (frozen or provisional).</summary>

@@ -32,12 +32,16 @@ public class Household
     /// <summary>For <see cref="SweepTarget.Split"/>: the share that goes to savings, 0 to 100.</summary>
     public int SweepSavingsPercent { get; set; } = 50;
 
-    /// <summary>The partner's name as it appears on incoming transfers ("Zelle payment from ..."); set in Settings.</summary>
+    /// <summary>
+    /// No longer used: the name on a friend's transfers is now kept on each friend (<see cref="Friend.TransferName"/>,
+    /// DECISIONS.md 211), and migration FriendMoneyPerFriend copied it there. Kept so the old value isn't lost.
+    /// </summary>
     public string? PartnerName { get; set; }
 
     /// <summary>Your name as a linked partner sees it ("Sam asks for $800…", DECISIONS.md 205).</summary>
     public string? DisplayName { get; set; }
     /// <summary>
+    /// No longer used (now <see cref="Friend.LabelsStartAfter"/>, DECISIONS.md 211).
     /// Labeling transfers between you starts after this day (DECISIONS.md 92, 100): the day before you first named your
     /// partner. Money from her on or before it is her contribution, as it always was; after it, transfers wait for a label.
     /// </summary>
@@ -217,6 +221,9 @@ public class Transaction
     public decimal SplitFactor { get; set; } = 1m;
     /// <summary>Money to or from the partner (by the name in Settings): it waits for you to say what it was for (DECISIONS.md 100).</summary>
     public bool IsPartnerTransfer { get; set; }
+    /// <summary>Which friend the money is to or from, when <see cref="IsPartnerTransfer"/> (DECISIONS.md 211).</summary>
+    public Guid? FriendId { get; set; }
+    public Friend? Friend { get; set; }
     /// <summary>For a transfer waiting for a label: the category the app thinks it was for (shown pre-selected, counted nowhere).</summary>
     public Guid? SuggestedCategoryId { get; set; }
     /// <summary>Her contribution sent early: it counts for the budget month starting on this date, not the one it landed in (DECISIONS.md 166).</summary>
@@ -390,6 +397,9 @@ public class PartnerArrangement
 {
     public Guid Id { get; set; }
     public Guid HouseholdId { get; set; }
+    /// <summary>The friend who sends it (DECISIONS.md 211). Their transfers are the ones matched to it.</summary>
+    public Guid FriendId { get; set; }
+    public Friend Friend { get; set; } = null!;
     public Guid CategoryId { get; set; }
     public Category Category { get; set; } = null!;
     public long AmountCents { get; set; }
@@ -544,6 +554,18 @@ public class Friend
     public Guid HouseholdId { get; set; }
     public required string Name { get; set; }
     public Guid? LinkId { get; set; }
+
+    /// <summary>
+    /// Their name as your bank shows it on their transfers ("Zelle payment from …"). Money from that name is theirs, not
+    /// your income, and their fixed contributions count toward your bills (DECISIONS.md 207, 211). Any number of friends can
+    /// have one; no two the same.
+    /// </summary>
+    public string? TransferName { get; set; }
+    /// <summary>
+    /// Labeling their transfers starts after this day (DECISIONS.md 92, 100): the day before you first added the name.
+    /// Money from them on or before it is their contribution, as it always was; after it, transfers wait for a label.
+    /// </summary>
+    public DateOnly? LabelsStartAfter { get; set; }
     public DateTime CreatedUtc { get; set; }
 }
 

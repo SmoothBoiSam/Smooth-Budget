@@ -115,9 +115,17 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
         await load()
       })
     },
-    onExit: () => {
+    onExit: (err, metadata) => {
       const itemId = updateItemId
       linkClosed()
+      // Plaid closed on an error of its own: say what it reported, with the session id Plaid support asks for.
+      if (err) {
+        setError(
+          `Plaid stopped with an error: ${err.display_message || err.error_message} (${err.error_code}).` +
+            (metadata.link_session_id ? ` Plaid session ${metadata.link_session_id}.` : ''),
+        )
+        return
+      }
       // With nothing changed in Plaid (the account was already ticked), Plaid closes without "success": still check
       // whether it shares an account the app hasn't imported yet (DECISIONS.md 184).
       if (itemId && updateFor === 'add') void run('Checking your accounts…', () => showAccounts(itemId))

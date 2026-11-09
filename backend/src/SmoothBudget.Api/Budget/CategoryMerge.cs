@@ -148,7 +148,7 @@ public static class CategoryMerge
         if (cat is null)
             return (null, new() { ["id"] = ["That category doesn't exist."] });
         if (await db.PartnerArrangements.AnyAsync(a => a.HouseholdId == householdId && a.CategoryId == id, ct))
-            return (null, new() { ["moveToId"] = [$"Your partner's contribution goes toward {cat.Name}. Pick a category to move it and its transactions to."] });
+            return (null, new() { ["moveToId"] = [$"A friend's contribution goes toward {cat.Name}. Pick a category to move it and its transactions to."] });
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var reason = $"You deleted {cat.Name}. Pick a new category.";

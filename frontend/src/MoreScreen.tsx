@@ -144,8 +144,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
           <Row label="Bank connections" href="#/more/banks" />
           <Row label="Import a CSV" hint={lastImport ? `Last: ${lastImport.fileName}` : undefined} href="#/more/import" />
           <Row label="Merchant rules" value={rules.length > 0 ? rules.length : undefined} href="#/more/rules" />
-          <Row label="Shared" hint="Friends you split costs with" href="#/shared" />
-          <Row label="Partner" hint="Contributions, splits, who owes whom" href="#/partner" />
+          <Row label="Friends" hint="People you split costs with" href="#/friends" />
         </Rows>
       </Card>
 

@@ -219,7 +219,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
                 strokeLinecap="round"
                 stroke={`url(#ring-${c})`}
                 strokeDasharray={`${arc * shown.share} 999`}
-                className="transition-opacity duration-300"
+                className="transition-opacity duration-500"
                 opacity={ringColors[c].includes(shown.level) ? 1 : 0}
               />
             ))}
@@ -235,7 +235,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
                 src={levels[l].cat.src}
                 alt={on ? style.cat.alt : ''}
                 aria-hidden={!on}
-                className={`absolute inset-0 size-16 object-contain transition-[opacity,transform] duration-300 ${on ? 'scale-100 opacity-100' : 'scale-90 opacity-0'}`}
+                className={`absolute inset-0 size-16 object-contain transition-[opacity,transform] duration-500 ${on ? 'scale-100 opacity-100' : 'scale-90 opacity-0'}`}
               />
             )
           })}
@@ -262,7 +262,7 @@ function CashCheckRow({ cash: c, shortCents, pickUp }: { cash: CashCheck; shortC
   const rows: [string, number, 1 | -1][] = [
     ['In checking now', c.checkingCents, 1],
     ['Pay still coming', c.incomeStillComingCents, 1],
-    ['Partner money still coming', c.partnerStillComingCents, 1],
+    ['Money from friends still coming', c.partnerStillComingCents, 1],
     ['Bills not paid yet', c.billsStillDueCents, -1],
     ['Cards to pay off', c.cardsToPayCents, -1],
     ['Savings not moved yet', c.savingsStillToMoveCents, -1],
@@ -346,7 +346,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
     notices.push({
       key: `partner-${f.arrangementId}`,
       tone: 'danger',
-      href: '#/partner',
+      href: f.friendId ? `#/friends/${f.friendId}` : '#/friends',
       text:
         f.state === 'late'
           ? `${formatCents(f.expectedCents)} for ${f.categoryName} hasn’t come yet`

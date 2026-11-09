@@ -6,8 +6,8 @@ import DebtScreen from './DebtScreen'
 import HomeScreen from './HomeScreen'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
-import PartnerScreen from './PartnerScreen'
-import SharedScreen from './SharedScreen'
+import FriendsScreen from './FriendsScreen'
+import FriendScreen from './FriendScreen'
 import ReviewScreen from './ReviewScreen'
 import TasksScreen from './TasksScreen'
 import PayTasksScreen from './PayTasksScreen'
@@ -33,7 +33,11 @@ function currentRoute(): Route {
         ? 'tasks/transactions'
         : hash.startsWith('review/')
           ? 'tasks/' + hash.slice('review/'.length)
-          : null
+          : hash === 'shared'
+            ? 'friends' // Shared was renamed Friends (DECISIONS.md 207)
+            : hash === 'partner'
+              ? 'friends/transfers' // Partner became the friend whose transfers are tracked
+              : null
   if (moved) {
     window.history.replaceState(null, '', '#/' + moved)
     hash = moved
@@ -42,7 +46,7 @@ function currentRoute(): Route {
   if (hash === 'tasks') return 'tasks'
   if (hash === 'tasks/payday') return 'paytasks'
   if (hash.startsWith('tasks/')) return 'review' // tasks/transactions, tasks/bills[/<key>]
-  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'partner' ? 'partner' : hash === 'shared' || hash.startsWith('join/') ? 'shared' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {
@@ -113,8 +117,8 @@ export default function App() {
     const onHash = () => {
       if (inViewTransition() || reducedMotion()) return
       screen.current?.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], {
-        duration: 200,
-        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        duration: 420,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
       })
     }
     window.addEventListener('hashchange', onHash)
@@ -162,8 +166,8 @@ export default function App() {
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
-      {route === 'partner' && <PartnerScreen onSignedOut={signedOut} />}
-      {route === 'shared' && <SharedScreen onSignedOut={signedOut} />}
+      {route === 'friends' && <FriendsScreen onSignedOut={signedOut} />}
+      {route === 'friend' && <FriendScreen key={window.location.hash} id={window.location.hash.slice('#/friends/'.length)} onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
       </div>
       <BottomNav route={route} badges={{ tasks: inboxCount + billsCount + planCount }} />

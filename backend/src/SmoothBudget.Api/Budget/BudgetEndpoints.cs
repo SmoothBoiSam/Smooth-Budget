@@ -379,7 +379,7 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
         var debtExtra = await db.Households.Where(h => h.Id == householdId).Select(h => h.ExtraDebtPaymentCents).SingleAsync(ct);
         overrides = (overrides ?? new BudgetOverrides()) with { DebtExtraCents = debtExtra };
         var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills, contributions, plan, overrides);
-        var partnerName = await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct);
+        var partnerName = await Shared.SharedService.TrackedNamesAsync(db, householdId, ct);
         return (p, new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),
             p.IncomeCents, p.IncomeExplanation, p.PartnerCents, partnerName, filed, p.Categories, p.AllocatedCents, p.UnallocatedCents, p.SpendsMoreThanIncome,
             p.UncategorizedCount, hasCardDebt, needsSetup, contributions is not null), plan is not null);

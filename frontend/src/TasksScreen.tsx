@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import { ApiError, budgetApi, needsLook, openPlanItems, paydayApi, recurringApi, type PaydaySummary } from './api'
 import { icons } from './icons'
 import { weekday } from './paycheck'
-import { Card, CountBubble, Page, PageHeader, Row, Rows } from './ui'
+import { Card, Page, PageHeader, Row, Rows } from './ui'
 
 /**
  * The Tasks tab (DECISIONS.md 206): everything waiting on you, in one card like Plan's. Each part opens its own page and
- * carries its own count: transactions to confirm, bills to look at, and the steps for the check you're on. Pay period
+ * carries its own count on its icon (the tab bar shows their sum): transactions to confirm, bills to look at, and the steps for the check you're on. Pay period
  * tasks only show once there's a paycheck forecast (schedule or pay stubs).
  */
 export default function TasksScreen({
@@ -67,14 +67,14 @@ export default function TasksScreen({
             icon={icons.transactions}
             label={<span className="font-semibold">Review transactions</span>}
             hint={inboxCount > 0 ? `${inboxCount} ${inboxCount === 1 ? 'purchase' : 'purchases'} to confirm` : 'All caught up'}
-            value={inboxCount > 0 ? <CountBubble n={inboxCount} /> : undefined}
+            badge={inboxCount}
             href="#/tasks/transactions"
           />
           <Row
             icon={icons.bills}
             label={<span className="font-semibold">Review bills</span>}
             hint={billsCount > 0 ? `${billsCount} ${billsCount === 1 ? 'bill needs' : 'bills need'} a look` : 'Nothing new'}
-            value={billsCount > 0 ? <CountBubble n={billsCount} /> : undefined}
+            badge={billsCount}
             href="#/tasks/bills"
           />
           {hasPayTasks && (
@@ -82,7 +82,7 @@ export default function TasksScreen({
               icon={icons.payTasks}
               label={<span className="font-semibold">Pay period tasks</span>}
               hint={payHint}
-              value={planCount > 0 ? <CountBubble n={planCount} /> : undefined}
+              badge={planCount}
               href="#/tasks/payday"
             />
           )}

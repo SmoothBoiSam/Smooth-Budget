@@ -116,18 +116,18 @@ export const icons = {
       <path d="M22 18.3v4.4" stroke={C.dollar} strokeWidth={1.5} strokeLinecap="round" />
     </>,
   ),
-  /** An envelope sealed with a coin, and a red dot for one that's due: bills. */
+  /** An envelope sealed with a coin: bills. No red on it, so it isn't mistaken for a count bubble. */
   bills: art(
     <>
       {outlined(
         <>
-          <rect x="3.5" y="8" width="25" height="17.5" rx="3" fill={C.body} />
+          <rect x="3.5" y="7.5" width="25" height="18" rx="3" fill={C.body} />
         </>,
       )}
-      <path d="m5 10 11 8.2L27 10" fill="none" stroke={C.ring} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="16" cy="19" r="4.7" fill={C.coinRim} stroke="#fff" strokeWidth={1.2} />
-      <circle cx="16" cy="19" r="3.4" fill={C.coin} />
-      <circle cx="26" cy="8" r="3.3" fill={C.red} stroke="#fff" strokeWidth={1.4} />
+      <path d="m5 9.5 11 8.5 11-8.5" fill="none" stroke={C.ring} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="16" cy="18.5" r="4.9" fill={C.coinRim} stroke="#fff" strokeWidth={1.2} />
+      <circle cx="16" cy="18.5" r="3.6" fill={C.coin} />
+      <path d="M16 16.4v4.2" stroke={C.dollar} strokeWidth={1.4} strokeLinecap="round" />
     </>,
   ),
   /** Two coins passing between friends: the running tab. */

@@ -17,8 +17,10 @@ public record TransactionDto(
     bool NeedsReview = false, string? CategoryReason = null,
     // The automatic category is a real guess, not just "likely right".
     bool Unsure = false,
-    // Money to or from the partner; while it waits for a label, the category the app suggests (counted nowhere).
-    bool IsPartnerTransfer = false, Guid? SuggestedCategoryId = null);
+    // Money to or from a friend; while it waits for a label, the category the app suggests (counted nowhere).
+    bool IsPartnerTransfer = false, Guid? SuggestedCategoryId = null,
+    // Which friend (DECISIONS.md 211).
+    Guid? FriendId = null, string? FriendName = null);
 
 public record ConfirmRequest(List<Guid> Ids);
 public record ConfirmLikelyRequest(string Scope);
@@ -243,7 +245,7 @@ public static partial class TransactionEndpoints
                     return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerPurpose"] = ["That doesn't fit this transaction."] });
                 (t.Kind, t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.IsTransfer) =
                     (TransactionKind.PartnerContribution, null, null, CategorySource.User, false, false, false);
-                t.CategoryReason = "Your partner's money: you said so.";
+                t.CategoryReason = "Your friend's money: you said so.";
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new UpdateTransactionResult(await Project(db.Transactions.Where(x => x.Id == t.Id)).SingleAsync(ct), 0));
             }
@@ -434,7 +436,8 @@ public static partial class TransactionEndpoints
             .Select(t => new TransactionDto(
                 t.Id, t.Date, t.AmountCents, t.Merchant, t.Description, t.Kind.ToString(),
                 t.CategoryId, t.Category != null ? t.Category.Name : null, t.CategorySource.ToString(), t.IsTransfer, t.Pending,
-                t.AccountId, t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason, t.CategoryUnsure, t.IsPartnerTransfer, t.SuggestedCategoryId));
+                t.AccountId, t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason, t.CategoryUnsure, t.IsPartnerTransfer, t.SuggestedCategoryId,
+                t.FriendId, t.Friend != null ? t.Friend.Name : null));
 
     public static string? NormalizePattern(string? pattern)
     {

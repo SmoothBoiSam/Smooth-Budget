@@ -49,3 +49,12 @@ export function useTheme(): [ThemeChoice, (c: ThemeChoice) => void] {
 
   return [choice, set]
 }
+
+/** The count bubble's blue (DECISIONS.md 208): fixed colors, so the dark theme doesn't swap them, with white numbers. */
+export const bubbleStyle = { backgroundColor: '#2160d9', backgroundImage: 'linear-gradient(160deg, #4a8af4, #1d4fc4)', color: '#fff' } as const
+
+/**
+ * What a count bubble says (DECISIONS.md 210): the number itself up to 999, then "999+". A longer number stretches the
+ * bubble sideways into a pill instead of shrinking the text.
+ */
+export const bubbleText = (n: number) => (n > 999 ? '999+' : String(n))

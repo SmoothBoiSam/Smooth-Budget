@@ -1,21 +1,22 @@
 // Bottom tab bar (DECISIONS.md 147, 206): five tabs with their names under the icons. Tasks holds everything waiting on
-// you (transactions, bills, pay period tasks); Plan the paycheck forecast with Debt and Savings; Shared and Settings live under More.
+// you (transactions, bills, pay period tasks); Plan the paycheck forecast with Debt and Savings; Friends and Settings live under More.
 import type { ReactNode } from 'react'
 
 import { icons } from './icons'
+import { bubbleStyle, bubbleText } from './theme'
 
-export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'more' | 'partner' | 'shared'
+export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'more' | 'friends' | 'friend'
 
 const tabs: { label: string; route: Route; icon: ReactNode; also: Route[] }[] = [
   { label: 'Home', route: 'home', icon: icons.home, also: ['transactions'] },
   { label: 'Budget', route: 'budget', icon: icons.budget, also: [] },
   { label: 'Tasks', route: 'tasks', icon: icons.tasks, also: ['review', 'paytasks'] },
-  // Payday setup, Debt and Savings live under Plan; Partner and Shared under More.
+  // Payday setup, Debt and Savings live under Plan; Friends under More.
   { label: 'Plan', route: 'payday', icon: icons.payday, also: ['paysetup', 'debt', 'savings'] },
-  { label: 'More', route: 'more', icon: icons.more, also: ['partner', 'shared'] },
+  { label: 'More', route: 'more', icon: icons.more, also: ['friends', 'friend'] },
 ]
 
-/** A count in a red bubble on a tab: Tasks (transactions and bills to look at, payday steps still to do). */
+/** A count in a blue bubble on a tab: Tasks (transactions and bills to look at, payday steps still to do). */
 export default function BottomNav({ route, badges }: { route: Route; badges: Partial<Record<Route, number>> }) {
   return (
     <nav
@@ -34,17 +35,16 @@ export default function BottomNav({ route, badges }: { route: Route; badges: Par
                 aria-label={count > 0 ? `${tab.label}, ${count} to do` : tab.label}
                 className={`flex flex-col items-center gap-1 pb-2 ${active ? "text-accent" : "text-ink-faint"}`}
               >
-                <span className={`relative block rounded-2xl px-3.5 py-1.5 transition-shadow duration-200 ${active ? 'neu-inset' : ''}`}>
-                  <span className={`block transition-opacity duration-200 ${active ? '' : 'opacity-60'}`}>{tab.icon}</span>
+                <span className={`relative block rounded-2xl px-3.5 py-1.5 transition-shadow duration-300 ${active ? 'neu-inset' : ''}`}>
+                  <span className={`block transition-opacity duration-300 ${active ? '' : 'opacity-60'}`}>{tab.icon}</span>
                   {count > 0 && (
                     <span
                       key={count}
                       aria-hidden
-                      className="animate-pop absolute top-0 left-1/2 ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4"
-                      // A strong red so the white number stands out; fixed colors so the dark theme doesn't swap them.
-                      style={{ backgroundColor: '#DC2626', backgroundImage: 'linear-gradient(160deg, #f05a5a, #c81e1e)', color: '#fff' }}
+                      className="animate-pop absolute top-0 left-1/2 ml-1.5 inline-flex min-w-4 items-center justify-center whitespace-nowrap rounded-full px-1 text-[10px] font-bold tabular-nums leading-4"
+                      style={bubbleStyle}
                     >
-                      {count > 99 ? '99+' : count}
+                      {bubbleText(count)}
                     </span>
                   )}
                 </span>

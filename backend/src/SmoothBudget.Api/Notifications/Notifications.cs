@@ -104,7 +104,7 @@ public class NotificationService(
         ("low", "Left to Spend running low", "When under 15% of this month's spending money is left, and again if it drops below zero."),
         ("cash", "Account short before payday", "When an account won't cover the bills due before your next check."),
         ("price", "Bill price went up", "When a bill or subscription charges more than it used to."),
-        ("partner", "Partner contribution late", "When a fixed contribution from your partner hasn't arrived by the end of its usual days."),
+        ("partner", "Friend contribution late", "When a fixed contribution from a friend hasn't arrived by the end of its usual days."),
         ("bank", "Bank needs you", "When a bank connection stops syncing and needs you to sign in again. Weekly until it's fixed."),
         ("review", "Weekly review reminder", "Sunday evening, when purchases are waiting for you to confirm."),
     ];
@@ -206,10 +206,11 @@ public class NotificationService(
             list.Add(("price", $"price:{i.Key}:{i.AmountCents}", new PushMessage("Bill price went up",
                 $"{i.Name} went up{(i.PreviousAmountCents is { } was ? $" from {PayEngine.Dollars(was)}" : "")} to {PayEngine.Dollars(i.AmountCents)}.", "#/tasks/bills", "price")));
 
-        var partner = household.PartnerName is { Length: > 0 } p ? p.Split(' ')[0] : "Your partner";
+        // Each friend's own, opening their page (DECISIONS.md 211).
         foreach (var c in (h.Contributions ?? []).Where(c => c.State == "late"))
-            list.Add(("partner", $"partnerlate:{c.WindowStart:yyyy-MM-dd}:{c.ArrangementId}", new PushMessage("Partner contribution late",
-                $"{partner}'s {PayEngine.Dollars(c.ExpectedCents)} toward {c.CategoryName} hasn't arrived. Left to Spend counts without it for now.", "#/partner", "partner")));
+            list.Add(("partner", $"partnerlate:{c.WindowStart:yyyy-MM-dd}:{c.ArrangementId}", new PushMessage("Contribution late",
+                $"{c.FriendName ?? "Your friend"}'s {PayEngine.Dollars(c.ExpectedCents)} toward {c.CategoryName} hasn't arrived. Left to Spend counts without it for now.",
+                c.FriendId is { } fid ? $"#/friends/{fid}" : "#/friends", "partner")));
 
         // A bank that stopped syncing: weekly until it's fixed (the week is part of the key).
         var week = System.Globalization.ISOWeek.GetYear(today.ToDateTime(TimeOnly.MinValue)) * 100 + System.Globalization.ISOWeek.GetWeekOfYear(today.ToDateTime(TimeOnly.MinValue));

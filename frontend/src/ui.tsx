@@ -1,6 +1,7 @@
 // The app's building blocks (DECISIONS.md 187). Every screen is made of these, so cards, rows, notices and buttons look
 // and behave the same everywhere. Neumorphic: everything is the page's own color, raised (neu) or pressed in (neu-inset).
 import type { ReactNode } from 'react'
+import { bubbleStyle, bubbleText } from './theme'
 
 /** Every screen's frame: one width, one gutter, room above the bottom nav. */
 export function Page({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -68,11 +69,14 @@ export function Row({
   value,
   tone,
   icon,
+  badge,
   href,
   onClick,
 }: {
   label: ReactNode
   icon?: ReactNode
+  /** A count on the icon's corner, like the tab bar's. */
+  badge?: number
   hint?: ReactNode
   value?: ReactNode
   tone?: 'good' | 'danger'
@@ -81,7 +85,21 @@ export function Row({
 }) {
   const inner = (
     <>
-      {icon && <span className="w-7 shrink-0">{icon}</span>}
+      {icon && (
+        // A longer number stretches the bubble into a pill (DECISIONS.md 210). It starts a little further over the icon so
+        // it never reaches the label, which stays lined up with the other rows'.
+        <span className={`relative w-7 shrink-0 ${badge ? 'mr-1.5' : ''}`}>
+          {icon}
+          {!!badge && (
+            <span
+              className={`absolute -top-1.5 flex ${bubbleText(badge).length > 3 ? 'left-2.5' : bubbleText(badge).length > 2 ? 'left-4' : 'left-5'}`}
+              aria-label={`${badge} to do`}
+            >
+              <CountBubble n={badge} small />
+            </span>
+          )}
+        </span>
+      )}
       <span className="min-w-0 flex-1">
         <span className="block">{label}</span>
         {hint && <span className="mt-0.5 block truncate text-xs text-ink-soft">{hint}</span>}
@@ -169,16 +187,16 @@ export function Button({
   )
 }
 
-/** A count in a red bubble, like the tab bar's (fixed colors, so the dark theme doesn't swap them). Nothing at zero. */
-export function CountBubble({ n }: { n: number }) {
+/** A count in a blue bubble, like the tab bar's: a circle for one digit, a pill for more. Small sits on an icon. Nothing at zero. */
+export function CountBubble({ n, small = false }: { n: number; small?: boolean }) {
   if (n <= 0) return null
   return (
     <span
       key={n}
-      className="animate-pop inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-5"
-      style={{ backgroundColor: '#DC2626', backgroundImage: 'linear-gradient(160deg, #f05a5a, #c81e1e)', color: '#fff' }}
+      className={`animate-pop inline-flex items-center justify-center whitespace-nowrap rounded-full font-bold tabular-nums ${small ? 'min-w-4 px-1 text-[10px] leading-4' : 'min-w-5 px-1.5 text-[11px] leading-5'}`}
+      style={bubbleStyle}
     >
-      {n > 99 ? '99+' : n}
+      {bubbleText(n)}
     </span>
   )
 }

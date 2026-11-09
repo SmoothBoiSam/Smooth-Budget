@@ -161,8 +161,10 @@ export interface Transaction {
   needsReview: boolean
   /** The app's least certain guesses; shown first when reviewing. */
   unsure: boolean
-  /** Money to or from the partner (by the name in More). */
+  /** Money to or from a friend (by the name on their transfers), and which friend (DECISIONS.md 211). */
   isPartnerTransfer: boolean
+  friendId: string | null
+  friendName: string | null
   /** While money between you waits for a label: the category the app suggests (counted nowhere). */
   suggestedCategoryId: string | null
   categoryReason: string | null
@@ -567,7 +569,8 @@ export interface SuggestedCategory {
 
 export const partnerApi = {
   get: () => request<{ partnerName: string | null }>('GET', '/settings/partner'),
-  save: (partnerName: string | null) => request<AutoCategorizeResult>('PUT', '/settings/partner', { partnerName }),
+  /** The name on one friend's transfers (DECISIONS.md 207, 211); any number of friends can have one. */
+  save: (partnerName: string | null, friendId?: string) => request<AutoCategorizeResult>('PUT', '/settings/partner', { partnerName, friendId }),
   suggestions: () => request<{ name: string; count: number; totalCents: number }[]>('GET', '/settings/partner/suggestions'),
 }
 
@@ -804,6 +807,9 @@ export interface ContributionStatus {
   windowStart: string
   windowEnd: string
   shortfallCents: number
+  /** Who sends it (DECISIONS.md 211). */
+  friendId: string | null
+  friendName: string | null
 }
 
 export interface PartnerOverview {
@@ -839,6 +845,8 @@ export interface Friend {
   linkedSince: string | null
   /** An invite you sent that hasn't been used yet. */
   inviteExpiresUtc: string | null
+  /** Their name on their bank transfers, for the one friend whose transfers are tracked (DECISIONS.md 207). */
+  transferName: string | null
 }
 
 /** Your friends, and your name as they see it. Each linked account keeps its own budget. */
@@ -877,9 +885,10 @@ export function joinToken(): string | null {
 }
 
 export const partnerPlanApi = {
-  overview: () => request<PartnerOverview>('GET', '/partner'),
-  addContribution: (categoryId: string, amountCents: number, windowFromDay?: number, windowToDay?: number) =>
-    request<{ id: string }>('POST', '/partner/contributions', { categoryId, amountCents, windowFromDay, windowToDay }),
+  /** One friend's money: their fixed contributions and recent transfers (DECISIONS.md 211). */
+  overview: (friendId: string) => request<PartnerOverview>('GET', `/partner?friendId=${encodeURIComponent(friendId)}`),
+  addContribution: (friendId: string, categoryId: string, amountCents: number, windowFromDay?: number, windowToDay?: number) =>
+    request<{ id: string }>('POST', '/partner/contributions', { friendId, categoryId, amountCents, windowFromDay, windowToDay }),
   updateContribution: (id: string, categoryId: string, amountCents: number, windowFromDay?: number, windowToDay?: number) =>
     request<void>('PUT', `/partner/contributions/${id}`, { categoryId, amountCents, windowFromDay, windowToDay }),
   removeContribution: (id: string) => request<void>('DELETE', `/partner/contributions/${id}`),

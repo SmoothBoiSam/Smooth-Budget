@@ -5,12 +5,15 @@ using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Transactions;
 
-public record PartnerSettingsDto(string? PartnerName);
+/// <param name="PartnerName">The name on the friend's transfers. Read back: every tracked friend's, joined.</param>
+/// <param name="FriendId">Whose transfers these are (DECISIONS.md 207, 211); none: the only friend tracked, or one made from the name.</param>
+public record PartnerSettingsDto(string? PartnerName, Guid? FriendId = null);
 public record PartnerNameSuggestion(string Name, int Count, long TotalCents);
 
 /// <summary>
-/// The partner's name as it appears on her transfers (SPEC Appendix D: stored in Settings, never hard-coded).
-/// Money from that name is partner money, kept apart from the owner's own income; see DECISIONS.md 97-100.
+/// A friend's name as it appears on their transfers (SPEC Appendix D: stored per friend, never hard-coded), and their
+/// fixed contributions. Money from that name is that friend's, kept apart from your own income; see DECISIONS.md 97-100
+/// and 211 (any number of friends).
 /// </summary>
 public static class PartnerEndpoints
 {
@@ -18,22 +21,19 @@ public static class PartnerEndpoints
     {
         var g = app.MapGroup("/api/settings/partner").RequireAuthorization();
 
-        g.MapGet("", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
-            new PartnerSettingsDto(await db.Households.Where(h => h.Id == ctx.User.HouseholdId()).Select(h => h.PartnerName).SingleAsync(ct)));
+        g.MapGet("", async (HttpContext ctx, CategorizationService categorization, CancellationToken ct) =>
+            new PartnerSettingsDto((await categorization.FriendsAsync(ctx.User.HouseholdId(), ct)) is { Count: > 0 } fs ? string.Join(", ", fs.Select(f => f.TransferName)) : null));
 
         // Saving re-tags every incoming transfer: from that name it's partner money, otherwise your income.
-        g.MapPut("", async (PartnerSettingsDto req, HttpContext ctx, AppDbContext db, CategorizationService categorization, TimeProvider clock, CancellationToken ct) =>
+        g.MapPut("", async (PartnerSettingsDto req, HttpContext ctx, CategorizationService categorization, Shared.SharedService shared, CancellationToken ct) =>
         {
             var name = string.IsNullOrWhiteSpace(req.PartnerName) ? null : req.PartnerName.Trim();
             if (name is { Length: > 100 or < 2 })
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerName"] = ["Use 2 to 100 characters."] });
-            var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
-            h.PartnerName = name;
-            // Labeling starts today, today included: money from her before today is her contribution, as it always was (DECISIONS.md 92, 100).
-            if (name is not null)
-                h.PartnerLabelsStartAfter ??= Home.HomeSummaryService.TodayIn(h.TimeZoneId, clock).AddDays(-1);
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(await categorization.RunAsync(h.Id, ct));
+            var householdId = ctx.User.HouseholdId();
+            if (await shared.SetTransferNameAsync(householdId, req.FriendId, name, ct) is { } problem)
+                return Results.Problem(problem, statusCode: StatusCodes.Status409Conflict);
+            return Results.Ok(await categorization.RunAsync(householdId, ct));
         });
 
         // Senders of incoming Zelle/Venmo-style transfers in the last year, most frequent first, to pick from.
@@ -57,17 +57,19 @@ public static class PartnerEndpoints
 
         var p = app.MapGroup("/api/partner").RequireAuthorization();
 
-        // The Partner screen (SPEC 4.8): fixed contributions with this month's status, and recent transfers between you.
-        p.MapGet("", async (HttpContext ctx, AppDbContext db, Budget.BudgetMonthService months, CancellationToken ct) =>
+        // A friend's money (SPEC 4.8): their fixed contributions with this month's status, and recent transfers between you.
+        // No friend given (older clients): everyone's.
+        p.MapGet("", async (Guid? friendId, HttpContext ctx, AppDbContext db, Budget.BudgetMonthService months, CategorizationService categorization, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             var row = await months.EnsureCurrentAsync(householdId, ct);
             var month = await months.LoadAsync(householdId, row, ct);
-            var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId)
+            var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId && (friendId == null || a.FriendId == friendId))
                 .OrderBy(a => a.CreatedUtc).Include(a => a.Category).ToListAsync(ct);
-            var statuses = Budget.ContributionStatusDto.From(month.Contributions, month.Categories);
+            var statuses = Budget.ContributionStatusDto.From(month.Contributions, month.Categories, await Shared.SharedService.SendersAsync(db, householdId, ct));
+            var names = (await categorization.FriendsAsync(householdId, ct)).Where(f => friendId == null || f.Id == friendId).Select(f => f.TransferName).ToList();
             var recent = await db.Transactions.AsNoTracking()
-                .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer)
+                .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && (friendId == null || t.FriendId == friendId))
                 .OrderByDescending(t => t.Date).ThenByDescending(t => t.CreatedUtc).Take(15)
                 .Select(t => new PartnerActivityDto(t.Id, t.Date, t.AmountCents,
                     t.Kind == TransactionKind.PartnerTransfer ? "waiting"
@@ -76,15 +78,16 @@ public static class PartnerEndpoints
                     t.CategoryId != null ? t.Category!.Name : null))
                 .ToListAsync(ct);
             var counted = await db.Transactions.AsNoTracking()
-                .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.CountsForMonthStart == month.Range.Start)
+                .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && (friendId == null || t.FriendId == friendId) && t.CountsForMonthStart == month.Range.Start)
                 .OrderBy(t => t.Date).Select(t => new EarlyDepositDto(t.Id, t.Date, -t.AmountCents)).ToListAsync(ct);
-            var waiting = statuses.Any(s => s.State is "expected" or "late" or "differentAmount");
+            var mine = arrangements.Select(a => a.Id).ToHashSet();
+            var waiting = statuses.Any(s => mine.Contains(s.ArrangementId) && s.State is "expected" or "late" or "differentAmount");
             return new PartnerOverviewDto(
-                await db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).SingleAsync(ct),
+                names.Count > 0 ? string.Join(", ", names) : null,
                 arrangements.Select(a => new ArrangementDto(a.Id, a.CategoryId, a.Category.Name, a.AmountCents, a.WindowFromDay, a.WindowToDay,
                     statuses.FirstOrDefault(s => s.ArrangementId == a.Id))).ToList(),
                 recent,
-                waiting ? (await EarlyCandidatesAsync(householdId, month.Range, db, months, ct)).Select(d => new EarlyDepositDto(d.Id, d.Date, d.AmountCents)).ToList() : [],
+                waiting ? (await EarlyCandidatesAsync(householdId, month.Range, db, months, ct, friendId)).Select(d => new EarlyDepositDto(d.Id, d.Date, d.AmountCents)).ToList() : [],
                 counted);
         });
 
@@ -126,10 +129,17 @@ public static class PartnerEndpoints
         {
             var householdId = ctx.User.HouseholdId();
             if (await ValidateAsync(req, householdId, db, ct) is { } problem) return problem;
+            // Whose it is; no friend given (older clients): the only friend whose transfers are tracked.
+            var tracked = await categorization.FriendsAsync(householdId, ct);
+            var friendId = req.FriendId is { } given
+                ? await db.Friends.AnyAsync(f => f.Id == given && f.HouseholdId == householdId, ct) ? given : (Guid?)null
+                : tracked.Count == 1 ? tracked[0].Id : null;
+            if (friendId is null)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["friendId"] = ["Pick the friend who sends it."] });
             var current = await months.EnsureCurrentAsync(householdId, ct);
             var a = new PartnerArrangement
             {
-                Id = Guid.NewGuid(), HouseholdId = householdId, CategoryId = req.CategoryId, AmountCents = req.AmountCents,
+                Id = Guid.NewGuid(), HouseholdId = householdId, FriendId = friendId.Value, CategoryId = req.CategoryId, AmountCents = req.AmountCents,
                 WindowFromDay = req.WindowFromDay ?? 18, WindowToDay = req.WindowToDay ?? 24, StartsOn = current.StartDate,
                 CreatedUtc = clock.GetUtcNow().UtcDateTime,
             };
@@ -163,13 +173,14 @@ public static class PartnerEndpoints
         });
     }
 
-    /// <summary>Her transfers from the days before <paramref name="range"/> that weren't the contribution of the month they landed in.</summary>
+    /// <summary>A friend's transfers (anyone's, with no friend given) from the days before <paramref name="range"/> that weren't the contribution of the month they landed in.</summary>
     private static async Task<IReadOnlyList<Core.Budgeting.PartnerDeposit>> EarlyCandidatesAsync(
-        Guid householdId, Core.Budgeting.BudgetMonthRange range, AppDbContext db, Budget.BudgetMonthService months, CancellationToken ct)
+        Guid householdId, Core.Budgeting.BudgetMonthRange range, AppDbContext db, Budget.BudgetMonthService months, CancellationToken ct, Guid? friendId = null)
     {
         var from = range.Start.AddDays(-Core.Budgeting.PartnerContributions.EarlyDays);
         var deposits = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer && t.Date >= from && t.Date < range.Start)
+            .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && (friendId == null || t.FriendId == friendId)
+                        && t.AmountCents < 0 && !t.IsTransfer && t.Date >= from && t.Date < range.Start)
             .Select(t => new Core.Budgeting.PartnerDeposit(t.Id, t.Date, -t.AmountCents,
                 t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
                 t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution, t.CountsForMonthStart))
@@ -184,7 +195,7 @@ public static class PartnerEndpoints
     private static async Task<IResult?> ValidateAsync(ArrangementRequest r, Guid householdId, AppDbContext db, CancellationToken ct)
     {
         var errors = new Dictionary<string, string[]>();
-        if (r.AmountCents is <= 0 or > 1_000_000_00) errors["amountCents"] = ["Enter the amount she sends."];
+        if (r.AmountCents is <= 0 or > 1_000_000_00) errors["amountCents"] = ["Enter the amount they send."];
         if (r.WindowFromDay is < 1 or > 31 || r.WindowToDay is < 1 or > 31 || (r.WindowFromDay ?? 18) > (r.WindowToDay ?? 24))
             errors["windowFromDay"] = ["Use days 1 to 31, from before to."];
         if (!await db.Categories.AnyAsync(c => c.Id == r.CategoryId && c.HouseholdId == householdId, ct))
@@ -193,7 +204,8 @@ public static class PartnerEndpoints
     }
 }
 
-public record ArrangementRequest(Guid CategoryId, long AmountCents, int? WindowFromDay = null, int? WindowToDay = null);
+/// <param name="FriendId">Who sends it (DECISIONS.md 211). Only read when adding one; none: the only friend whose transfers are tracked.</param>
+public record ArrangementRequest(Guid CategoryId, long AmountCents, int? WindowFromDay = null, int? WindowToDay = null, Guid? FriendId = null);
 public record ArrangementDto(Guid Id, Guid CategoryId, string CategoryName, long AmountCents, int WindowFromDay, int WindowToDay, Budget.ContributionStatusDto? ThisMonth);
 /// <param name="Purpose">"waiting" (not labeled yet), "contribution" (her money in), "payback" (from her, in a category), "yourShare" (to her, in a category).</param>
 public record PartnerActivityDto(Guid Id, DateOnly Date, long AmountCents, string Purpose, string? CategoryName);

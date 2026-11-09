@@ -89,6 +89,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => new { x.AccountId, x.Fingerprint });
             e.Property(x => x.PlaidTransactionId).HasMaxLength(100);
             e.HasIndex(x => x.PlaidTransactionId).IsUnique().HasFilter("\"PlaidTransactionId\" IS NOT NULL");
+            e.HasOne(x => x.Friend).WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.SetNull);
             // No cascade: undoing an import deletes its rows explicitly (and keeps SQL Server's single-cascade-path rule happy).
             e.HasOne<ImportBatch>().WithMany().HasForeignKey(x => x.ImportBatchId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
@@ -177,6 +178,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         b.Entity<Friend>(e =>
         {
             e.Property(x => x.Name).HasMaxLength(60);
+            e.Property(x => x.TransferName).HasMaxLength(100);
             e.HasIndex(x => x.HouseholdId);
             e.HasOne<HouseholdLink>().WithMany().HasForeignKey(x => x.LinkId).OnDelete(DeleteBehavior.SetNull);
         });
@@ -198,6 +200,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         b.Entity<PartnerArrangement>(e =>
         {
             e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Friend).WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.HouseholdId);
         });
 

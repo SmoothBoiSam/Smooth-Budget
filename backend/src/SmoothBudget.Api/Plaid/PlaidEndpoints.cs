@@ -189,7 +189,9 @@ public static class PlaidEndpoints
         }
         catch (PlaidException ex)
         {
-            return Results.Problem(ex.DisplayMessage ?? $"Plaid error: {ex.ErrorCode}.", statusCode: StatusCodes.Status400BadRequest);
+            // Plaid's own explanation when it gives no message for people: it says what to fix (a dashboard setting, say).
+            // It never carries keys or account numbers.
+            return Results.Problem(ex.DisplayMessage ?? ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
         catch (PlaidSetupException ex)
         {

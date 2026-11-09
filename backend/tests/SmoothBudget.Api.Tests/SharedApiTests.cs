@@ -132,6 +132,36 @@ public class SharedApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Every_friend_can_have_the_name_on_their_transfers_but_no_two_the_same()
+    {
+        At(9);
+        var sam = await UserAsync("Sam");
+        Task<HttpResponseMessage> Save(string? name, Guid? friendId = null) =>
+            sam.PutAsJsonAsync("/api/settings/partner", new SmoothBudget.Api.Transactions.PartnerSettingsDto(name, friendId), Json);
+
+        // Saved the old way (no friend given): a friend is made from it.
+        Assert.Equal(HttpStatusCode.OK, (await Save("JANE Q DOE")).StatusCode);
+        var jane = await FriendAsync(sam, "Jane");
+        Assert.Equal("JANE Q DOE", jane.TransferName);
+
+        // Any number of friends (DECISIONS.md 211), each with their own name.
+        var pat = await AddAsync(sam, "Pat");
+        Assert.Equal(HttpStatusCode.OK, (await Save("PAT SMITH", pat.Id)).StatusCode);
+        Assert.Equal(("JANE Q DOE", "PAT SMITH"), ((await FriendAsync(sam, "Jane")).TransferName, (await FriendAsync(sam, "Pat")).TransferName));
+        // Two the same couldn't be told apart.
+        Assert.Equal(HttpStatusCode.Conflict, (await Save("pat smith", jane.Id)).StatusCode);
+
+        // Clearing one leaves the other.
+        Assert.Equal(HttpStatusCode.OK, (await Save(null, jane.Id)).StatusCode);
+        Assert.Equal((null, "PAT SMITH"), ((await FriendAsync(sam, "Jane")).TransferName, (await FriendAsync(sam, "Pat")).TransferName));
+
+        // Removing a friend stops tracking their transfers.
+        Assert.Equal(HttpStatusCode.NoContent, (await sam.DeleteAsync($"/api/shared/friends/{pat.Id}")).StatusCode);
+        var setting = (await sam.GetFromJsonAsync<SmoothBudget.Api.Transactions.PartnerSettingsDto>("/api/settings/partner", Json))!;
+        Assert.Null(setting.PartnerName);
+    }
+
+    [Fact]
     public async Task An_invite_expires_after_a_week_and_a_wrong_one_does_nothing()
     {
         At(1);

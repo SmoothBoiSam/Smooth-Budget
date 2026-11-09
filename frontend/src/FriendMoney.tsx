@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, partnerPlanApi, type Category, type ContributionStatus, type PartnerOverview } from './api'
-import { ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
-import PartnerSetting from './PartnerSetting'
-import { centsToInput, formatCents, formatDay, ordinal, parseDollars, titleCase } from './format'
+import { ErrorNotice, Loading, smallBtn } from './ui'
+import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const purposeLabel: Record<PartnerOverview['recent'][number]['purpose'], string> = {
   waiting: 'Waiting for a label',
@@ -12,11 +11,11 @@ const purposeLabel: Record<PartnerOverview['recent'][number]['purpose'], string>
 }
 
 /**
- * The Partner screen (SPEC 4.8): her fixed contributions with this month's expected vs received and the late flag, and
- * recent transfers between you. There's no running tally (DECISIONS.md 100): each transfer is labeled in Review with
- * what it was for, and lands in that category.
+ * A friend's money, on their page (what was the Partner screen, SPEC 4.8; DECISIONS.md 207): their fixed contributions
+ * with this month's expected vs received and the late flag, and recent transfers between you. Each transfer is labeled
+ * in Tasks with what it was for, and lands in that category. Each friend has their own (DECISIONS.md 211).
  */
-export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void }) {
+export default function FriendMoney({ friendId, who, reloadKey, onSignedOut }: { friendId: string; who: string; reloadKey: string; onSignedOut: () => void }) {
   const [o, setO] = useState<PartnerOverview | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [editing, setEditing] = useState<PartnerOverview['contributions'][number] | null | undefined>(undefined) // null = adding
@@ -33,18 +32,25 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
 
   const load = useCallback(async () => {
     try {
-      const [ov, cats] = await Promise.all([partnerPlanApi.overview(), budgetApi.categories()])
+      const [ov, cats] = await Promise.all([partnerPlanApi.overview(friendId), budgetApi.categories()])
       setO(ov)
       setCategories(cats)
       setError(null)
     } catch (e) {
       fail(e)
     }
-  }, [fail])
+  }, [fail, friendId])
 
+  // Again whenever the name on their transfers changes (reloadKey): which transfers are theirs changes with it.
   useEffect(() => {
-    void load()
-  }, [load])
+    Promise.all([partnerPlanApi.overview(friendId), budgetApi.categories()])
+      .then(([ov, cats]) => {
+        setO(ov)
+        setCategories(cats)
+        setError(null)
+      })
+      .catch(fail)
+  }, [fail, friendId, reloadKey])
 
   async function act(action: () => Promise<unknown>, message: string) {
     try {
@@ -57,17 +63,8 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
     }
   }
 
-  const first = o?.partnerName ? titleCase(o.partnerName.split(' ')[0]) : null
-  const who = first ?? 'Your partner'
-
   return (
-    <Page>
-      <PageHeader title="Partner" back={{ href: '#/more', label: 'More' }} />
-      <div className="mt-4">
-        {/* The name on their transfers, moved here from More → Settings (DECISIONS.md 156). */}
-        <PartnerSetting onChanged={() => void load()} />
-      </div>
-
+    <>
       {notice && (
         <p role="status" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
@@ -75,12 +72,6 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
       )}
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
       {!o && !error && <Loading />}
-
-      {o && !o.partnerName && (
-        <p className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-gold-ink">
-          Set your partner’s name as it shows on their transfers (above) so the app can recognize them.
-        </p>
-      )}
 
       {o && (
         <>
@@ -192,14 +183,14 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
           onSave={(categoryId, cents, from, to) =>
             act(
               () =>
-                editing ? partnerPlanApi.updateContribution(editing.id, categoryId, cents, from, to) : partnerPlanApi.addContribution(categoryId, cents, from, to),
+                editing ? partnerPlanApi.updateContribution(editing.id, categoryId, cents, from, to) : partnerPlanApi.addContribution(friendId, categoryId, cents, from, to),
               'Saved. Your budget now counts it as an offset to that bill.',
             )
           }
           onRemove={editing ? () => act(() => partnerPlanApi.removeContribution(editing.id), 'Removed.') : undefined}
         />
       )}
-    </Page>
+    </>
   )
 }
 

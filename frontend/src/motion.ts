@@ -1,4 +1,4 @@
-// The app's motion (DECISIONS.md 190): short, soft, and never in the way. Only opacity and transform are animated where
+// The app's motion (DECISIONS.md 190, 210): soft, unhurried, and never in the way. Only opacity and transform are animated where
 // possible (the phone's graphics chip does those without redrawing), nothing blocks a tap, and with Reduce Motion on,
 // all of it is off.
 import { useEffect, useRef, useState } from 'react'

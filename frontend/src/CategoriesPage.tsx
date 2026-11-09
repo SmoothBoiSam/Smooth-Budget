@@ -272,7 +272,7 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
             about each one again, and files them all from the bank’s info and the app’s guesses.
           </p>
           <p>Everything it files waits in Tasks for you to confirm. Ones it can’t place wait there with no category.</p>
-          <p>Your merchant rules, transfers, and what you said about money from your partner stay as they are.</p>
+          <p>Your merchant rules, transfers, and what you said about money from friends stay as they are.</p>
           <p className="font-semibold text-danger">
             This can’t be undone.
           </p>

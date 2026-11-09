@@ -70,8 +70,10 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         await db.PlaidItems.Where(i => i.HouseholdId == householdId).ExecuteDeleteAsync(ct); // demo only; sandbox items are disposable
         household.SweepTarget = SweepTarget.Debt;
         household.SweepSavingsPercent = 50;
-        household.PartnerName = "Partner"; // matches the fake "Zelle payment from Partner" rows
-        household.PartnerLabelsStartAfter = null; // the demo's partner money is all her contribution
+        // The friend the fake "Zelle payment from Partner" rows are from (DECISIONS.md 207, 211); labeling never started, so
+        // the demo's money from them is all their contribution. Other friends the demo was given are kept.
+        await db.Friends.Where(f => f.HouseholdId == householdId && f.TransferName != null).ExecuteDeleteAsync(ct);
+        var partner = db.Friends.Add(new Friend { Id = Guid.NewGuid(), HouseholdId = householdId, Name = "Partner", TransferName = "Partner", CreatedUtc = now }).Entity;
 
         Account NewAccount(string name, AccountType type, string mask, long balance) => new()
         {
@@ -103,7 +105,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         // Her $800 toward rent as a fixed contribution (milestone 7), for every demo month.
         db.PartnerArrangements.Add(new PartnerArrangement
         {
-            Id = Guid.NewGuid(), HouseholdId = householdId, CategoryId = rent.Id, AmountCents = 800_00, StartsOn = new DateOnly(2000, 1, 1), CreatedUtc = now,
+            Id = Guid.NewGuid(), HouseholdId = householdId, FriendId = partner.Id, CategoryId = rent.Id, AmountCents = 800_00, StartsOn = new DateOnly(2000, 1, 1), CreatedUtc = now,
         });
         var (groceries, eatingOut, gas, shopping, entertainment, household_, personal) =
             (C("Groceries"), C("Eating out"), C("Gas"), C("Shopping"), C("Entertainment"), C("Household"), C("Personal care"));
@@ -199,6 +201,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
                     CategoryReason = p.Category is null || p.Transfer ? null : back == 0 ? "Demo: filed automatically." : "Demo: reviewed.",
                     Pending = back == 0 && date >= today.AddDays(-1), Source = DataSource.Seed, CreatedUtc = now,
                     IsPartnerTransfer = p.Merchant.Contains("Zelle payment from Partner", StringComparison.Ordinal),
+                    FriendId = p.Merchant.Contains("Zelle payment from Partner", StringComparison.Ordinal) ? partner.Id : null,
                 });
             }
 

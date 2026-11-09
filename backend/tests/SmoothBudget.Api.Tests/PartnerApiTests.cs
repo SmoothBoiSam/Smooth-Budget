@@ -184,6 +184,45 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Each_friend_has_their_own_transfers_and_contributions()
+    {
+        var (c, checking, rent, _) = await SetupAsync();
+        var jane = (await c.GetFromJsonAsync<Shared.SharedOverviewDto>("/api/shared", Json))!.Friends.Single(f => f.Name == "Jane");
+        var pat = (await (await c.PostAsJsonAsync("/api/shared/friends", new Shared.SetNameRequest("Pat"), Json)).Content.ReadFromJsonAsync<Shared.FriendDto>(Json))!;
+        Assert.True((await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto("PAT ROOMIE", pat.Id), Json)).IsSuccessStatusCode);
+        var utilities = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Utilities & internet").Id;
+
+        // With two friends tracked, a contribution says whose it is.
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/partner/contributions", new ArrangementRequest(rent, 800_00), Json)).StatusCode);
+        Assert.True((await c.PostAsJsonAsync("/api/partner/contributions", new ArrangementRequest(rent, 800_00, FriendId: jane.Id), Json)).IsSuccessStatusCode);
+        Assert.True((await c.PostAsJsonAsync("/api/partner/contributions", new ArrangementRequest(utilities, 100_00, FriendId: pat.Id), Json)).IsSuccessStatusCode);
+
+        At(11, 21);
+        await ImportAsync(c, checking, ChaseChecking, Zelle(20, 800m, "J1"),
+            "CREDIT,11/20/2026,\"Zelle payment from PAT ROOMIE P1\",100.00,PARTNERFI_TO_CHASE,1000.00,,");
+        var txns = (await c.GetFromJsonAsync<TransactionListDto>("/api/transactions", Json))!.Items;
+        var fromJane = txns.Single(t => t.Description.EndsWith("J1"));
+        var fromPat = txns.Single(t => t.Description.EndsWith("P1"));
+        Assert.Equal(("Jane", "PartnerContribution", "Jane's contribution toward Rent."), (fromJane.FriendName, fromJane.Kind, fromJane.CategoryReason));
+        Assert.Equal(("Pat", "PartnerContribution", "Pat's contribution toward Utilities & internet."), (fromPat.FriendName, fromPat.Kind, fromPat.CategoryReason));
+
+        // Both count in the budget, each under its own friend.
+        var b = await Budget(c);
+        Assert.Equal(["Jane received", "Pat received"], b.Contributions!.Select(s => $"{s.FriendName} {s.State}").Order());
+        Assert.Equal(900_00, b.PartnerExpectedCents);
+        Assert.Equal("Jane and Pat", b.PartnerName);
+
+        // Each friend's page shows only theirs.
+        var o = (await c.GetFromJsonAsync<PartnerOverviewDto>($"/api/partner?friendId={pat.Id}", Json))!;
+        Assert.Equal(("PAT ROOMIE", "Utilities & internet", "received"), (o.PartnerName, Assert.Single(o.Contributions).CategoryName, o.Contributions[0].ThisMonth!.State));
+        Assert.Equal(100_00L * -1, Assert.Single(o.Recent).AmountCents);
+
+        // Removing Pat takes their contribution with them; Jane's stays.
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/shared/friends/{pat.Id}")).StatusCode);
+        Assert.Equal("Jane received", $"{Assert.Single((await Budget(c)).Contributions!).FriendName} {(await Budget(c)).Contributions![0].State}");
+    }
+
+    [Fact]
     public async Task Bad_arrangements_are_rejected()
     {
         var (c, _, rent, _) = await SetupAsync();

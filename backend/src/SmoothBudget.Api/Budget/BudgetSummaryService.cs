@@ -24,14 +24,17 @@ public record BudgetCategoryLineDto(
 
 /// <param name="State">"expected", "received", "differentAmount" or "late".</param>
 /// <param name="ShortfallCents">What Left to Spend is missing because of it (late, or short after the window).</param>
+/// <param name="FriendId">Who sends it, and <paramref name="FriendName"/> their name (DECISIONS.md 211).</param>
 public record ContributionStatusDto(
     Guid ArrangementId, Guid CategoryId, string CategoryName, string State, long ExpectedCents, long ReceivedCents,
-    DateOnly WindowStart, DateOnly WindowEnd, long ShortfallCents)
+    DateOnly WindowStart, DateOnly WindowEnd, long ShortfallCents, Guid? FriendId = null, string? FriendName = null)
 {
-    public static List<ContributionStatusDto> From(IReadOnlyList<ContributionStatus>? statuses, IReadOnlyList<MonthCategory> categories) =>
+    public static List<ContributionStatusDto> From(IReadOnlyList<ContributionStatus>? statuses, IReadOnlyList<MonthCategory> categories,
+        IReadOnlyDictionary<Guid, (Guid FriendId, string Name)>? senders = null) =>
         (statuses ?? []).Select(s => new ContributionStatusDto(s.ArrangementId, s.CategoryId,
             categories.FirstOrDefault(c => c.Id == s.CategoryId)?.Name ?? "", char.ToLowerInvariant(s.State.ToString()[0]) + s.State.ToString()[1..],
-            s.ExpectedCents, s.ReceivedCents, s.WindowStart, s.WindowEnd, s.ShortfallCents)).ToList();
+            s.ExpectedCents, s.ReceivedCents, s.WindowStart, s.WindowEnd, s.ShortfallCents,
+            senders?.GetValueOrDefault(s.ArrangementId).FriendId, senders?.GetValueOrDefault(s.ArrangementId).Name)).ToList();
 }
 
 public record BudgetGroupDto(
@@ -144,7 +147,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         // With fixed contributions set up, partner money is those contributions, counted once as offsets (DECISIONS.md 97).
         var moneyIn = MonthData.MoneyIn(row, data.Contributions);
         var partnerExpected = moneyIn - row.IncomeExpectedCents;
-        var partnerName = db.Households.Where(h => h.Id == householdId).Select(h => h.PartnerName).Single();
+        var partnerName = await Shared.SharedService.TrackedNamesAsync(db, householdId, ct); // everyone whose transfers are tracked (DECISIONS.md 211)
         var reviewCount = db.Transactions.Count(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null && !t.IsTransfer
                                                      && t.Date >= data.Month.Start && t.Date <= data.Month.End);
 
@@ -155,7 +158,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             row.IncomeExpectedCents, planned, moneyIn - planned,
             Received(Core.Transactions.TransactionKind.Income), partnerExpected, Received(Core.Transactions.TransactionKind.PartnerContribution),
             partnerName, reviewCount,
-            groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories), data.PartnerShortfallCents,
+            groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories, await Shared.SharedService.SendersAsync(db, householdId, ct)), data.PartnerShortfallCents,
             new AutoBudgetDto(db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).Single(), row.AutoNote, row.AutoNoteUtc, row.AutoShortCents,
                 db.Categories.Where(c => c.HouseholdId == householdId && c.LimitSetByUser).Select(c => c.Id).AsEnumerable()
                     .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser),

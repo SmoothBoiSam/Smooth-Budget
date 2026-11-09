@@ -3,7 +3,6 @@ import {
   ApiError,
   budgetApi,
   budgetEditApi,
-  partnerApi,
   type Category,
   type ReviewScope,
   type ReviewSummary,
@@ -50,7 +49,6 @@ export default function ReviewScreen({
   const [summary, setSummary] = useState<ReviewSummary | null>(null)
   const [todoCount, setTodoCount] = useState<number | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
-  const [partnerName, setPartnerName] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -83,12 +81,6 @@ export default function ReviewScreen({
     Promise.all([loadQueue(scope), loadSide(), loadCategories()]).catch(fail)
   }, [scope, loadQueue, loadSide, loadCategories, fail])
 
-  useEffect(() => {
-    partnerApi
-      .get()
-      .then((p) => setPartnerName(p.partnerName))
-      .catch(fail)
-  }, [fail])
 
   // A link to #/tasks/bills (a bill line on the Budget tab, a notification) switches pages even while one is open.
   useEffect(() => {
@@ -263,7 +255,6 @@ export default function ReviewScreen({
               key={current.id}
               t={current}
               categories={categories}
-              partnerName={partnerName}
               onDone={(message, reload) => void done(current.id, message, reload)}
               older={!!summary && current.date < summary.windowStart}
               onSkip={() => setQueue((q) => (q && q.length > 1 ? [...q.slice(1), q[0]] : q))}
@@ -313,7 +304,6 @@ export default function ReviewScreen({
 function ReviewCard({
   t,
   categories,
-  partnerName,
   older,
   onDone,
   onSkip,
@@ -322,7 +312,6 @@ function ReviewCard({
 }: {
   t: Transaction
   categories: Category[]
-  partnerName: string | null
   /** Before the months the budget is built from. */
   older?: boolean
   onDone: (message: string, reload?: boolean) => void
@@ -330,7 +319,7 @@ function ReviewCard({
   onCategoryCreated: () => Promise<void>
   onError: (e: unknown) => void
 }) {
-  const first = partnerName ? titleCase(partnerName.split(' ')[0]) : 'your partner'
+  const first = t.friendName ?? 'your friend' // which friend it's to or from (DECISIONS.md 211)
   const partnerIn = t.isPartnerTransfer && t.amountCents < 0
   const partnerOut = t.isPartnerTransfer && t.amountCents > 0
   const pick = t.categoryId ?? t.suggestedCategoryId

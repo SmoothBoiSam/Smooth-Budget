@@ -433,7 +433,7 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
       </p>
       {c.partnerOffsetCents > 0 && (
         <p className="mt-0.5 text-xs tabular-nums text-ink-soft">
-          Partner covers {formatCents(c.partnerOffsetCents)} · your share <span className="font-medium text-ink-soft">{formatCents(c.limitCents - c.partnerOffsetCents)}</span>
+          A friend covers {formatCents(c.partnerOffsetCents)} · your share <span className="font-medium text-ink-soft">{formatCents(c.limitCents - c.partnerOffsetCents)}</span>
         </p>
       )}
     </>
@@ -813,7 +813,7 @@ function LastMonthCard({ last }: { last: LastMonth }) {
             ['Left in spending categories', last.totalUnspentCents, 1],
             ['Over in spending categories', last.totalOverspentCents, -1],
             ['Carried in from the month before', last.carriedInDeficitCents, -1],
-            ['Partner money that didn’t come', last.partnerShortfallCents ?? 0, -1],
+            ['Money from friends that didn’t come', last.partnerShortfallCents ?? 0, -1],
             ['Spending not filed in a category', last.unfiledSpendingCents ?? 0, -1],
             ['Planned beyond the month’s money', last.overplannedCents ?? 0, -1],
           ] as const
@@ -863,8 +863,8 @@ function IncomeCard({
   const incomeCents = parseDollars(income)
   const partnerCents = parseDollars(partner)
   const over = s.unallocatedCents < 0
-  const first = s.partnerName ? titleCase(s.partnerName.split(' ')[0]) : null
-  const partnerLabel = first ? `From ${first}` : 'Partner contributions'
+  const first = s.partnerName
+  const partnerLabel = first ? `From ${first}` : 'From friends'
   const fixed = s.contributions ?? []
   const a = s.auto
   const moneyIn = s.incomeExpectedCents + s.partnerExpectedCents
@@ -908,8 +908,8 @@ function IncomeCard({
           {fixed.length > 0 ? (
             <p className="text-xs text-ink-soft">
               {partnerLabel}: set on the{' '}
-              <a href="#/partner" className={`${smallBtn} py-1! text-accent`}>
-                Partner screen
+              <a href="#/friends" className={`${smallBtn} py-1! text-accent`}>
+                Friends
               </a>
               .
             </p>
@@ -955,7 +955,7 @@ function IncomeCard({
               </dd>
             </div>
             ) : (
-              fixed.map((f) => <ContributionRow key={f.arrangementId} f={f} who={first ?? 'Partner'} />)
+              fixed.map((f) => <ContributionRow key={f.arrangementId} f={f} who={f.friendName ?? 'Your friend'} />)
             )}
           </dl>
           <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
@@ -981,10 +981,10 @@ function IncomeCard({
           )}
           {!s.partnerName && (
             <p className="mt-2 text-xs text-ink-soft">
-              <a href="#/partner" className={`${smallBtn} py-1! text-accent`}>
-                Set your partner's name
+              <a href="#/friends" className={`${smallBtn} py-1! text-accent`}>
+                Add a friend’s name on their transfers
               </a>{' '}
-              to track her contributions apart from your income.
+              to track what they send apart from your income.
             </p>
           )}
         </>
@@ -1043,8 +1043,8 @@ function ContributionRow({ f, who }: { f: ContributionStatus; who: string }) {
       <dd className="text-right tabular-nums">
         {formatCents(f.expectedCents)} <span className={`block text-xs ${note.cls}`}>{note.text}</span>
         {f.state !== 'received' && (
-          // Sent before the budget month started? The Partner screen can count it here (DECISIONS.md 166).
-          <a href="#/partner" className="block text-xs font-medium text-accent">
+          // Sent before the budget month started? Their friend page can count it here (DECISIONS.md 166).
+          <a href={f.friendId ? `#/friends/${f.friendId}` : '#/friends'} className="block text-xs font-medium text-accent">
             Sent early? ›
           </a>
         )}

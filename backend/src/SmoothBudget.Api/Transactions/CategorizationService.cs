@@ -5,14 +5,16 @@ using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Transactions;
 
+/// <summary>A friend whose transfers are tracked (DECISIONS.md 211): their name in the app, the name on their transfers, and when labeling started.</summary>
+public sealed record FriendTransfers(Guid Id, string Name, string TransferName, DateOnly? LabelsStartAfter);
+
 /// <summary>What categorization needs about one household, loaded once per import, sync or back-fill.</summary>
 public sealed class CategorizationContext(
     IReadOnlyCollection<MerchantRule> rules,
     IReadOnlyDictionary<string, Guid> categoryIdsByName,
     IReadOnlyDictionary<string, MerchantHistory> history,
-    string? partnerName,
-    IReadOnlyList<RecentPurchase>? recentPurchases = null,
-    DateOnly? partnerLabelsStartAfter = null)
+    IReadOnlyList<FriendTransfers> friends,
+    IReadOnlyList<RecentPurchase>? recentPurchases = null)
 {
     public IReadOnlyDictionary<string, Guid> CategoryIdsByName { get; } = categoryIdsByName;
 
@@ -21,7 +23,7 @@ public sealed class CategorizationContext(
         rules, history.GetValueOrDefault(t.Merchant), CategoryIdsByName);
 
     /// <summary>
-    /// Applies automatic decisions to one row: recognizes money to and from the partner (by the name in Settings), files
+    /// Applies automatic decisions to one row: recognizes money to and from a friend (by the name on their transfers), files
     /// purchases in a category, and tells income from partner money. Never touches what the user chose, or transfers.
     /// Every automatic category waits for the user (DECISIONS.md 80). Money between you and your partner waits too,
     /// counted nowhere, with the app's suggestion, until you say what it was for (DECISIONS.md 100); her fixed
@@ -31,11 +33,15 @@ public sealed class CategorizationContext(
     {
         if (t.IsTransfer)
             return;
-        var fromPartner = t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerTransfer
-                          && PartnerDetector.IsFromPartner(t.Description, t.AmountCents, partnerName);
-        var toPartner = t.AmountCents > 0 && t.Kind is TransactionKind.Purchase or TransactionKind.Other or TransactionKind.PartnerTransfer
-                        && PartnerMoney.IsToPartner(t.Description, t.AmountCents, partnerName);
-        t.IsPartnerTransfer = fromPartner || toPartner;
+        // Whose it is: the first friend whose transfer name it carries.
+        var from = t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerTransfer
+            ? friends.FirstOrDefault(f => PartnerDetector.IsFromPartner(t.Description, t.AmountCents, f.TransferName)) : null;
+        var to = t.AmountCents > 0 && t.Kind is TransactionKind.Purchase or TransactionKind.Other or TransactionKind.PartnerTransfer
+            ? friends.FirstOrDefault(f => PartnerMoney.IsToPartner(t.Description, t.AmountCents, f.TransferName)) : null;
+        var friend = from ?? to;
+        var (fromPartner, toPartner) = (from is not null, to is not null);
+        t.IsPartnerTransfer = friend is not null;
+        t.FriendId = friend?.Id;
 
         if (!TransactionRules.IsAutomatic(t.CategorySource))
         {
@@ -45,12 +51,12 @@ public sealed class CategorizationContext(
             return;
         }
         t.SuggestedCategoryId = null;
-        var labeling = partnerLabelsStartAfter is { } start && t.Date > start; // before that, as it always was
+        var labeling = friend?.LabelsStartAfter is { } start && t.Date > start; // before that, as it always was
 
         if (fromPartner)
         {
             if (labeling)
-                Wait(t, PartnerMoney.Suggest(t.Date, t.AmountCents, recentPurchases ?? [], partnerName!));
+                Wait(t, PartnerMoney.Suggest(t.Date, t.AmountCents, recentPurchases ?? [], friend!.Name));
             else
                 (t.Kind, t.CategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) =
                     (TransactionKind.PartnerContribution, null, CategorySource.None, false, false, null);
@@ -67,7 +73,7 @@ public sealed class CategorizationContext(
         if (toPartner && labeling)
         {
             // Your share of something she bought, or something else: you say. What you chose for her before is a suggestion.
-            var asked = PartnerMoney.Suggest(t.Date, t.AmountCents, [], partnerName!);
+            var asked = PartnerMoney.Suggest(t.Date, t.AmountCents, [], friend!.Name);
             Wait(t, new PartnerSuggestion(guess.CategoryId, asked.Reason));
             return;
         }
@@ -135,28 +141,34 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
         var history = choices.Where(c => live.Contains(c.CategoryId)).GroupBy(c => c.Merchant)
             .ToDictionary(g => g.Key, g => new MerchantHistory(g.Key, g.ToDictionary(x => x.CategoryId, x => x.Count)));
 
-        var h = await db.Households.Where(x => x.Id == householdId)
-            .Select(x => new { x.PartnerName, x.PartnerLabelsStartAfter }).SingleAsync(ct);
-        // Your purchases from the last few months, to recognize "half of the groceries" when she pays you back.
+        var friends = await FriendsAsync(householdId, ct);
+        // Your purchases from the last few months, to recognize "half of the groceries" when a friend pays you back.
         var since = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime).AddDays(-120);
-        var recent = h.PartnerName is null ? [] : await db.Transactions.AsNoTracking()
+        var recent = friends.Count == 0 ? [] : await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.Date >= since && t.AmountCents > 0 && !t.IsTransfer && !t.IsPartnerTransfer
                         && t.CategoryId != null && t.Kind == TransactionKind.Purchase)
             .Select(t => new RecentPurchase(t.Date, t.Merchant, t.AmountCents, t.CategoryId!.Value))
             .ToListAsync(ct);
-        return new CategorizationContext(rules, categories, history, h.PartnerName, recent, h.PartnerLabelsStartAfter);
+        return new CategorizationContext(rules, categories, history, friends, recent);
     }
+
+    /// <summary>Friends whose transfers are tracked, oldest first (so the first one added wins a tie).</summary>
+    public async Task<List<FriendTransfers>> FriendsAsync(Guid householdId, CancellationToken ct) =>
+        await db.Friends.AsNoTracking().Where(f => f.HouseholdId == householdId && f.TransferName != null)
+            .OrderBy(f => f.CreatedUtc).ThenBy(f => f.Name)
+            .Select(f => new FriendTransfers(f.Id, f.Name, f.TransferName!, f.LabelsStartAfter)).ToListAsync(ct);
 
 
     /// <summary>
-    /// Marks the transfer that matched each fixed contribution as her contribution (DECISIONS.md 97): the largest from her
-    /// inside the window, even an unusual amount like $200 that would otherwise look like paying back. Runs after every
-    /// import, sync and re-run. Never touches what you labeled yourself.
+    /// Marks the transfer that matched each fixed contribution as that friend's contribution (DECISIONS.md 97, 211): the
+    /// largest from them inside the window, even an unusual amount like $200 that would otherwise look like paying back.
+    /// Each friend's transfers only match their own contributions. Runs after every import, sync and re-run. Never touches
+    /// what you labeled yourself.
     /// </summary>
     public async Task MatchContributionsAsync(Guid householdId, CancellationToken ct)
     {
         var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId)
-            .OrderBy(a => a.CreatedUtc).Include(a => a.Category).ToListAsync(ct);
+            .OrderBy(a => a.CreatedUtc).Include(a => a.Category).Include(a => a.Friend).ToListAsync(ct);
         if (arrangements.Count == 0)
             return;
         var h = await db.Households.AsNoTracking().SingleAsync(x => x.Id == householdId, ct);
@@ -166,16 +178,17 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
         var rows = await db.Transactions
             .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer && (t.Date >= from || t.CountsForMonthStart >= from))
             .ToListAsync(ct);
-        var first = h.PartnerName is { } n ? n.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] : "Your partner";
-        first = first.Length > 1 ? char.ToUpperInvariant(first[0]) + first[1..].ToLowerInvariant() : first;
 
-        // A transfer sent early counts in the month you moved it to (DECISIONS.md 166).
-        foreach (var month in rows.GroupBy(t => t.CountsForMonthStart is { } m ? calendar.MonthContaining(m) : calendar.MonthContaining(t.Date)))
+        // Each friend's transfers, month by month. A transfer sent early counts in the month you moved it to (DECISIONS.md 166).
+        foreach (var month in rows.GroupBy(t => (t.FriendId, Month: t.CountsForMonthStart is { } m ? calendar.MonthContaining(m) : calendar.MonthContaining(t.Date))))
         {
-            var active = arrangements.Where(a => a.StartsOn <= month.Key.End).ToList();
+            var active = arrangements.Where(a => a.FriendId == month.Key.FriendId && a.StartsOn <= month.Key.Month.End).ToList();
+            if (active.Count == 0)
+                continue;
+            var first = active[0].Friend.Name;
             var statuses = PartnerContributions.Match(
                 active.Select(a => new ContributionArrangement(a.Id, a.CategoryId, a.AmountCents, a.WindowFromDay, a.WindowToDay)).ToList(),
-                month.Key,
+                month.Key.Month,
                 month.Select(t => new PartnerDeposit(t.Id, t.Date, -t.AmountCents,
                     t.CategorySource == CategorySource.User && t.Kind == TransactionKind.PartnerContribution,
                     t.CategorySource == CategorySource.User && t.Kind != TransactionKind.PartnerContribution, t.CountsForMonthStart)).ToList(),
@@ -191,7 +204,7 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
                 t.CategoryReason = s.State == ContributionState.Received
                     ? $"{first}'s contribution toward {a.Category.Name}."
                     : $"{first}'s contribution toward {a.Category.Name}: {Money(s.ReceivedCents)}, not the usual {Money(s.ExpectedCents)}.";
-                if (h.PartnerLabelsStartAfter is not { } start || t.Date > start)
+                if (a.Friend.LabelsStartAfter is not { } start || t.Date > start)
                     t.NeedsReview = true; // still yours to confirm
             }
         }

@@ -43,7 +43,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
         me = await api.login(email, password)
         if (invited) await sharedApi.join(invite!)
       }
-      if (invite) window.history.replaceState(null, '', '#/shared')
+      if (invite) window.history.replaceState(null, '', '#/friends')
       onSignedIn(me)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')

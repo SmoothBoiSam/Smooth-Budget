@@ -538,6 +538,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<Guid>("HouseholdId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("LabelsStartAfter")
+                        .HasColumnType("date");
+
                     b.Property<Guid?>("LinkId")
                         .HasColumnType("uuid");
 
@@ -545,6 +548,10 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)");
+
+                    b.Property<string>("TransferName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
 
@@ -765,6 +772,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid>("FriendId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("HouseholdId")
                         .HasColumnType("uuid");
 
@@ -780,6 +790,8 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CategoryId");
+
+                    b.HasIndex("FriendId");
 
                     b.HasIndex("HouseholdId");
 
@@ -1280,6 +1292,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<Guid?>("FriendId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("HouseholdId")
                         .HasColumnType("uuid");
 
@@ -1329,6 +1344,8 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CategoryId");
+
+                    b.HasIndex("FriendId");
 
                     b.HasIndex("ImportBatchId");
 
@@ -1534,7 +1551,15 @@ namespace SmoothBudget.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SmoothBudget.Api.Data.Friend", "Friend")
+                        .WithMany()
+                        .HasForeignKey("FriendId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.Navigation("Category");
+
+                    b.Navigation("Friend");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.PlaidItem", b =>
@@ -1589,6 +1614,11 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("SmoothBudget.Api.Data.Friend", "Friend")
+                        .WithMany()
+                        .HasForeignKey("FriendId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("SmoothBudget.Api.Data.Household", null)
                         .WithMany()
                         .HasForeignKey("HouseholdId")
@@ -1603,6 +1633,8 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Navigation("Account");
 
                     b.Navigation("Category");
+
+                    b.Navigation("Friend");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.BudgetMonth", b =>
