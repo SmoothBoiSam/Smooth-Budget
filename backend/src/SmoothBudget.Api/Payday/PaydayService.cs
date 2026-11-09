@@ -105,7 +105,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     {
         var profile = c.InputOn(p.Start);
         return PayForecast.Check(PayEngine.Gross(p, c.Months.GetValueOrDefault((p.Start.Year, p.Start.Month)), profile, c.Rules),
-            c.Model, profile.RateCentsPerHour, c.Profile.FlatNetPercent, typicalMiss);
+            c.Model, c.Profile.FlatNetPercent, typicalMiss);
     }
 
     /// <summary>

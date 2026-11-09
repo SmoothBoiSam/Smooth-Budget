@@ -131,7 +131,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Contains(check.Lines, l => l.Name == "Uni Allowance");
         Assert.DoesNotContain(check.Lines, l => l.Name == "Commuter Subsid"); // only on the check paid on the 7th
         Assert.Equal(check.GrossCents - check.Taxes.Sum(t => t.Cents) - check.Deductions.Sum(d => d.Cents), check.NetCents);
-        Assert.True(check.LowNetCents < check.NetCents && check.NetCents < check.HighNetCents);
+        Assert.True(check.LowNetCents <= check.NetCents && check.NetCents <= check.HighNetCents); // no history yet: no miss to widen it
         var home = (await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!;
         Assert.Equal((new DateOnly(2026, 11, 23), check.NetCents), (home.NextPayday!.PayDate, home.NextPayday.NetCents));
 

@@ -8,16 +8,16 @@ public record ForecastCheck(
     bool LowConfidence, IReadOnlyList<string> Reasons, IReadOnlyList<string> Notes);
 
 /// <summary>
-/// One check's forecast (SPEC 5.5): gross from the schedule plus the fixed lines and PTO cash-out learned from the stubs,
-/// run through the learned withholding model, with a low/likely/high range.
+/// One check's forecast (SPEC 5.5): gross from the schedule plus the fixed lines learned from the stubs, run through the
+/// learned withholding model, with a low/likely/high range. A PTO cash-out is never assumed: it comes only when you choose
+/// to cash out (DECISIONS.md 193).
 /// </summary>
 public static class PayForecast
 {
-    public const string PtoLine = "PTO cash-out";
 
     /// <param name="flatNetPercent">With fewer than 2 stubs: net as this percent of gross, the owner's flat estimate.</param>
     /// <param name="typicalMissCents">How far recent forecasts were from what landed (mean absolute), which widens the range.</param>
-    public static ForecastCheck Check(PeriodGross gross, WithholdingModel? model, long rateCentsPerHour, int flatNetPercent, long typicalMissCents)
+    public static ForecastCheck Check(PeriodGross gross, WithholdingModel? model, int flatNetPercent, long typicalMissCents)
     {
         var p = gross.Period;
         if (!gross.HasSchedule)
@@ -25,14 +25,10 @@ public static class PayForecast
 
         var lines = gross.Lines.ToList();
         var notes = gross.Notes.ToList();
-        GrossLine? pto = null;
         if (model is not null)
         {
             foreach (var r in model.RecurringEarnings.Where(r => r.Schedule == CheckSchedule.Every || (r.Schedule == CheckSchedule.SecondHalf) == p.SecondHalf))
                 lines.Add(new GrossLine(r.Name, r.Cents, r.Schedule == CheckSchedule.Every ? "On every check (from your stubs)." : "Once a month, on this check (from your stubs)."));
-            if (model.PtoHoursPerCheck > 0)
-                lines.Add(pto = new GrossLine(PtoLine, Hm.Pay((long)Math.Round(model.PtoHoursPerCheck * 60), rateCentsPerHour),
-                    $"About {model.PtoHoursPerCheck:0.##} user and vacation hours earned per check, cashed out at {PayEngine.Dollars(rateCentsPerHour)}/hour. They land on alternating checks, so this is the average."));
             if (model.LeftOut.Count > 0)
                 notes.Add($"Left out as irregular: {string.Join(", ", model.LeftOut)}.");
         }
@@ -50,14 +46,12 @@ public static class PayForecast
         }
 
         var likely = Net(lines);
-        var withoutPto = pto is null ? likely : Net(lines.Where(l => l != pto).ToList());
-        var doublePto = pto is null ? likely : Net(lines.Append(pto).ToList());
         if (model is null) reasons.Add($"Fewer than 2 pay stubs: net is a flat {flatNetPercent}% of gross until you add stubs.");
         else if (likely.OutsideFit)
             reasons.Add($"Taxable pay of {PayEngine.Dollars(likely.TaxableCents)} is outside what your stubs cover ({PayEngine.Dollars(model.MinTaxableCents)} to {PayEngine.Dollars(model.MaxTaxableCents)}), so taxes are extrapolated (floored at $0).");
 
         return new ForecastCheck(p, true, lines, likely.GrossCents, likely.TaxableCents, likely.Taxes, likely.Deductions, likely.NetCents,
-            Math.Max(0, withoutPto.NetCents - typicalMissCents), doublePto.NetCents + typicalMissCents, reasons.Count > 0, reasons, notes);
+            Math.Max(0, likely.NetCents - typicalMissCents), likely.NetCents + typicalMissCents, reasons.Count > 0, reasons, notes);
     }
 
     /// <summary>The typical miss: mean absolute difference between forecast and actual net over the most recent checks.</summary>

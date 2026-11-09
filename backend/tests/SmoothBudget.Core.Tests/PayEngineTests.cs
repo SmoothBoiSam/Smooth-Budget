@@ -223,26 +223,28 @@ public class PayEngineTests
     }
 
     [Fact]
-    public void A_check_forecast_adds_fixed_lines_and_pto_and_gives_a_range()
+    public void A_check_forecast_adds_fixed_lines_but_no_pto_cash_out_and_gives_a_range()
     {
         var s = ScheduleTextParser.Parse(PayFixtures.Text, Rules);
         var m = Withholding.Learn(PayFixtures.Stubs, Rules.Lines)!;
         var g = PayEngine.Gross(PayCalendar.PeriodContaining(new(2027, 2, 16), Rules), Month(s), Profile, Rules);
-        var f = PayForecast.Check(g, m, Profile.RateCentsPerHour, 80, typicalMissCents: 10_00);
+        var f = PayForecast.Check(g, m, 80, typicalMissCents: 10_00);
         Assert.Contains(f.Lines, l => l.Name == "Commuter Subsid" && l.Cents == 40_00); // second-half check
         Assert.Contains(f.Lines, l => l.Name == "Uni Allowance");
-        Assert.Contains(f.Lines, l => l.Name == PayForecast.PtoLine && l.Cents == Hm.Pay(198, 30_32)); // 3.3 hours
-        Assert.True(f.LowNetCents < f.NetCents && f.NetCents < f.HighNetCents);
+        // DECISIONS.md 193: the stubs show PTO hours earned, but a cash-out only comes when you choose one, so it's never assumed.
+        Assert.DoesNotContain(f.Lines, l => l.Name.Contains("PTO") || l.Name.Contains("User Pay") || l.Name.Contains("Vacation Pay"));
+        Assert.Equal(g.Cents + f.Lines.Except(g.Lines).Sum(l => l.Cents), f.GrossCents);
+        Assert.Equal((f.NetCents - 10_00, f.NetCents + 10_00), (f.LowNetCents, f.HighNetCents));
         Assert.Equal(f.GrossCents - f.Taxes.Sum(t => t.CurrentCents) - f.Deductions.Sum(d => d.CurrentCents), f.NetCents);
 
-        var first = PayForecast.Check(PayEngine.Gross(PayCalendar.PeriodContaining(new(2027, 2, 1), Rules), Month(s), Profile, Rules), m, Profile.RateCentsPerHour, 80, 0);
+        var first = PayForecast.Check(PayEngine.Gross(PayCalendar.PeriodContaining(new(2027, 2, 1), Rules), Month(s), Profile, Rules), m, 80, 0);
         Assert.DoesNotContain(first.Lines, l => l.Name == "Commuter Subsid");
 
-        var flat = PayForecast.Check(g, null, Profile.RateCentsPerHour, 80, 0);
+        var flat = PayForecast.Check(g, null, 80, 0);
         Assert.True(flat.LowConfidence);
         Assert.Equal((long)Math.Round(g.Cents * 0.8m), flat.NetCents);
 
-        var noSchedule = PayForecast.Check(PayEngine.Gross(PayCalendar.PeriodContaining(new(2027, 3, 1), Rules), null, Profile, Rules), m, Profile.RateCentsPerHour, 80, 0);
+        var noSchedule = PayForecast.Check(PayEngine.Gross(PayCalendar.PeriodContaining(new(2027, 3, 1), Rules), null, Profile, Rules), m, 80, 0);
         Assert.False(noSchedule.HasSchedule);
 
         Assert.Equal(15_00, PayForecast.TypicalMiss([(100_00, 110_00), (100_00, 80_00)]));

@@ -79,7 +79,7 @@ public class PrivateSampleTests(ITestOutputHelper output)
         var profile = new PayProfileInput(Rules.RateFor(0));
         foreach (var p in PayCalendar.From(new DateOnly(text.Year, text.Month, 10), Rules).Take(2))
         {
-            var f = PayForecast.Check(PayEngine.Gross(p, month, profile, Rules), model, profile.RateCentsPerHour, 80, 0);
+            var f = PayForecast.Check(PayEngine.Gross(p, month, profile, Rules), model, 80, 0);
             output.WriteLine($"{p.PayDate} ({p.Start}–{p.End}): gross {f.GrossCents / 100m}, taxable {f.TaxableCents / 100m}, net {f.NetCents / 100m} ({f.LowNetCents / 100m}–{f.HighNetCents / 100m}) {(f.LowConfidence ? "LOW: " + string.Join(" ", f.Reasons) : "")}");
             foreach (var l in f.Lines) output.WriteLine($"   {l.Name}: {l.Cents / 100m} — {l.Note}");
             Assert.True(f.HasSchedule);
