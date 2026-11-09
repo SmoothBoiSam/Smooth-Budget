@@ -160,7 +160,7 @@ export default function CategoryEditSheet({
             {auto.setByYou ? (
               <>
                 You set this limit, so the automatic budget leaves it alone.{' '}
-                <button type="button" disabled={busy} onClick={() => void backToAutomatic()} className="font-medium text-coral underline">
+                <button type="button" disabled={busy} onClick={() => void backToAutomatic()} className="font-medium text-danger underline">
                   Back to automatic
                 </button>
               </>
@@ -220,10 +220,10 @@ export default function CategoryEditSheet({
         )}
 
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
             Cancel
           </button>
-          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm">
+          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm">
             {busy ? 'Saving…' : isNew ? 'Add' : 'Save'}
           </button>
         </div>

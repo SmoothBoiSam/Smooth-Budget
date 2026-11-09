@@ -114,7 +114,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         <p className="mt-1 text-xs text-ink-soft">
           Turned on, the budget builds and updates itself from your history, bills, debt plan, savings priorities and paycheck forecast, and squeezes spending when a month brings in less.
         </p>
-        <button type="button" disabled={busy} onClick={() => void setAutomatic(true)} className="mt-2 rounded-lg bg-coral shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-coral-ink disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={() => void setAutomatic(true)} className="mt-2 rounded-lg bg-primary shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-primary-ink disabled:opacity-50">
           Turn on the automatic budget
         </button>
       </section>
@@ -213,7 +213,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         type="button"
         onClick={apply}
         disabled={busy || invalid}
-        className="mt-6 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
+        className="mt-6 w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm"
       >
         {busy ? 'Saving…' : remainder < 0 ? 'Use this budget anyway' : 'Use this budget'}
       </button>

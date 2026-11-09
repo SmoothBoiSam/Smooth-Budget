@@ -12,7 +12,7 @@ export function PageHeader({ title, sub, back, action }: { title: ReactNode; sub
   return (
     <header>
       {back && (
-        <a href={back.href} className="neu-sm mb-3 inline-flex items-center gap-1 rounded-full py-1.5 pr-3.5 pl-2.5 text-xs font-semibold text-ink-soft">
+        <a href={back.href} className="neu-sm mb-3 inline-flex items-center gap-1 rounded-full py-1.5 pr-3.5 pl-2.5 text-xs font-semibold text-danger">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-3.5">
             <path d="m12 5-5 5 5 5" />
           </svg>
@@ -29,7 +29,7 @@ export function PageHeader({ title, sub, back, action }: { title: ReactNode; sub
 }
 
 /** A small raised pill button for a header's action ("Add", "Edit"). */
-export const headerActionCls = 'neu-sm shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-coral'
+export const headerActionCls = 'neu-sm shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-primary'
 
 /** The bottom sheet's panel (sheets slide up over a dim backdrop). */
 export const sheetCls = 'max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]'
@@ -133,7 +133,7 @@ export function Pill({ tone, children }: { tone?: 'good' | 'danger' | 'todo'; ch
   return <span className={`neu-inset inline-block rounded-full px-3 py-1 text-xs font-semibold transition-colors duration-300 ${color}`}>{children}</span>
 }
 
-/** The one main button style (coral) and the one secondary style (raised). */
+/** The one main button style (green) and the one secondary style (raised). */
 export function Button({
   children,
   onClick,
@@ -149,7 +149,7 @@ export function Button({
   disabled?: boolean
   className?: string
 }) {
-  const look = kind === 'primary' ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu text-ink'
+  const look = kind === 'primary' ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu text-ink'
   return (
     <button
       type={type}
@@ -188,7 +188,7 @@ export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: (
     <div role="alert" className="neu mt-4 rounded-2xl px-4 py-3 text-sm">
       <p className="text-danger">{message}</p>
       {onRetry && (
-        <button type="button" onClick={onRetry} className="mt-2 font-semibold text-coral">
+        <button type="button" onClick={onRetry} className="mt-2 font-semibold text-primary">
           Try again
         </button>
       )}

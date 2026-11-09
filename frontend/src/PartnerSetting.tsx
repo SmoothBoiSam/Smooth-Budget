@@ -59,7 +59,7 @@ export default function PartnerSetting({ onChanged }: { onChanged: () => void })
           aria-label="Partner's name on transfers"
           className="min-w-0 flex-1 rounded-2xl neu-inset px-4 py-3 text-sm"
         />
-        <button type="submit" disabled={busy || (name.trim() || null) === saved} className="rounded-lg bg-coral shadow-neu-sm px-4 text-sm font-semibold text-coral-ink disabled:opacity-50">
+        <button type="submit" disabled={busy || (name.trim() || null) === saved} className="rounded-lg bg-primary shadow-neu-sm px-4 text-sm font-semibold text-primary-ink disabled:opacity-50">
           Save
         </button>
       </form>

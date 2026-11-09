@@ -135,6 +135,28 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(c.CheckingCents + c.IncomeStillComingCents + c.PartnerStillComingCents
                      - c.BillsStillDueCents - c.CardsToPayCents - c.SavingsStillToMoveCents - c.LeftoverToMoveCents, c.AvailableCents);
         Assert.Equal(100_00, c.CheckingCents);
+
+        // DECISIONS.md 192: nothing short, no flight hours. With a latest stub that took home 75% of gross, the hours to pick up
+        // are the shortfall over the rate's take-home, rounded up.
+        Assert.Null(rich.PickUp);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Data.AppDbContext>();
+            var data = new SmoothBudget.Core.Pay.PayStubData(new(2026, 11, 20), new(2026, 11, 1), new(2026, 11, 15), 40_00,
+                2_000_00, 1_900_00, 400_00, 100_00, 1_500_00, [], [], [], []);
+            db.PayStubs.Add(new SmoothBudget.Api.Data.PayStub
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, PayDate = data.PayDate, PeriodStart = data.PeriodStart, PeriodEnd = data.PeriodEnd,
+                GrossCents = data.GrossCents, NetCents = data.NetCents, Json = JsonSerializer.Serialize(data, SmoothBudget.Api.Payday.PaydayService.Json),
+            });
+            await db.SaveChangesAsync();
+        }
+        var withPay = await SummaryAsync(client);
+        var pick = withPay.PickUp!;
+        Assert.True(pick.RateCents > 0);
+        Assert.Equal((long)Math.Round(pick.RateCents * 0.75m, MidpointRounding.AwayFromZero), pick.TakeHomePerHourCents);
+        Assert.Equal((int)Math.Ceiling((decimal)withPay.CashShortCents / pick.TakeHomePerHourCents), pick.Hours);
+        Assert.True(pick.Hours * pick.TakeHomePerHourCents >= withPay.CashShortCents);
     }
 
     [Fact]

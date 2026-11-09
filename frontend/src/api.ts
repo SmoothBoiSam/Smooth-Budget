@@ -2,6 +2,13 @@
 
 export type Status = 'healthy' | 'low' | 'overspent'
 
+/** Flight hours to pick up to cover a shortfall, at today's rate and the latest stub's take-home share. */
+export interface PickUp {
+  hours: number
+  rateCents: number
+  takeHomePerHourCents: number
+}
+
 export interface HomeSummary {
   budgetMonth: { start: string; end: string; label: string }
   today: string
@@ -35,6 +42,8 @@ export interface HomeSummary {
   cashShortCents: number
   /** Left to Spend checked against the bank; null unless every checking balance comes from the bank. */
   cash: CashCheck | null
+  /** When the accounts come up short: the flight hours that would make it up (DECISIONS.md 192). */
+  pickUp: PickUp | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */

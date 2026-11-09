@@ -122,7 +122,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
                   <p className="min-w-0 flex-1 text-sm">
                     <span className="font-medium">{r.pattern}</span> <span className="text-ink-faint">→</span> {r.categoryName}
                   </p>
-                  <button type="button" onClick={() => removeRule(r)} className={headerActionCls + ' text-ink-soft!'}>
+                  <button type="button" onClick={() => removeRule(r)} className={headerActionCls + ' text-danger!'}>
                     Delete
                   </button>
                 </li>
@@ -158,7 +158,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
           </li>
           <li className="flex items-center gap-3 px-5 py-3.5 text-sm">
             <span className="min-w-0 flex-1 truncate text-ink-soft">{me.email}</span>
-            <button type="button" onClick={signOut} className={headerActionCls}>
+            <button type="button" onClick={signOut} className={headerActionCls + ' text-danger!'}>
               Sign out
             </button>
           </li>
@@ -239,7 +239,7 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
                   </option>
                 ))}
               </select>
-              <button type="button" onClick={() => setAdding(true)} className="neu-sm rounded-xl px-3.5 text-sm font-semibold text-coral">
+              <button type="button" onClick={() => setAdding(true)} className="neu-sm rounded-xl px-3.5 text-sm font-semibold text-primary">
                 New
               </button>
             </div>
@@ -251,13 +251,13 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
               accept=".csv,text/csv"
               required
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="mt-1 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-coral file:text-coral-ink file:px-3 file:py-2 file:font-medium"
+              className="mt-1 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:text-primary-ink file:px-3 file:py-2 file:font-medium"
             />
           </label>
           <button
             type="submit"
             disabled={busy || !file || !selectedId}
-            className="w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
+            className="w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm"
           >
             {busy ? 'Importing…' : 'Import'}
           </button>
@@ -355,10 +355,10 @@ function AddAccountForm({ onDone }: { onDone: (a: Account | null) => void }) {
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
-        <button type="button" onClick={() => onDone(null)} className="neu flex-1 rounded-2xl py-3 text-sm font-semibold">
+        <button type="button" onClick={() => onDone(null)} className="neu flex-1 rounded-2xl py-3 text-sm font-semibold text-danger">
           Cancel
         </button>
-        <button type="submit" className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink">
+        <button type="submit" className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink">
           Add account
         </button>
       </div>

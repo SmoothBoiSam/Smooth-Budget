@@ -84,7 +84,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
                     type="checkbox"
                     checked={create.has(p.name)}
                     onChange={() => setCreate(toggle(create, p.name))}
-                    className="mt-1 h-4 w-4 shrink-0 accent-coral"
+                    className="mt-1 h-4 w-4 shrink-0 accent-primary"
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2">
@@ -115,7 +115,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
             {d.unused.map((u) => (
               <li key={u.id}>
                 <label className="flex cursor-pointer gap-3 px-4 py-3">
-                  <input type="checkbox" checked={hide.has(u.id)} onChange={() => setHide(toggle(hide, u.id))} className="mt-1 h-4 w-4 shrink-0 accent-coral" />
+                  <input type="checkbox" checked={hide.has(u.id)} onChange={() => setHide(toggle(hide, u.id))} className="mt-1 h-4 w-4 shrink-0 accent-primary" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium">Hide {u.name}</span>
                     <span className="block text-xs text-ink-soft">{u.reason}</span>
@@ -147,12 +147,12 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
         type="button"
         onClick={apply}
         disabled={busy || (changes === 0 && !firstTime) || nothingFound}
-        className="mt-6 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
+        className="mt-6 w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm"
       >
         {busy ? 'Sorting your transactions…' : changes === 0 ? 'Nothing to change' : firstTime ? 'Create these and sort my transactions' : 'Apply'}
       </button>
       {onCancel && (
-        <button type="button" onClick={onCancel} className="mt-2 w-full py-2 text-sm text-ink-soft">
+        <button type="button" onClick={onCancel} className="mt-2 w-full py-2 text-sm text-danger">
           {firstTime ? 'Skip for now' : 'Back to the budget'}
         </button>
       )}

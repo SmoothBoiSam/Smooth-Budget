@@ -111,7 +111,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
     </>
   )
   const previewCard = preview && (
-        <div id="schedule-preview" className="mt-3 scroll-mt-4 neu rounded-3xl p-5 ring-2 ring-coral">
+        <div id="schedule-preview" className="mt-3 scroll-mt-4 neu rounded-3xl p-5 ring-2 ring-primary">
           <p className="text-sm font-semibold">
             {monthLabel(preview.month.year, preview.month.month)}: {preview.month.trips.length} trips, {hm(preview.month.creditMinutes)} credit
             {preview.replaces ? ' (replaces the month you imported before)' : ''}
@@ -119,7 +119,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
           <p className="text-xs text-ink-soft">Check the trips, then confirm.</p>
           <MonthBody m={preview.month} />
           <div className="mt-3 flex gap-2">
-            <button type="button" onClick={() => setPreview(null)} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
+            <button type="button" onClick={() => setPreview(null)} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
               Cancel
             </button>
             <button
@@ -131,7 +131,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
                   setPreview(null)
                 }, `Imported ${monthLabel(preview.month.year, preview.month.month)}. The forecast is updated.`)
               }
-              className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-50"
+              className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-50"
             >
               Confirm import
             </button>
@@ -244,7 +244,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 
 function FileButton({ label, accept, onChange }: { label: string; accept: string; onChange: (e: ChangeEvent<HTMLInputElement>) => void }) {
   return (
-    <label className="block cursor-pointer rounded-2xl neu py-3 text-center text-sm font-medium focus-within:ring-2 focus-within:ring-coral">
+    <label className="block cursor-pointer rounded-2xl neu py-3 text-center text-sm font-medium focus-within:ring-2 focus-within:ring-primary">
       {label}
       <input type="file" accept={accept} onChange={onChange} className="sr-only" />
     </label>
@@ -276,13 +276,13 @@ function MonthBody({ m, onOvertime, onPaid, onDropped }: { m: ScheduleMonth; onO
             <p className="text-xs text-ink-faint">{t.days.map((d) => `${formatDay(d.date)} ${d.route} (${hm(d.creditMinutes)})`).join(' · ')}</p>
             {onOvertime && (
               <label className="mt-1 flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={t.overtime} onChange={() => onOvertime(t.key)} className="accent-coral" />
+                <input type="checkbox" checked={t.overtime} onChange={() => onOvertime(t.key)} className="accent-primary" />
                 Flown as overtime (1.5×)
               </label>
             )}
             {onDropped && (
               <label className="mt-1 flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={t.dropped} onChange={() => onDropped(t.key)} className="accent-coral" />
+                <input type="checkbox" checked={t.dropped} onChange={() => onDropped(t.key)} className="accent-primary" />
                 I dropped this trip (left out of pay)
               </label>
             )}
@@ -293,7 +293,7 @@ function MonthBody({ m, onOvertime, onPaid, onDropped }: { m: ScheduleMonth; onO
             <span className="font-medium">{e.code}</span> · {formatDay(e.start.slice(0, 10))}–{formatDay(e.end.slice(0, 10))} · {hm(e.creditMinutes)} credit
             {onPaid ? (
               <label className="mt-1 flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={e.paid} onChange={() => onPaid(e.key)} className="accent-coral" />
+                <input type="checkbox" checked={e.paid} onChange={() => onPaid(e.key)} className="accent-primary" />
                 This is paid (treated as unpaid unless you switch it on)
               </label>
             ) : (
@@ -347,7 +347,7 @@ function MonthCard({ m, busy, act, onUpdate }: { m: ScheduleMonth; busy: boolean
       {open && (
         <>
       <label className="mt-2 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={m.reserve} disabled={busy} onChange={() => save(!m.reserve, overtime, paid)} className="accent-coral" />
+        <input type="checkbox" checked={m.reserve} disabled={busy} onChange={() => save(!m.reserve, overtime, paid)} className="accent-primary" />
         Reserve this month (the 76-hour guarantee, split across the two checks)
       </label>
       <MonthBody
@@ -375,7 +375,7 @@ function MonthCard({ m, busy, act, onUpdate }: { m: ScheduleMonth; busy: boolean
 function StubReviewCard({ r, busy, onCancel, onSave }: { r: StubReview; busy: boolean; onCancel: () => void; onSave: () => void }) {
   const s = r.stub
   return (
-    <div className="mt-3 neu rounded-3xl p-5 ring-2 ring-coral">
+    <div className="mt-3 neu rounded-3xl p-5 ring-2 ring-primary">
       <p className="text-sm font-semibold">
         Paid {formatDay(s.payDate)} for {formatDay(s.periodStart)}–{formatDay(s.periodEnd)}
         {r.replaces ? ' (replaces the stub you saved for this date)' : ''}
@@ -413,10 +413,10 @@ function StubReviewCard({ r, busy, onCancel, onSave }: { r: StubReview; busy: bo
         ))}
       </ul>
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={onCancel} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
+        <button type="button" onClick={onCancel} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
           Cancel
         </button>
-        <button type="button" disabled={busy || r.problems.length > 0} onClick={onSave} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-40">
+        <button type="button" disabled={busy || r.problems.length > 0} onClick={onSave} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-40">
           Save stub
         </button>
       </div>
@@ -480,11 +480,11 @@ function ProfileSection({ p, busy, act }: { p: PayProfile; busy: boolean; act: A
           </label>
         )}
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={d.fullTime} onChange={() => setD({ ...d, fullTime: !d.fullTime })} className="accent-coral" />
+          <input type="checkbox" checked={d.fullTime} onChange={() => setD({ ...d, fullTime: !d.fullTime })} className="accent-primary" />
           Full-time (80-hour line guarantee; part-time is 40)
         </label>
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={d.holidayPay} onChange={() => setD({ ...d, holidayPay: !d.holidayPay })} className="accent-coral" />
+          <input type="checkbox" checked={d.holidayPay} onChange={() => setD({ ...d, holidayPay: !d.holidayPay })} className="accent-primary" />
           Eligible for holiday pay
         </label>
         <label className="flex items-center justify-between gap-2">
@@ -492,7 +492,7 @@ function ProfileSection({ p, busy, act }: { p: PayProfile; busy: boolean; act: A
           <NumberInput label="Flat take-home percent" value={d.flatNetPercent} step={1} onChange={(v) => setD({ ...d, flatNetPercent: Math.round(v) })} />
         </label>
         {changed && (
-          <button type="button" disabled={busy} onClick={() => void save()} className="rounded-lg bg-coral shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-coral-ink">
+          <button type="button" disabled={busy} onClick={() => void save()} className="rounded-lg bg-primary shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-primary-ink">
             Save profile
           </button>
         )}

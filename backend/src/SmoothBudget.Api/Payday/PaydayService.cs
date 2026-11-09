@@ -37,6 +37,10 @@ public record HistoryDto(DateOnly PayDate, long PredictedNetCents, long LowNetCe
 public record ProfileDto(int YearsOfService, long RateCents, bool FullTime, bool HolidayPay, int FlatNetPercent,
     DateOnly? HireDate = null, DateOnly? NextRaiseOn = null, long? NextRaiseRateCents = null);
 
+/// <param name="Hours">Whole flight hours to pick up.</param>
+/// <param name="TakeHomePerHourCents">What one more hour brings home after taxes and deductions.</param>
+public record PickUpDto(int Hours, long RateCents, long TakeHomePerHourCents);
+
 public record PaydayDto(
     ProfileDto Profile, int StubCount, bool ModelLearned, bool ModelEdited, IReadOnlyList<CheckDto> Checks, IReadOnlyList<HistoryDto> History,
     IReadOnlyList<string> ScheduleMonths);
@@ -146,6 +150,25 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var c = await ContextAsync(householdId, ct);
         var miss = await TypicalMissAsync(householdId, ct);
         return Forecast(c, PayCalendar.From(c.Today, c.Rules).First(), miss);
+    }
+
+    /// <summary>
+    /// The flight hours to pick up so their take-home covers <paramref name="cents"/> (DECISIONS.md 192): your hourly rate
+    /// today times the share of gross your latest pay stub took home (or the flat take-home percent before any stub),
+    /// rounded up to whole hours. Null when the app has no pay data.
+    /// </summary>
+    public async Task<PickUpDto?> PickUpAsync(Guid householdId, long cents, CancellationToken ct)
+    {
+        if (cents <= 0) return null;
+        if (!await db.ScheduleMonths.AnyAsync(m => m.HouseholdId == householdId, ct) && !await db.PayStubs.AnyAsync(s => s.HouseholdId == householdId, ct))
+            return null;
+        var c = await ContextAsync(householdId, ct);
+        var rate = c.ProfileInput.RateCentsPerHour;
+        var stub = c.Stubs.Select(s => s.Stub).Where(s => s.GrossCents > 0 && s.NetCents > 0).MaxBy(s => s.PayDate);
+        var share = stub is not null ? (decimal)stub.NetCents / stub.GrossCents : c.Profile.FlatNetPercent / 100m;
+        var perHour = (long)Math.Round(rate * share, MidpointRounding.AwayFromZero);
+        if (perHour <= 0) return null;
+        return new PickUpDto((int)Math.Ceiling((decimal)cents / perHour), rate, perHour);
     }
 
     public async Task<PaydayDto> GetAsync(Guid householdId, CancellationToken ct)

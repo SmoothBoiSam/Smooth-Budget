@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, plaidApi, type CashCheck, type Category, type HomeSummary, type Me, type Transaction } from './api'
+import { ApiError, api, budgetApi, plaidApi, type CashCheck, type Category, type HomeSummary, type Me, type PickUp, type Transaction } from './api'
 import { TransactionList } from './BudgetScreen'
 import TransactionSheet from './TransactionSheet'
 import { formatCents, formatDay, formatTime } from './format'
@@ -137,7 +137,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
           <div className="mt-6">
             <Notice tone="danger">
               Couldn’t load Left to Spend. {error}{' '}
-              <button type="button" onClick={refresh} className="font-semibold text-coral">
+              <button type="button" onClick={refresh} className="font-semibold text-primary">
                 Try again
               </button>
             </Notice>
@@ -151,7 +151,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
           <div className="mt-6">
             <Notice tone="todo">
               Showing your numbers from {formatTime(savedAt)}.{' '}
-              <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-coral disabled:opacity-50">
+              <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-primary disabled:opacity-50">
                 {loading ? 'Trying…' : 'Try again'}
               </button>
             </Notice>
@@ -169,7 +169,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
                 ? `Updated ${formatTime(summary.lastUpdatedUtc)}`
                 : 'No transactions yet'}
             {' · '}
-            <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-coral disabled:opacity-50">
+            <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-primary disabled:opacity-50">
               {loading ? 'Syncing…' : 'Refresh'}
             </button>
           </p>
@@ -258,7 +258,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
  * Left to Spend checked against the bank (DECISIONS.md 183): checking now and money still coming, less what still has to
  * go out this month. Folded, it says whether the accounts cover Left to Spend; open, it shows every part.
  */
-function CashCheckRow({ cash: c, shortCents }: { cash: CashCheck; shortCents: number }) {
+function CashCheckRow({ cash: c, shortCents, pickUp }: { cash: CashCheck; shortCents: number; pickUp: PickUp | null }) {
   const rows: [string, number, 1 | -1][] = [
     ['In checking now', c.checkingCents, 1],
     ['Pay still coming', c.incomeStillComingCents, 1],
@@ -272,7 +272,14 @@ function CashCheckRow({ cash: c, shortCents }: { cash: CashCheck; shortCents: nu
     <li>
       <details className="group">
         <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-3.5 text-sm">
-          <span className="flex-1">Your accounts</span>
+          <span className="min-w-0 flex-1">
+            <span className="block">Your accounts</span>
+            {shortCents > 0 && pickUp && (
+              <span className="mt-0.5 block text-xs text-ink-soft">
+                Pick up {pickUp.hours} flight {pickUp.hours === 1 ? 'hour' : 'hours'} to make it up
+              </span>
+            )}
+          </span>
           <span className={`shrink-0 whitespace-nowrap font-semibold tabular-nums ${shortCents > 0 ? 'text-danger' : 'text-good'}`}>
             {shortCents > 0 ? `${formatCents(shortCents)} short` : 'Cover it'}
           </span>
@@ -297,6 +304,12 @@ function CashCheckRow({ cash: c, shortCents }: { cash: CashCheck; shortCents: nu
             <dd className="tabular-nums">{formatCents(c.availableCents)}</dd>
           </div>
           {shortCents > 0 && <p className="pt-1 text-ink-faint">Left to Spend is capped at what’s available.</p>}
+          {shortCents > 0 && pickUp && (
+            <p className="text-ink-faint">
+              At {formatCents(pickUp.rateCents)}/hour, an extra flight hour brings home about {formatCents(pickUp.takeHomePerHourCents)} after taxes, so{' '}
+              {pickUp.hours} {pickUp.hours === 1 ? 'hour covers' : 'hours cover'} the {formatCents(shortCents)}. It lands on the check that pays for the trip.
+            </p>
+          )}
         </dl>
       </details>
     </li>
@@ -418,7 +431,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
           {s.carriedInDeficitCents > 0 && <Row label="Carried over" value={`−${formatCents(s.carriedInDeficitCents)}`} tone="danger" />}
           {s.unfiledSpendingCents > 0 && <Row label="Not in a category" value={`−${formatCents(s.unfiledSpendingCents)}`} tone="danger" href="#/review" />}
           {s.overplannedCents > 0 && <Row label="Planned beyond your money" value={`−${formatCents(s.overplannedCents)}`} tone="danger" href="#/budget/plan" />}
-          {s.cash && <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} />}
+          {s.cash && <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />}
           {s.nextPayday && (
             <Row
               label={`Payday ${formatDay(s.nextPayday.payDate)}`}
@@ -467,7 +480,7 @@ function RecentTransactions({ summary, onChanged }: { summary: HomeSummary; onCh
         <h2 id="recent-h" className="px-1 text-sm font-semibold text-ink-soft">
           Recent
         </h2>
-        <a href="#/transactions" className="text-sm font-semibold text-coral">
+        <a href="#/transactions" className="text-sm font-semibold text-primary">
           See all
         </a>
       </div>

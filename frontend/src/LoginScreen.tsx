@@ -45,7 +45,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base outline-none focus:ring-2 focus:ring-coral"
+            className="mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base outline-none focus:ring-2 focus:ring-primary"
           />
         </label>
         <label className="block">
@@ -57,7 +57,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
             minLength={mode === 'register' ? 10 : undefined}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base outline-none focus:ring-2 focus:ring-coral"
+            className="mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base outline-none focus:ring-2 focus:ring-primary"
           />
         </label>
 
@@ -70,7 +70,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
+          className="w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm"
         >
           {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
         </button>

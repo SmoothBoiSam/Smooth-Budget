@@ -547,7 +547,7 @@ function SearchableList({
           aria-expanded={open}
           aria-controls="search-filters"
           onClick={() => setOpen(!open)}
-          className={`shrink-0 rounded-xl px-3.5 text-sm font-semibold ${open || filterCount > 0 ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu-sm text-ink-soft'}`}
+          className={`shrink-0 rounded-xl px-3.5 text-sm font-semibold ${open || filterCount > 0 ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu-sm text-ink-soft'}`}
         >
           Filters{filterCount > 0 && ` · ${filterCount}`}
         </button>
@@ -602,7 +602,7 @@ function SearchableList({
                   type="button"
                   onClick={() => set({ from: p.from, to: p.to })}
                   aria-pressed={f.from === p.from && f.to === p.to}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.from === p.from && f.to === p.to ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu text-ink-soft'}`}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.from === p.from && f.to === p.to ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu text-ink-soft'}`}
                 >
                   {p.label}
                 </button>
@@ -614,7 +614,7 @@ function SearchableList({
             <button type="button" onClick={() => setF({ ...noFilters, q: f.q })} className="flex-1 rounded-2xl neu py-3 text-sm font-medium text-ink-soft">
               Clear filters
             </button>
-            <button type="button" onClick={() => setOpen(false)} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink">
+            <button type="button" onClick={() => setOpen(false)} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink">
               Done
             </button>
           </div>
@@ -699,7 +699,7 @@ function dateLabel(from: string, to: string) {
 
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-coral shadow-neu-sm py-1 pr-1 pl-2.5 text-xs font-medium text-coral-ink">
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary shadow-neu-sm py-1 pr-1 pl-2.5 text-xs font-medium text-primary-ink">
       {label}
       <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="rounded-full px-1.5 leading-none text-ink-faint">
         ×
@@ -907,7 +907,7 @@ function IncomeCard({
           <button
             type="submit"
             disabled={incomeCents === null || partnerCents === null}
-            className="w-full rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-50"
+            className="w-full rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-50"
           >
             Save
           </button>
@@ -926,7 +926,7 @@ function IncomeCard({
                 {s.auto.incomeSetByYou ? (
                   <>
                     You set this.{' '}
-                    <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className="font-medium text-coral underline">
+                    <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className="font-medium text-primary underline">
                       Use your paychecks instead
                     </button>
                   </>
@@ -1032,7 +1032,7 @@ function ContributionRow({ f, who }: { f: ContributionStatus; who: string }) {
         {formatCents(f.expectedCents)} <span className={`block text-xs ${note.cls}`}>{note.text}</span>
         {f.state !== 'received' && (
           // Sent before the budget month started? The Partner screen can count it here (DECISIONS.md 166).
-          <a href="#/partner" className="block text-xs font-medium text-coral">
+          <a href="#/partner" className="block text-xs font-medium text-primary">
             Sent early? ›
           </a>
         )}

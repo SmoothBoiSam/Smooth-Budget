@@ -168,7 +168,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
                 role="radio"
                 aria-checked={currentStrategy === st}
                 onClick={() => whatIf(currentExtra, st)}
-                className={`rounded-xl px-3 py-2 text-left ${currentStrategy === st ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu'}`}
+                className={`rounded-xl px-3 py-2 text-left ${currentStrategy === st ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu'}`}
               >
                 <span className="block text-sm font-semibold">{st}</span>
                 <span className={`block text-xs ${currentStrategy === st ? 'text-ink-faint' : 'text-ink-soft'}`}>
@@ -193,7 +193,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
               value={currentExtra}
               onChange={(e) => whatIf(Number(e.target.value), currentStrategy)}
               aria-valuetext={`${formatCents(currentExtra)} extra a month`}
-              className="mt-2 w-full accent-coral"
+              className="mt-2 w-full accent-primary"
             />
           </label>
           <p className="mt-1 text-xs text-ink-soft">
@@ -207,7 +207,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
               <button type="button" onClick={() => void load()} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
                 Reset
               </button>
-              <button type="button" disabled={busy} onClick={() => void savePlan(currentExtra)} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-50">
+              <button type="button" disabled={busy} onClick={() => void savePlan(currentExtra)} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-50">
                 Save as my plan
               </button>
             </div>
@@ -655,10 +655,10 @@ function DebtSheet({
           </p>
         )}
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
             Cancel
           </button>
-          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm">
+          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm">
             {busy ? 'Saving…' : 'Save'}
           </button>
         </div>

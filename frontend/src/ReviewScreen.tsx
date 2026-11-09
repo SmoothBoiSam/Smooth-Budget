@@ -199,7 +199,7 @@ export default function ReviewScreen({
                     setQueue(null)
                     setNotice(null)
                   }}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu text-ink-soft'}`}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu text-ink-soft'}`}
                 >
                   {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
                   {n != null && n > 0 && <span className="ml-1 opacity-70">{n}</span>}
@@ -238,7 +238,7 @@ export default function ReviewScreen({
                   fail(e)
                 }
               }}
-              className="mt-2 rounded-full bg-coral shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-coral-ink"
+              className="mt-2 rounded-full bg-primary shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-primary-ink"
             >
               I can’t remember these: use best guesses ({counts!.total})
             </button>
@@ -482,7 +482,7 @@ function ReviewCard({
             ).map(([value, label, hint]) => (
               <label
                 key={value}
-                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ${mode === value ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu'}`}
+                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ${mode === value ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu'}`}
               >
                 <input type="radio" name={`purpose-${t.id}`} checked={mode === value} onChange={() => setMode(value)} className="sr-only" />
                 <span>
@@ -510,7 +510,7 @@ function ReviewCard({
                   aria-pressed={group === g.type}
                   aria-label={g.label}
                   onClick={() => chooseGroup(g.type)}
-                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-coral shadow-neu-sm text-coral-ink' : 'neu text-ink-soft'}`}
+                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu text-ink-soft'}`}
                 >
                   {g.short}
                 </button>
@@ -527,7 +527,7 @@ function ReviewCard({
                   type="button"
                   aria-pressed={c.id === categoryId}
                   onClick={() => setCategoryId(c.id)}
-                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-coral shadow-neu-sm font-semibold text-coral-ink' : 'neu text-ink-soft'}`}
+                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-primary shadow-neu-sm font-semibold text-primary-ink' : 'neu text-ink-soft'}`}
                 >
                   {c.name}
                 </button>
@@ -535,7 +535,7 @@ function ReviewCard({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="neu-sm rounded-full px-3 py-1 text-sm font-semibold text-coral"
+                className="neu-sm rounded-full px-3 py-1 text-sm font-semibold text-primary"
               >
                 + New category
               </button>
@@ -571,7 +571,7 @@ function ReviewCard({
         type="button"
         disabled={busy || (partnerIn && !mode) || (needsCategory && !categoryId)}
         onClick={() => void save()}
-        className="mt-3 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-40 text-sm"
+        className="mt-3 w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-40 text-sm"
       >
         {busy
           ? 'Saving…'
@@ -644,7 +644,7 @@ function NewCategory({
         />
       </label>
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={onCancel} className="flex-1 rounded-2xl neu py-2 text-sm font-medium">
+        <button type="button" onClick={onCancel} className="flex-1 rounded-2xl neu py-2 text-sm font-medium text-danger">
           Cancel
         </button>
         <button
@@ -660,7 +660,7 @@ function NewCategory({
               setBusy(false)
             }
           }}
-          className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink disabled:opacity-40"
+          className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-40"
         >
           Add
         </button>

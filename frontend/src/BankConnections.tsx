@@ -217,7 +217,7 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                   {i.statusMessage && <p className="mt-1 text-xs text-danger">{i.statusMessage}</p>}
                   <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
                     {(i.status === 'LoginRequired' || i.status === 'Error') && (
-                      <button type="button" onClick={() => connect(i.id)} className="rounded-full bg-coral px-3.5 py-1.5 text-coral-ink shadow-neu-sm">
+                      <button type="button" onClick={() => connect(i.id)} className="rounded-full bg-primary px-3.5 py-1.5 text-primary-ink shadow-neu-sm">
                         Reconnect
                       </button>
                     )}
@@ -256,7 +256,7 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
               type="button"
               disabled={busy !== null}
               onClick={() => connect()}
-              className="w-full rounded-2xl bg-coral py-3 text-sm font-semibold text-coral-ink shadow-neu-sm disabled:opacity-50"
+              className="w-full rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-ink shadow-neu-sm disabled:opacity-50"
             >
               Connect a bank
             </button>
@@ -325,7 +325,7 @@ function DuplicateBank({ name, onAddThere, onKeepBoth }: { name: string; onAddTh
           To add an account there, like a new savings account, add it to your existing {name} connection. This extra connection will be removed, and
           Plaid will open so you can tick the new account.
         </p>
-        <button type="button" onClick={onAddThere} className="mt-4 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink text-sm">
+        <button type="button" onClick={onAddThere} className="mt-4 w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink text-sm">
           Add accounts to my {name} connection
         </button>
         <button type="button" onClick={onKeepBoth} className="mt-2 w-full rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
@@ -419,7 +419,7 @@ function AccountSetup({ setup, onDone }: { setup: LinkResult; onDone: (r: SyncRe
           type="button"
           disabled={busy}
           onClick={save}
-          className="mt-5 w-full rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink disabled:opacity-50 text-sm"
+          className="mt-5 w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm"
         >
           {busy ? 'Importing transactions…' : 'Import and sync'}
         </button>

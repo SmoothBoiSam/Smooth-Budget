@@ -81,7 +81,7 @@ export default function CategoriesPage({
 
   return (
     <div className="pb-6">
-      <button type="button" onClick={onAdd} className="mt-4 w-full rounded-2xl bg-coral shadow-neu-sm py-3 text-sm font-semibold text-coral-ink">
+      <button type="button" onClick={onAdd} className="mt-4 w-full rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink">
         + Add a category
       </button>
 
@@ -109,7 +109,7 @@ export default function CategoriesPage({
                 <button type="button" disabled={busy !== null} onClick={() => void keep(c)} className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-ink-soft disabled:opacity-40">
                   Keep
                 </button>
-                <button type="button" disabled={busy !== null} onClick={() => void archive(c)} className="shrink-0 rounded-full bg-coral shadow-neu-sm px-2.5 py-1.5 text-xs font-semibold text-coral-ink disabled:opacity-40">
+                <button type="button" disabled={busy !== null} onClick={() => void archive(c)} className="shrink-0 rounded-full bg-primary shadow-neu-sm px-2.5 py-1.5 text-xs font-semibold text-primary-ink disabled:opacity-40">
                   Archive
                 </button>
               </li>
@@ -284,10 +284,10 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
           </p>
         )}
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <button type="button" disabled={busy} onClick={onClose} className="rounded-xl neu-sm py-3 text-sm font-semibold text-ink-soft disabled:opacity-40">
+          <button type="button" disabled={busy} onClick={onClose} className="rounded-xl neu-sm py-3 text-sm font-semibold text-danger disabled:opacity-40">
             Cancel
           </button>
-          <button type="button" disabled={busy} onClick={reset} className="rounded-2xl bg-danger py-3 text-sm font-semibold text-coral-ink shadow-neu-sm disabled:opacity-60">
+          <button type="button" disabled={busy} onClick={reset} className="rounded-2xl bg-danger py-3 text-sm font-semibold text-primary-ink shadow-neu-sm disabled:opacity-60">
             {busy ? 'Refreshing…' : 'Yes, reset all'}
           </button>
         </div>
@@ -382,10 +382,10 @@ function DeleteSheet({
           </p>
         )}
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <button type="button" onClick={onClose} className="rounded-xl neu-sm py-3 text-sm font-semibold text-ink-soft">
+          <button type="button" onClick={onClose} className="rounded-xl neu-sm py-3 text-sm font-semibold text-danger">
             Cancel
           </button>
-          <button type="submit" disabled={to === '' || busy} className="rounded-2xl bg-danger py-3 text-sm font-semibold text-coral-ink shadow-neu-sm disabled:opacity-40">
+          <button type="submit" disabled={to === '' || busy} className="rounded-2xl bg-danger py-3 text-sm font-semibold text-primary-ink shadow-neu-sm disabled:opacity-40">
             {busy ? 'Deleting…' : 'Delete'}
           </button>
         </div>

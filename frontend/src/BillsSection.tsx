@@ -118,7 +118,7 @@ export default function BillsSection({
       {s && current && (
         <>
           {focused ? (
-            <button type="button" onClick={() => setFocus(null)} className="neu-sm mt-3 inline-flex items-center gap-1 rounded-full py-1.5 pr-3.5 pl-2.5 text-xs font-semibold text-ink-soft">
+            <button type="button" onClick={() => setFocus(null)} className="neu-sm mt-3 inline-flex items-center gap-1 rounded-full py-1.5 pr-3.5 pl-2.5 text-xs font-semibold text-danger">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-3.5">
                 <path d="m12 5-5 5 5 5" />
               </svg>
@@ -568,7 +568,7 @@ function ItemSheet({
             <p className="text-sm">
               {i.categoryName ? `Its charges are filed under ${i.categoryName}` : 'Its charges have no category'}, so your budget treats it as everyday spending.
             </p>
-            <button type="button" onClick={() => onTrackAsBill(i)} className="mt-2 rounded-full bg-coral shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-coral-ink">
+            <button type="button" onClick={() => onTrackAsBill(i)} className="mt-2 rounded-full bg-primary shadow-neu-sm px-3 py-1.5 text-xs font-semibold text-primary-ink">
               Make it its own bill line
             </button>
           </div>
@@ -580,10 +580,10 @@ function ItemSheet({
           </p>
         )}
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
             Cancel
           </button>
-          <button type="submit" className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink text-sm">
+          <button type="submit" className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink text-sm">
             Save
           </button>
         </div>

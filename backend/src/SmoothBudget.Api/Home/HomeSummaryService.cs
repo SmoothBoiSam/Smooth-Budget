@@ -44,7 +44,9 @@ public record HomeSummaryDto(
     bool IncomeUnknown = false,
     // Left to Spend checked against the bank (DECISIONS.md 183): how much it was lowered, and the check itself.
     long CashShortCents = 0,
-    CashCheck? Cash = null);
+    CashCheck? Cash = null,
+    // When the accounts come up short: the flight hours that would make it up (DECISIONS.md 192).
+    Payday.PickUpDto? PickUp = null);
 
 /// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
 public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
@@ -231,7 +233,8 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             OverplannedCents: r.OverplannedCents,
             IncomeUnknown: MonthData.MoneyIn(data.Row, data.Contributions) <= 0 && data.Categories.Any(c => c.LimitCents > 0),
             CashShortCents: r.CashShortCents,
-            Cash: r.Cash);
+            Cash: r.Cash,
+            PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct));
     }
 
     /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>

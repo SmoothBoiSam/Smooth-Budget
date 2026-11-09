@@ -1,12 +1,13 @@
 @import "tailwindcss";
 
 /*
-  The app's palette, taken from the cat logo (DECISIONS.md 187), as Tailwind colors (bg-surface, text-ink, bg-coral, ...):
+  The app's palette, taken from the cat logo (DECISIONS.md 187), as Tailwind colors (bg-surface, text-ink, bg-primary, ...):
   - surface: the one soft surface everything sits on (neumorphism: cards are the page's own color, raised by shadow);
   - ink / ink-soft / ink-faint: text, from the cat's charcoal;
-  - coral: the logo's background, for actions and what's selected;
+  - primary (green): actions, and what's selected or can be picked;
+  - danger (red, like the notification bubbles): back, cancel, delete, and problems;
   - gold: the coin, for the money that matters (Left to Spend's ring, progress);
-  - good / danger: on track, and problems (always with words, never color alone).
+  - good: on track (always with words, never color alone).
   Dark mode redefines them under :root.dark below.
 */
 @theme {
@@ -14,12 +15,12 @@
   --color-ink: #2a2c33;
   --color-ink-soft: #626775;
   --color-ink-faint: #8d93a1;
-  --color-coral: #e05a5a;
-  --color-coral-ink: #ffffff;
+  --color-primary: #17914f;
+  --color-primary-ink: #ffffff;
   --color-gold: #f2b53a;
   --color-gold-ink: #94630a; /* gold as text: dark enough to read on the light surface */
   --color-good: #23885a;
-  --color-danger: #c93a3a;
+  --color-danger: #dc2626;
   --color-neu-dark: #c2c7d2;
   --color-neu-light: #ffffff;
 }
@@ -34,7 +35,7 @@
   background-color: var(--color-surface);
   box-shadow: 3px 3px 7px var(--color-neu-dark), -3px -3px 7px var(--color-neu-light);
 }
-/* The raised shadow alone, for colored buttons (bg-coral shadow-neu-sm). */
+/* The raised shadow alone, for colored buttons (bg-primary shadow-neu-sm). */
 @utility shadow-neu-sm {
   box-shadow: 3px 3px 7px var(--color-neu-dark), -3px -3px 7px var(--color-neu-light);
 }
@@ -79,11 +80,11 @@ body {
   --color-ink: #ededed;
   --color-ink-soft: #a8a8a8;
   --color-ink-faint: #808080;
-  --color-coral: #e8666a;
+  --color-primary: #23a05c;
   --color-gold: #f4bd4a;
   --color-gold-ink: #f4bd4a;
   --color-good: #4cc38a;
-  --color-danger: #f07a72;
+  --color-danger: #ef4444;
   --color-neu-dark: #1f1f1f;
   --color-neu-light: #3e3e3e;
 
@@ -114,7 +115,7 @@ body {
 
   --color-red-50: #3d2a2c;
   --color-red-100: #4a2d30;
-  --color-red-600: #f07a72;
+  --color-red-600: #ef4444;
   --color-red-700: #f6a39d;
   --color-red-800: #fac8c4;
 
@@ -147,7 +148,7 @@ body {
    Gradients and motion (DECISIONS.md 190). Gradients: a soft light-to-shade sheen over every colored fill, so each keeps
    its own color in both themes. Motion: short and soft, opacity and transform wherever possible, never blocking a tap.
    --------------------------------------------------------------------------------------------------------------------- */
-.bg-coral,
+.bg-primary,
 .bg-good,
 .bg-gold,
 .bg-danger {

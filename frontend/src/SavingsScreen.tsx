@@ -226,7 +226,7 @@ function BalanceEditor({ cents, onSave }: { cents: number; onSave: (cents: numbe
       }}
     >
       <input aria-label="Balance" value={value} onChange={(e) => setValue(e.target.value)} inputMode="decimal" className="w-24 rounded-xl neu-inset px-2 py-1 text-right text-sm tabular-nums" />
-      <button type="submit" disabled={parsed === null} className="rounded-lg bg-coral shadow-neu-sm px-2 py-1 text-xs font-semibold text-coral-ink disabled:opacity-40">
+      <button type="submit" disabled={parsed === null} className="rounded-lg bg-primary shadow-neu-sm px-2 py-1 text-xs font-semibold text-primary-ink disabled:opacity-40">
         Save
       </button>
     </form>
@@ -393,10 +393,10 @@ function GoalSheet({
           </p>
         )}
         <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-ink-soft text-sm">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
             Cancel
           </button>
-          <button type="submit" className="flex-1 rounded-2xl bg-coral shadow-neu-sm py-3 font-semibold text-coral-ink text-sm">
+          <button type="submit" className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink text-sm">
             Save
           </button>
         </div>

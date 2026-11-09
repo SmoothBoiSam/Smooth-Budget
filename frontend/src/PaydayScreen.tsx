@@ -72,7 +72,7 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
         <section className="mt-6 rounded-3xl neu p-5">
           <h2 className="font-semibold">Forecast your paychecks</h2>
           <p className="mt-1 text-sm text-ink-soft">Import your SkedPlus+ schedule and 2 or more pay stubs.</p>
-          <a href="#/payday/setup" className="mt-4 block rounded-2xl bg-coral shadow-neu-sm py-3 text-center text-sm font-semibold text-coral-ink">
+          <a href="#/payday/setup" className="mt-4 block rounded-2xl bg-primary shadow-neu-sm py-3 text-center text-sm font-semibold text-primary-ink">
             Import a schedule or pay stub
           </a>
         </section>
@@ -227,7 +227,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
         <span className="shrink-0 text-xs text-ink-soft">
           Covers {formatDay(c.periodStart)}–{formatDay(c.periodEnd)}
           {(!c.isCurrent || finished(c)) && (
-            <button type="button" onClick={() => setFolded(true)} className="ml-2 font-medium text-coral">
+            <button type="button" onClick={() => setFolded(true)} className="ml-2 font-medium text-primary">
               Fold
             </button>
           )}
@@ -236,7 +236,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
       {!c.hasSchedule && c.landedNetCents === null ? (
         <p className="mt-2 text-sm text-ink-soft">
           Import your {monthName(c.periodStart)} schedule to forecast this check.{' '}
-          <a href="#/payday/setup" className="font-medium text-coral">
+          <a href="#/payday/setup" className="font-medium text-primary">
             Import
           </a>
         </p>
@@ -259,7 +259,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem) =>
             </p>
           ))}
           {c.hasSchedule && (
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 text-xs font-medium text-coral">
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 text-xs font-medium text-primary">
             {open ? 'Hide' : 'How this is figured'}
           </button>
           )}
@@ -330,13 +330,13 @@ function PlanRow({ item, onToggle }: { item: PlanItem; onToggle: () => void }) {
           disabled={item.auto}
           onChange={onToggle}
           aria-label={item.auto ? `${planText(item)}: done, from your accounts` : planText(item)}
-          className="mt-1 size-4 shrink-0 accent-coral"
+          className="mt-1 size-4 shrink-0 accent-primary"
         />
         {body}
       </label>
       {item.bills && item.bills.length > 0 && (
         <div className="ml-7">
-          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-coral">
+          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-primary">
             <Caret open={billsOpen} />
             {billsOpen ? 'Hide the bills' : 'Show the bills'}
           </button>
