@@ -33,21 +33,21 @@ public class BudgetFitterTests
     }
 
     [Fact]
-    public void Savings_habit_then_discretionary_spending_shrink_first_in_proportion()
+    public void Nice_to_have_spending_shrinks_first_in_proportion_then_the_savings_habit()
     {
-        // $250 short: the $100 savings habit goes, then $150 comes off eating out and shopping (2 to 1, like their room).
+        // $250 short: it all comes off eating out and shopping (2 to 1, like their room), so the savings habit stays (DECISIONS.md 182).
         var f = BudgetFitter.Fit(Plan(2_510_00), NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
         Assert.Equal((0L, 250_00L), (f.ShortCents, f.SqueezedCents));
-        Assert.Equal((0L, 100_00L, 50_00L), (Limit(f, Save), Limit(f, EatingOut), Limit(f, Shopping)));
+        Assert.Equal((100_00L, 33_00L, 17_00L), (Limit(f, Save), Limit(f, EatingOut), Limit(f, Shopping)));
         Assert.Equal((400_00L, 150_00L, 1_650_00L, 160_00L), (Limit(f, Groceries), Limit(f, Gas), Limit(f, Rent), Limit(f, Card)));
-        Assert.Contains("Squeezed by $100.00 (from $200.00)", f.Proposal.Categories.Single(c => c.CategoryId == EatingOut).Explanation);
+        Assert.Contains("Squeezed by $167.00 (from $200.00)", f.Proposal.Categories.Single(c => c.CategoryId == EatingOut).Explanation);
         Assert.Equal(2_510_00, f.Proposal.AllocatedCents);
     }
 
     [Fact]
     public void Everyday_spending_goes_last_and_not_below_its_floor_then_the_rest_is_a_shortfall()
     {
-        // $800 short: savings 100 + discretionary 300 + everyday down to 80% (groceries 320, gas 120: 110 more) = 510; 290 short.
+        // $800 short: nice to have 300 + savings 100 + everyday down to 80% (groceries 320, gas 120: 110 more) = 510; 290 short.
         var f = BudgetFitter.Fit(Plan(1_960_00), NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
         Assert.Equal((320_00L, 120_00L, 0L, 0L), (Limit(f, Groceries), Limit(f, Gas), Limit(f, EatingOut), Limit(f, Shopping)));
         Assert.Equal((290_00L, 510_00L), (f.ShortCents, f.SqueezedCents));
@@ -57,7 +57,7 @@ public class BudgetFitterTests
     [Fact]
     public void Must_have_spending_is_squeezed_only_after_important_spending_is_at_its_floor()
     {
-        // Groceries marked must have, gas left important (DECISIONS.md 182). $480 short: savings 100, nice-to-have 300,
+        // Groceries marked must have, gas left important (DECISIONS.md 182). $480 short: nice to have 300, the savings habit 100,
         // then gas gives its 30 (down to 80%, 120) before groceries gives 50 of its 80.
         var plan = Plan(2_280_00);
         plan = plan with { Categories = plan.Categories.Select(c => c.CategoryId == Groceries ? c with { Priority = CategoryPriority.High } : c).ToList() };
@@ -65,7 +65,7 @@ public class BudgetFitterTests
         Assert.Equal((120_00L, 350_00L), (Limit(f, Gas), Limit(f, Groceries)));
         Assert.Equal((0L, 480_00L), (f.ShortCents, f.SqueezedCents));
 
-        // $360 short: the savings habit (100) and nice-to-have spending (260) cover it, so gas and groceries stay whole.
+        // $360 short: nice-to-have spending (300) and the savings habit (60) cover it, so gas and groceries stay whole.
         var light = BudgetFitter.Fit(Plan(2_400_00) with { Categories = plan.Categories }, NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
         Assert.Equal((150_00L, 400_00L), (Limit(light, Gas), Limit(light, Groceries)));
     }
@@ -75,7 +75,7 @@ public class BudgetFitterTests
     {
         var spent = new Dictionary<Guid, long> { [EatingOut] = 180_00 };
         var f = BudgetFitter.Fit(Plan(2_510_00), spent, new HashSet<Guid> { Shopping }, savingsFromGoals: false);
-        // Savings 100; eating out can only give 20 (180 spent); shopping is yours; everyday spending gives 110 down to its
+        // Eating out can only give 20 (180 spent); shopping is yours; savings 100; everyday spending gives 110 down to its
         // 80% floors (groceries 320, gas 120), and the last $20 is reported as short.
         Assert.Equal((0L, 180_00L, 100_00L), (Limit(f, Save), Limit(f, EatingOut), Limit(f, Shopping)));
         Assert.Equal((230_00L, 20_00L), (f.SqueezedCents, f.ShortCents));
@@ -86,12 +86,12 @@ public class BudgetFitterTests
     public void Bills_and_card_payments_are_at_least_what_was_already_paid_this_month()
     {
         // DECISIONS.md 173: rent went up to $1,800 and $300 already went to the card; those are gone, so the plan holds
-        // them, and the $290 more comes off the savings habit ($100), then discretionary spending ($190).
+        // them, and the $290 more comes off nice-to-have spending, leaving $10 of its $300; the savings habit stays.
         // Overspending on groceries doesn't raise its line: it already comes off Left to Spend.
         var spent = new Dictionary<Guid, long> { [Rent] = 1_800_00, [Card] = 300_00, [Groceries] = 450_00 };
         var f = BudgetFitter.Fit(Plan(2_760_00), spent, new HashSet<Guid>(), savingsFromGoals: false);
         Assert.Equal((1_800_00L, 300_00L, 400_00L), (Limit(f, Rent), Limit(f, Card), Limit(f, Groceries)));
-        Assert.Equal((0L, 110_00L), (Limit(f, Save), Limit(f, EatingOut) + Limit(f, Shopping)));
+        Assert.Equal((100_00L, 10_00L), (Limit(f, Save), Limit(f, EatingOut) + Limit(f, Shopping)));
         Assert.Equal((0L, 290_00L), (f.ShortCents, f.SqueezedCents));
         Assert.EndsWith("Raised to $1,800.00, what's already been paid this month.", f.Proposal.Categories.Single(c => c.CategoryId == Rent).Explanation);
 

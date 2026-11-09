@@ -11,11 +11,12 @@ public sealed record FittedBudget(BudgetProposal Proposal, long ShortCents, long
 /// priorities only when there is some, so extra debt payments and savings goals are the first to drop. If the plan
 /// still costs more than the month brings in, it squeezes, in this order:
 /// <list type="number">
+/// <item>nice-to-have spending (DECISIONS.md 182), as far as what's already spent;</item>
 /// <item>savings transfers that aren't part of your goals plan (a habit, not a bill);</item>
-/// <item>spending by priority (DECISIONS.md 182): nice to have first, as far as what's already spent; then important,
-/// then must have, each never below <see cref="EssentialFloorPercent"/>% of its usual amount. Within a priority, in
-/// proportion to the room each has.</item>
+/// <item>important spending, then must-have spending, each never below <see cref="EssentialFloorPercent"/>% of its
+/// usual amount.</item>
 /// </list>
+/// Within a step, categories give in proportion to the room each has.
 /// Bill, card and savings lines are first raised to whatever was already paid on them this month.
 /// Nothing goes below what's already been spent this month, limits you set yourself are never touched, and bills,
 /// card minimums and debt payments aren't squeezed. Whatever is still missing is reported as a shortfall rather than
@@ -54,8 +55,8 @@ public static class BudgetFitter
         long Floor80(ProposedLimit l) => Math.Max(Spent(l.CategoryId), RoundUpToDollar(l.MedianCents * EssentialFloorPercent / 100));
         var stages = new (Func<ProposedLimit, bool> Pick, Func<ProposedLimit, long> Floor, string Reason)[]
         {
-            (l => l.Type == CategoryType.SavingsTransfer && !savingsFromGoals, l => Spent(l.CategoryId), "Savings transfers are squeezed first"),
-            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.Low, l => Spent(l.CategoryId), "Nice-to-have spending is squeezed next"),
+            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.Low, l => Spent(l.CategoryId), "Nice-to-have spending is squeezed first"),
+            (l => l.Type == CategoryType.SavingsTransfer && !savingsFromGoals, l => Spent(l.CategoryId), "Savings transfers are squeezed next"),
             (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.Medium, Floor80, $"Important spending is next, to no less than {EssentialFloorPercent}% of usual"),
             (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.High, Floor80, $"Must-have spending is squeezed last, to no less than {EssentialFloorPercent}% of usual"),
         };
