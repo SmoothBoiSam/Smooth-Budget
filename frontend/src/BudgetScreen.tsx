@@ -19,6 +19,7 @@ import {
 import { useRemembered } from './offline'
 import { Caret, ErrorNotice, Loading } from './ui'
 import BudgetPlanner from './BudgetPlanner'
+import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
 import CategoriesPage from './CategoriesPage'
 import { centsToInput, formatCents, formatDay, formatSigned, formatTime, parseDollars, titleCase } from './format'
@@ -199,6 +200,11 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           }}
         />
       )}
+      {view.kind === 'plan' && (
+        <div className="mt-6">
+          <SweepSetting />
+        </div>
+      )}
 
       {summary && view.kind === 'category' && line && (
         <>
@@ -253,6 +259,7 @@ function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; 
         {formatCents(s.totalVariableSpentCents)} of {formatCents(s.totalVariableLimitCents)} spent
         {s.carriedInDeficitCents > 0 && <> · {formatCents(s.carriedInDeficitCents)} carried over</>}
         {s.unfiledSpendingCents > 0 && <> · {formatCents(s.unfiledSpendingCents)} not filed yet</>}
+        {s.cashShortCents > 0 && <> · {formatCents(s.cashShortCents)} more than your accounts cover</>}
       </p>
       {s.overplannedCents > 0 && (
         <a href="#/budget/plan" role="alert" className="mt-3 block rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">

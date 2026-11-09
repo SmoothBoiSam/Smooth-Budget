@@ -87,7 +87,9 @@ public record BudgetSummaryDto(
     AutoBudgetDto? Auto = null,
     // What else comes off Left to Spend (DECISIONS.md 177-178): spending not filed yet, and a plan beyond the month's money.
     long UnfiledSpendingCents = 0,
-    long OverplannedCents = 0);
+    long OverplannedCents = 0,
+    // How much the cash check lowered Left to Spend (DECISIONS.md 183).
+    long CashShortCents = 0);
 
 /// <param name="ShortCents">What this month still needs beyond its money after every squeeze.</param>
 /// <param name="SetByYou">Categories whose limit you set yourself (from now on, or this month only).</param>
@@ -152,7 +154,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             new AutoBudgetDto(db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).Single(), row.AutoNote, row.AutoNoteUtc, row.AutoShortCents,
                 db.Categories.Where(c => c.HouseholdId == householdId && c.LimitSetByUser).Select(c => c.Id).AsEnumerable()
                     .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser),
-            lts.UnfiledSpendingCents, lts.OverplannedCents);
+            lts.UnfiledSpendingCents, lts.OverplannedCents, lts.CashShortCents);
     }
 
     private async Task<LastMonthDto?> LastMonthAsync(Guid householdId, Data.BudgetMonth current, CancellationToken ct)

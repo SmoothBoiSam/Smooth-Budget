@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, plaidApi, type Category, type HomeSummary, type Me, type Status, type Transaction } from './api'
+import { ApiError, api, budgetApi, plaidApi, type CashCheck, type Category, type HomeSummary, type Me, type Status, type Transaction } from './api'
 import { TransactionList } from './BudgetScreen'
 import TransactionSheet from './TransactionSheet'
 import { formatCents, formatDay, formatTime } from './format'
@@ -182,6 +182,57 @@ function daysBetween(from: string, to: string) {
   return Math.round(day(to) - day(from))
 }
 
+/**
+ * Left to Spend checked against the bank (DECISIONS.md 183): checking now and money still coming, less what still has to
+ * go out this month. Folded, it says whether the accounts cover Left to Spend; open, it shows every part.
+ */
+function CashCheckRow({ cash: c, shortCents }: { cash: CashCheck; shortCents: number }) {
+  const rows: [string, number, 1 | -1][] = [
+    ['In checking now', c.checkingCents, 1],
+    ['Pay still coming this month', c.incomeStillComingCents, 1],
+    ['Partner money still coming', c.partnerStillComingCents, 1],
+    ['Bills not paid yet', c.billsStillDueCents, -1],
+    ['Card payments and charges to pay off', c.cardsToPayCents, -1],
+    ['Savings not moved yet', c.savingsStillToMoveCents, -1],
+    ['Last month’s leftover to move', c.leftoverToMoveCents, -1],
+  ]
+  return (
+    <li>
+      <details className="group rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
+        <summary className="flex cursor-pointer list-none justify-between gap-3">
+          <span className="text-slate-600">{shortCents > 0 ? 'More than your accounts can cover' : 'Checked against your accounts'}</span>
+          <span className={`shrink-0 whitespace-nowrap font-semibold tabular-nums ${shortCents > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+            {shortCents > 0 ? `−${formatCents(shortCents)}` : 'Covered'} <span className="inline-block text-slate-400 group-open:rotate-90">›</span>
+          </span>
+        </summary>
+        <dl className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 text-xs">
+          {rows
+            .filter(([label, cents]) => cents !== 0 || label === 'In checking now')
+            .map(([label, cents, sign]) => (
+              <div key={label} className="flex justify-between gap-3">
+                <dt className="text-slate-600">{label}</dt>
+                <dd className="shrink-0 whitespace-nowrap tabular-nums">
+                  {sign < 0 ? '−' : '+'}
+                  {formatCents(Math.abs(cents))}
+                </dd>
+              </div>
+            ))}
+          <div className="flex justify-between gap-3 border-t border-slate-100 pt-1.5 font-semibold">
+            <dt>Your accounts cover</dt>
+            <dd className="tabular-nums">{formatCents(c.availableCents)}</dd>
+          </div>
+        </dl>
+        <p className="mt-2 text-xs text-slate-500">
+          {shortCents > 0
+            ? 'Your budget had more left than this, so Left to Spend shows only what your accounts can cover.'
+            : 'Left to Spend is no more than this, so the money is there.'}{' '}
+          Card purchases are counted from the payday before this month’s first one, the same ones your payday plan pays off.
+        </p>
+      </details>
+    </li>
+  )
+}
+
 function Summary({ summary: s }: { summary: HomeSummary }) {
   const style = statusStyles[s.status]
   // What lasts until the next check: the safe daily amount for each day before payday (DECISIONS.md 148).
@@ -247,6 +298,7 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
             </a>
           </li>
         )}
+        {s.cash && <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} />}
         {s.incomeUnknown && (
           <li>
             <a href="#/budget/plan" className="block rounded-xl bg-amber-50 px-4 py-3 text-amber-900">

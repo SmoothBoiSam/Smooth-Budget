@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Budget;
@@ -100,6 +101,40 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal("healthy", s.Status);
         Assert.NotNull(s.LastUpdatedUtc);
         Assert.False(s.IncomeUnknown);
+    }
+
+    [Fact]
+    public async Task Left_to_spend_is_checked_against_the_bank_once_checking_comes_from_the_bank()
+    {
+        // DECISIONS.md 183. The seed's checking is a CSV account: no check until its balance comes from the bank.
+        SetDenverNoon(2026, 11, 20);
+        var (client, household) = await RegisterAsync();
+        await SeedAsync(household);
+        Assert.Null((await SummaryAsync(client)).Cash);
+
+        async Task SetChecking(long cents)
+        {
+            using var scope = app.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Data.AppDbContext>();
+            await db.Accounts.Where(a => a.HouseholdId == household && a.Type == SmoothBudget.Api.Data.AccountType.Checking)
+                .ExecuteUpdateAsync(u => u.SetProperty(a => a.PlaidAccountId, "test-checking").SetProperty(a => a.CurrentBalanceCents, cents));
+        }
+
+        // Plenty in checking: the budget's own figure stands.
+        await SetChecking(100_000_00);
+        var rich = await SummaryAsync(client);
+        Assert.NotNull(rich.Cash);
+        Assert.Equal((0L, 478_67L), (rich.CashShortCents, rich.LeftToSpendCents));
+
+        // $100 in checking: Left to Spend is only what the accounts cover, and every part adds up to it.
+        await SetChecking(100_00);
+        var poor = await SummaryAsync(client);
+        var c = poor.Cash!;
+        Assert.Equal(c.AvailableCents, poor.LeftToSpendCents);
+        Assert.Equal(478_67 - c.AvailableCents, poor.CashShortCents);
+        Assert.Equal(c.CheckingCents + c.IncomeStillComingCents + c.PartnerStillComingCents
+                     - c.BillsStillDueCents - c.CardsToPayCents - c.SavingsStillToMoveCents - c.LeftoverToMoveCents, c.AvailableCents);
+        Assert.Equal(100_00, c.CheckingCents);
     }
 
     [Fact]

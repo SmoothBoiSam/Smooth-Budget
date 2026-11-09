@@ -3,7 +3,6 @@ import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportRe
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import BankConnections from './BankConnections'
-import SweepSetting from './SweepSetting'
 import { formatTime } from './format'
 
 const accountTypeLabel: Record<Account['type'], string> = { Checking: 'Checking', Savings: 'Savings', CreditCard: 'Credit card' }
@@ -51,7 +50,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
     onSignedOut()
   }
 
-  // Merchant rules and recent imports grow over time, so each has its own page (DECISIONS.md 156).
+  // Merchant rules and CSV imports grow over time, so each has its own page (DECISIONS.md 156).
   const [sub, setSub] = useState(subFromHash)
   useEffect(() => {
     const onHash = () => {
@@ -72,7 +71,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
   if (sub === 'imports')
     return (
       <div className={shell}>
-        <SubHeader title="Recent imports" />
+        <SubHeader title="CSV imports" />
         {errorBox}
         {batches.length === 0 ? (
           <p className="text-sm text-slate-500">Nothing imported yet.</p>
@@ -130,14 +129,19 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
 
       <BankConnections onChanged={changed} />
 
-      <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
+      <div className="space-y-2">
+        <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
+        {/* With the CSV import it belongs to, on its own (DECISIONS.md 184). */}
+        <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
+          <SubLink href="#/more/imports" title="View CSVs" detail={batches.length === 0 ? 'Nothing imported yet' : `${batches.length} ${batches.length === 1 ? 'file' : 'files'}, with undo`} />
+        </div>
+      </div>
 
-      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
-        <SubLink href="#/more/imports" title="Recent imports" detail={batches.length === 0 ? 'Nothing imported yet' : `${batches.length} ${batches.length === 1 ? 'file' : 'files'}, with undo`} />
+      <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
         <SubLink href="#/more/rules" title="Merchant rules" detail={rules.length === 0 ? 'None yet' : `${rules.length} ${rules.length === 1 ? 'rule' : 'rules'}`} />
       </div>
 
-      {/* Under imports and rules (DECISIONS.md 162). */}
+      {/* Under merchant rules (DECISIONS.md 162). */}
       <a href="#/partner" className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-200">
         <span>
           <span className="block font-semibold">Partner</span>
@@ -152,7 +156,6 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         </h2>
         <AppearanceSetting />
         <NotificationSetting />
-        <SweepSetting />
         <div className="flex items-center justify-between rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
           <span className="truncate text-sm text-slate-500">{me.email}</span>
           <button type="button" onClick={signOut} className="text-sm font-medium text-slate-700">

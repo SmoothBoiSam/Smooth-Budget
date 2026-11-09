@@ -31,6 +31,10 @@ export interface HomeSummary {
   overplannedCents: number
   /** No income figure this month while there is a plan: Left to Spend can't check the plan against your money. */
   incomeUnknown: boolean
+  /** How much Left to Spend was lowered because the accounts can't cover more (DECISIONS.md 183). */
+  cashShortCents: number
+  /** Left to Spend checked against the bank; null unless every checking balance comes from the bank. */
+  cash: CashCheck | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */
@@ -309,6 +313,8 @@ export interface BudgetSummary {
   unfiledSpendingCents: number
   /** How far the plan goes beyond the month's money (it comes off Left to Spend). */
   overplannedCents: number
+  /** How much the cash check lowered Left to Spend. */
+  cashShortCents: number
   /** The automatic budget: on or off, its last change, any shortfall, and the limits you set yourself. */
   auto: { on: boolean; note: string | null; noteUtc: string | null; shortCents: number; setByYou: string[]; incomeSetByYou: boolean } | null
 }
@@ -1155,3 +1161,15 @@ export const needsLook = (i: RecurringItem) =>
 export type Priority = 'Low' | 'Medium' | 'High'
 
 export const priorityLabels: Record<Priority, string> = { High: 'Must have', Medium: 'Important', Low: 'Nice to have' }
+
+/** The bank side of the month (DECISIONS.md 183): what the accounts can cover for spending the rest of it. */
+export interface CashCheck {
+  checkingCents: number
+  incomeStillComingCents: number
+  partnerStillComingCents: number
+  billsStillDueCents: number
+  cardsToPayCents: number
+  savingsStillToMoveCents: number
+  leftoverToMoveCents: number
+  availableCents: number
+}

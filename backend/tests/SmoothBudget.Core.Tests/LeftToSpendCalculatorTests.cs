@@ -254,4 +254,44 @@ public class LeftToSpendCalculatorTests
         Assert.Equal(LeftToSpendStatus.Low, LeftToSpendCalculator.StatusFor(0, 0));
         Assert.Equal(LeftToSpendStatus.Overspent, LeftToSpendCalculator.StatusFor(-5, 0));
     }
+
+    [Fact]
+    public void Left_to_spend_is_never_more_than_the_accounts_can_cover()
+    {
+        // DECISIONS.md 183. $200 of groceries on the card this month, so the budget says 760 - 200 = 560 left.
+        // The bank: 1,500 in checking + 1,000 pay still coming. Still to go out: rent 1,650, savings 100, and the cards
+        // 700 (the 300 card payment + 400 charged since the payday before the month: last month's 200 and this month's 200).
+        // 2,500 - 2,450 = 50 is all the accounts cover.
+        var groceries = new BudgetTransaction(Groceries, new DateOnly(2026, 11, 10), 200_00, OnCreditCard: true);
+        LeftToSpendResult Run(long checking, long? owed = null, bool hasCards = true) =>
+            LeftToSpendCalculator.Calculate(Nov, Today, Categories, [groceries], 0,
+                cash: new CashInput(checking, 1_000_00, 0, hasCards, 400_00, 0, owed, 0));
+
+        var r = Run(1_500_00);
+        Assert.Equal((1_650_00L, 700_00L, 100_00L, 50_00L), (r.Cash!.BillsStillDueCents, r.Cash.CardsToPayCents, r.Cash.SavingsStillToMoveCents, r.Cash.AvailableCents));
+        Assert.Equal((50_00L, 510_00L), (r.LeftToSpendCents, r.CashShortCents));
+
+        // Enough in checking: the budget's own figure stands.
+        var covered = Run(3_100_00);
+        Assert.Equal((560_00L, 0L), (covered.LeftToSpendCents, covered.CashShortCents));
+
+        // The cards never need more than their balances say is owed.
+        Assert.Equal(500_00, Run(1_500_00, owed: 500_00).Cash!.CardsToPayCents);
+        // With no cards, the debt line is paid like a bill.
+        Assert.Equal(300_00, Run(1_500_00, hasCards: false).Cash!.CardsToPayCents);
+    }
+
+    [Fact]
+    public void Paying_the_cards_and_bills_moves_money_out_of_checking_without_changing_the_check()
+    {
+        // Paying rent and 700 to the cards from checking: checking drops by 2,350, and so does what's still to go out.
+        var paid = new BudgetTransaction[]
+        {
+            new(Groceries, new DateOnly(2026, 11, 10), 200_00, OnCreditCard: true),
+            new(Rent, new DateOnly(2026, 11, 7), 1_650_00),
+        };
+        var before = LeftToSpendCalculator.Calculate(Nov, Today, Categories, [paid[0]], 0, cash: new CashInput(4_000_00, 0, 0, true, 400_00, 0, null, 0));
+        var after = LeftToSpendCalculator.Calculate(Nov, Today, Categories, paid, 0, cash: new CashInput(1_650_00, 0, 0, true, 400_00, 700_00, null, 0));
+        Assert.Equal(before.Cash!.AvailableCents, after.Cash!.AvailableCents);
+    }
 }

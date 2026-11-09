@@ -83,9 +83,41 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
             <p className="text-sm text-slate-500">You’ve saved</p>
             <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.totalSavedCents)}</p>
             {s.accounts.length === 0 && (
-              <p className="mt-2 text-xs text-slate-500">Connect or import a savings account so your goals follow its balance. Until then, goals are tracked by hand.</p>
+              <p className="mt-2 text-xs text-slate-500">No savings account yet. Connect it in More → Bank connections (Add accounts or Import accounts on your bank) to see its balance here and have goals follow it.</p>
             )}
           </section>
+
+          {s.accounts.length > 0 && (
+            <section aria-labelledby="accts-h" className="mt-4">
+              <h2 id="accts-h" className="text-sm font-semibold text-slate-700">
+                Savings accounts
+              </h2>
+              <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+                {s.accounts.map((a) => (
+                  <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">
+                        {a.name}
+                        {a.mask && <span className="text-slate-400"> ••{a.mask}</span>}
+                      </span>
+                      <span className="block text-xs text-slate-500">
+                        {a.paceCents > 0 ? `About ${formatCents(a.paceCents)} a month going in lately` : 'No regular deposits lately'}
+                        {a.balanceFromBank ? ' · from your bank' : ''}
+                      </span>
+                    </span>
+                    {a.balanceFromBank ? (
+                      <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCents(a.balanceCents)}</span>
+                    ) : (
+                      <BalanceEditor
+                        cents={a.balanceCents}
+                        onSave={(cents) => act(() => savingsApi.setBalance(a.id, cents), `${a.name} is now ${formatCents(cents)}.`)}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <TransfersCard s={s} />
 
@@ -133,37 +165,6 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
             </ol>
           </section>
 
-          {s.accounts.length > 0 && (
-            <section aria-labelledby="accts-h" className="mt-6">
-              <h2 id="accts-h" className="text-sm font-semibold text-slate-700">
-                Savings accounts
-              </h2>
-              <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
-                {s.accounts.map((a) => (
-                  <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">
-                        {a.name}
-                        {a.mask && <span className="text-slate-400"> ••{a.mask}</span>}
-                      </span>
-                      <span className="block text-xs text-slate-500">
-                        {a.paceCents > 0 ? `About ${formatCents(a.paceCents)} a month going in lately` : 'No regular deposits lately'}
-                        {a.balanceFromBank ? ' · from your bank' : ''}
-                      </span>
-                    </span>
-                    {a.balanceFromBank ? (
-                      <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCents(a.balanceCents)}</span>
-                    ) : (
-                      <BalanceEditor
-                        cents={a.balanceCents}
-                        onSave={(cents) => act(() => savingsApi.setBalance(a.id, cents), `${a.name} is now ${formatCents(cents)}.`)}
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
         </>
       )}
 

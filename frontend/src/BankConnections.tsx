@@ -70,8 +70,7 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
       setUpdateItemId(null)
       void run('Finishing…', async () => {
         if (itemId && updateFor === 'add') {
-          setKeepBoth(false)
-          setSetup(await plaidApi.itemAccounts(itemId))
+          await showAccounts(itemId)
         } else if (itemId) {
           setMessage(describe(await plaidApi.reconnected(itemId)))
           onChanged()
@@ -83,10 +82,34 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
       })
     },
     onExit: () => {
+      const itemId = updateItemId
       setLinkToken(null)
       setUpdateItemId(null)
+      // With nothing changed in Plaid (the account was already ticked), Plaid closes without "success": still check
+      // whether it shares an account the app hasn't imported yet (DECISIONS.md 184).
+      if (itemId && updateFor === 'add') void run('Checking your accounts…', () => showAccounts(itemId))
     },
   })
+
+  /**
+   * The accounts Plaid shares from a connection. Any not imported yet open the import sheet; with none, say what Plaid
+   * shares, so a missing account is clearly on Plaid's side.
+   */
+  async function showAccounts(itemId: string) {
+    const r = await plaidApi.itemAccounts(itemId)
+    const synced = new Set(r.existingAccounts.filter((a) => a.bankSynced).map((a) => a.id))
+    const fresh = r.accounts.filter((a) => a.accountType !== null && !(a.suggestedAccountId && synced.has(a.suggestedAccountId)))
+    if (fresh.length > 0) {
+      setKeepBoth(false)
+      setSetup(r)
+      return
+    }
+    const names = r.accounts.map((a) => (a.mask ? `${a.name} ••${a.mask}` : a.name)).join(', ')
+    setMessage(
+      `${r.institutionName ?? 'Your bank'} shares ${names || 'no accounts'} with the app, and every one it can track is already imported. ` +
+        'If an account is missing, tap Add accounts and make sure it’s ticked in Plaid, then tap Continue.',
+    )
+  }
 
   // Plaid Link opens once its token has loaded.
   useEffect(() => {
@@ -180,6 +203,16 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                     {i.status === 'Active' && (
                       <button type="button" disabled={busy !== null} onClick={() => connect(i.id, true)} className="text-slate-900 underline">
                         Add accounts
+                      </button>
+                    )}
+                    {i.status === 'Active' && (
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => void run('Checking your accounts…', () => showAccounts(i.id))}
+                        className="text-slate-900 underline"
+                      >
+                        Import accounts
                       </button>
                     )}
                     {config.sandboxShortcut && i.status === 'Active' && (

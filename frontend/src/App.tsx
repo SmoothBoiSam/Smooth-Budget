@@ -27,7 +27,7 @@ function currentRoute(): Route {
     return 'review'
   }
   if (hash === 'transactions') return 'transactions' // all transactions and search, from Home (DECISIONS.md 171)
-  return hash.startsWith('budget') ? 'budget' : hash === 'review' || hash.startsWith('review/') ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash === 'payday/setup' ? 'paysetup' : hash === 'partner' ? 'partner' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'review' || hash.startsWith('review/') ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'partner' ? 'partner' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {

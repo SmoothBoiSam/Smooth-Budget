@@ -60,7 +60,38 @@ public sealed record LeftToSpendResult(
     long UnfiledSpendingCents = 0,
     // What the month's plan needs beyond the money coming in: bills, card and savings at least what's already paid,
     // plus every spending limit, less expected income and partner money (DECISIONS.md 178).
-    long OverplannedCents = 0);
+    long OverplannedCents = 0,
+    // What's still more than the bank accounts can cover once this month's bills, card payoffs and savings are set aside
+    // (DECISIONS.md 183), and the check itself. Null when the app can't see every checking balance.
+    long CashShortCents = 0,
+    CashCheck? Cash = null);
+
+/// <summary>
+/// The bank side of the month, from the accounts (DECISIONS.md 183). Card charges and payments decide what the cards
+/// still need from checking: what you charged since the payday before this month's first one (the payday plan's
+/// "Pay off what you charged") plus the planned card payment, less what's been paid to the cards this month.
+/// </summary>
+/// <param name="CheckingCents">Every checking account's balance from the bank.</param>
+/// <param name="IncomeStillComingCents">The month's expected income not landed yet.</param>
+/// <param name="PartnerStillComingCents">The partner's money for this month not arrived yet.</param>
+/// <param name="HasCards">False with no credit cards: the debt line is then paid like a bill.</param>
+/// <param name="CardChargesCents">Purchases less refunds on the cards since the card window started.</param>
+/// <param name="CardPaymentsCents">Paid to the cards from checking this month.</param>
+/// <param name="CardsOwedCents">What the cards' balances say is owed, when every card's balance is known: the cards
+/// never need more than that.</param>
+/// <param name="LeftoverToMoveCents">Rollover sweeps from a closed month not sent yet.</param>
+public sealed record CashInput(
+    long CheckingCents, long IncomeStillComingCents, long PartnerStillComingCents,
+    bool HasCards, long CardChargesCents, long CardPaymentsCents, long? CardsOwedCents, long LeftoverToMoveCents);
+
+/// <summary>What the accounts can cover for spending the rest of the month: money there and still coming, less what must still go out.</summary>
+public sealed record CashCheck(
+    long CheckingCents, long IncomeStillComingCents, long PartnerStillComingCents,
+    long BillsStillDueCents, long CardsToPayCents, long SavingsStillToMoveCents, long LeftoverToMoveCents)
+{
+    public long AvailableCents => CheckingCents + IncomeStillComingCents + PartnerStillComingCents
+                                  - BillsStillDueCents - CardsToPayCents - SavingsStillToMoveCents - LeftoverToMoveCents;
+}
 
 /// <summary>
 /// Computes the headline number (SPEC section 3, "Left to Spend"):
@@ -89,7 +120,8 @@ public static class LeftToSpendCalculator
         IEnumerable<BudgetTransaction> transactions,
         long carriedInDeficitCents,
         long partnerShortfallCents = 0,
-        long moneyInCents = 0)
+        long moneyInCents = 0,
+        CashInput? cash = null)
     {
         ArgumentNullException.ThrowIfNull(month);
         ArgumentOutOfRangeException.ThrowIfNegative(partnerShortfallCents);
@@ -137,6 +169,9 @@ public static class LeftToSpendCalculator
         var unfiled = UnfiledSpending(month, allCategories, allTransactions);
         var overplanned = Overplanned(month, allCategories, allTransactions, moneyInCents);
         var leftToSpend = lines.Sum(l => l.RemainingCents) - carriedInDeficitCents - partnerShortfallCents - unfiled - overplanned;
+        var check = cash is null ? null : Check(month, allCategories, allTransactions, cash);
+        var cashShort = check is null ? 0 : Math.Max(0, leftToSpend - check.AvailableCents);
+        leftToSpend -= cashShort;
         var over = lines.Where(l => l.IsOver).ToList();
 
         return new LeftToSpendResult(
@@ -155,7 +190,30 @@ public static class LeftToSpendCalculator
             Categories: lines,
             PartnerShortfallCents: partnerShortfallCents,
             UnfiledSpendingCents: unfiled,
-            OverplannedCents: overplanned);
+            OverplannedCents: overplanned,
+            CashShortCents: cashShort,
+            Cash: check);
+    }
+
+    /// <summary>
+    /// Checks the month against the bank (DECISIONS.md 183): checking now, plus income and partner money still coming, less
+    /// each bill and savings line not paid yet, what the cards still need, and leftover still to move. Card purchases
+    /// already count in their categories, but the money for them is still in checking until the card is paid, so it's set
+    /// aside here; without this, last month's card charges looked like money to spend.
+    /// </summary>
+    public static CashCheck Check(BudgetMonthRange month, IReadOnlyCollection<BudgetCategory> categories, IEnumerable<BudgetTransaction> transactions, CashInput cash)
+    {
+        var lines = CategoryBreakdownCalculator.Calculate(month, categories, transactions);
+        long Unpaid(CategoryType type) => lines.Where(l => l.Type == type).Sum(l => Math.Max(0, l.LimitCents - l.SpentCents));
+        var cards = Unpaid(CategoryType.DebtPayment);
+        if (cash.HasCards)
+        {
+            cards = Math.Max(0, lines.Where(l => l.Type == CategoryType.DebtPayment).Sum(l => l.LimitCents) + cash.CardChargesCents - cash.CardPaymentsCents);
+            if (cash.CardsOwedCents is { } owed)
+                cards = Math.Min(cards, Math.Max(0, owed));
+        }
+        return new CashCheck(cash.CheckingCents, cash.IncomeStillComingCents, cash.PartnerStillComingCents,
+            Unpaid(CategoryType.FixedBill), cards, Unpaid(CategoryType.SavingsTransfer), cash.LeftoverToMoveCents);
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Core.Budgeting;
+using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Home;
 
@@ -40,7 +41,10 @@ public record HomeSummaryDto(
     long UnfiledSpendingCents = 0,
     long OverplannedCents = 0,
     // No income figure for this month while there is a plan: Left to Spend can't check the plan against your money (DECISIONS.md 182).
-    bool IncomeUnknown = false);
+    bool IncomeUnknown = false,
+    // Left to Spend checked against the bank (DECISIONS.md 183): how much it was lowered, and the check itself.
+    long CashShortCents = 0,
+    CashCheck? Cash = null);
 
 /// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
 public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
@@ -64,13 +68,14 @@ public sealed record CurrentMonthData(
     IReadOnlyList<PendingSweepDto> PendingSweeps,
     int ReviewCount,
     IReadOnlyList<ContributionStatus>? Contributions = null,
-    long PartnerShortfallCents = 0)
+    long PartnerShortfallCents = 0,
+    CashInput? Cash = null)
 {
     public IReadOnlyList<BudgetCategory> CalculatorCategories => Categories.Select(c => c.ForCalculator).ToList();
 
     public LeftToSpendResult LeftToSpend() =>
         LeftToSpendCalculator.Calculate(Month, Today, CalculatorCategories, Transactions, CarriedInDeficitCents, PartnerShortfallCents,
-            MonthData.MoneyIn(Row, Contributions));
+            MonthData.MoneyIn(Row, Contributions), Cash);
 
     public BudgetMonthDto MonthDto => new(Month.Start, Month.End, Month.Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture));
 
@@ -119,7 +124,72 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             lastUpdated, connections,
             pendingSweeps.Select(s => new PendingSweepDto(s.Id, s.Kind.ToString(), s.AmountCents, s.Destination,
                 calendar.MonthContaining(s.StartDate).Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture))).ToList(),
-            reviewCount, month.Contributions, month.PartnerShortfallCents);
+            reviewCount, month.Contributions, month.PartnerShortfallCents,
+            await CashAsync(householdId, today, month, pendingSweeps.Sum(s => s.AmountCents), ct));
+    }
+
+    /// <summary>
+    /// The bank side of the month for Left to Spend's cash check (DECISIONS.md 183). Null unless every checking account
+    /// in the budget gets its balance from the bank: without that there's nothing true to check against.
+    /// </summary>
+    private async Task<CashInput?> CashAsync(Guid householdId, DateOnly today, MonthData month, long leftoverToMove, CancellationToken ct)
+    {
+        var range = month.Range;
+        var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget)
+            .Select(a => new { a.Id, a.Type, a.PlaidAccountId, a.CurrentBalanceCents }).ToListAsync(ct);
+        var checking = accounts.Where(a => a.Type == AccountType.Checking).ToList();
+        if (checking.Count == 0 || checking.Any(a => a.PlaidAccountId is null))
+            return null;
+        var checkingIds = checking.Select(a => a.Id).ToList();
+        var cards = accounts.Where(a => a.Type == AccountType.CreditCard).ToList();
+        var cardIds = cards.Select(a => a.Id).ToList();
+
+        // Paychecks that landed count against the month's expected income, including one that came a few days early.
+        var deposits = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && checkingIds.Contains(t.AccountId) && t.Kind == TransactionKind.Income && t.AmountCents < 0
+                        && !t.IsTransfer && !t.IsPartnerTransfer && t.Date >= range.Start.AddDays(-5) && t.Date <= range.End)
+            .Select(t => new { t.Id, t.Date, t.AmountCents }).ToListAsync(ct);
+        var paidEarly = await db.PayPeriodForecasts.AsNoTracking()
+            .Where(f => f.HouseholdId == householdId && f.DepositTransactionId != null && f.PayDate >= range.Start && f.PayDate <= range.End)
+            .Select(f => f.DepositTransactionId!.Value).ToListAsync(ct);
+        var incomeLanded = deposits.Where(d => d.Date >= range.Start || paidEarly.Contains(d.Id)).Sum(d => -d.AmountCents);
+
+        long partnerComing;
+        if (month.Contributions is { Count: > 0 } contributions)
+            partnerComing = contributions.Sum(c => Math.Max(0, c.ExpectedCents - c.ReceivedCents));
+        else
+        {
+            var partnerLanded = await db.Transactions.AsNoTracking()
+                .Where(t => t.HouseholdId == householdId && t.IsPartnerTransfer && t.AmountCents < 0 && !t.IsTransfer && t.Date >= range.Start && t.Date <= range.End)
+                .SumAsync(t => -t.AmountCents, ct);
+            partnerComing = Math.Max(0, month.Row.PartnerExpectedCents - partnerLanded);
+        }
+
+        // The cards' window starts at the payday before this month's first one, like the payday plan's "Pay off what you
+        // charged" (DECISIONS.md 179); without pay dates, at the month's start.
+        var cardsFrom = range.Start;
+        if (await db.ScheduleMonths.AnyAsync(m => m.HouseholdId == householdId, ct) || await db.PayStubs.AnyAsync(s => s.HouseholdId == householdId, ct))
+        {
+            var profile = await db.PayProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.HouseholdId == householdId, ct);
+            var rules = profile is null ? SmoothBudget.Core.Pay.PayRules.Default : Payday.PaydayService.RulesOf(profile);
+            var firstPay = SmoothBudget.Core.Pay.PayCalendar.From(range.Start, rules).First().PayDate;
+            var before = SmoothBudget.Core.Pay.PayCalendar.From(firstPay.AddDays(-45), rules).TakeWhile(p => p.PayDate < firstPay)
+                .Select(p => p.PayDate).LastOrDefault(firstPay.AddDays(-14));
+            if (before < cardsFrom) cardsFrom = before;
+        }
+        var charged = cardIds.Count == 0 ? 0 : await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && !t.IsTransfer && t.Kind != TransactionKind.CardPayment
+                        && t.Date >= cardsFrom && t.Date <= today)
+            .SumAsync(t => t.AmountCents, ct);
+        var paid = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && checkingIds.Contains(t.AccountId) && t.Kind == TransactionKind.CardPayment && t.AmountCents > 0
+                        && t.Date >= range.Start && t.Date <= today)
+            .SumAsync(t => t.AmountCents, ct);
+        // A card's balance is negative when money is owed on it.
+        long? owed = cards.Count > 0 && cards.All(c => c.PlaidAccountId is not null) ? cards.Sum(c => Math.Max(0, -c.CurrentBalanceCents)) : null;
+
+        return new CashInput(checking.Sum(a => a.CurrentBalanceCents), Math.Max(0, month.Row.IncomeExpectedCents - incomeLanded), partnerComing,
+            cards.Count > 0, charged, paid, owed, leftoverToMove);
     }
 }
 
@@ -159,7 +229,9 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             CashWarnings: await CashWarningsAsync(householdId, ct),
             UnfiledSpendingCents: r.UnfiledSpendingCents,
             OverplannedCents: r.OverplannedCents,
-            IncomeUnknown: MonthData.MoneyIn(data.Row, data.Contributions) <= 0 && data.Categories.Any(c => c.LimitCents > 0));
+            IncomeUnknown: MonthData.MoneyIn(data.Row, data.Contributions) <= 0 && data.Categories.Any(c => c.LimitCents > 0),
+            CashShortCents: r.CashShortCents,
+            Cash: r.Cash);
     }
 
     /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>
