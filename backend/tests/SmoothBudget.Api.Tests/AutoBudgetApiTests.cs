@@ -36,7 +36,7 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
             db.Categories.AddRange(
                 new Category { Id = rent, HouseholdId = me.HouseholdId, Name = "Rent", Type = CategoryType.FixedBill, MonthlyLimitCents = 2_300_00 },
                 new Category { Id = groceries, HouseholdId = me.HouseholdId, Name = "Groceries", Type = CategoryType.Variable, MonthlyLimitCents = 400_00, SortOrder = 1 },
-                new Category { Id = eating, HouseholdId = me.HouseholdId, Name = "Eating out", Type = CategoryType.Variable, IsDiscretionary = true, MonthlyLimitCents = 300_00, SortOrder = 2 });
+                new Category { Id = eating, HouseholdId = me.HouseholdId, Name = "Eating out", Type = CategoryType.Variable, Priority = CategoryPriority.Low, MonthlyLimitCents = 300_00, SortOrder = 2 });
             Transaction T(DateOnly d, Guid? cat, long cents, TransactionKind kind = TransactionKind.Purchase) => new()
             {
                 Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, AccountId = acct.Id, CategoryId = cat, Date = d, AmountCents = cents, Merchant = "TEST",
@@ -114,12 +114,12 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
     public async Task A_limit_you_set_stays_until_you_hand_it_back()
     {
         var (c, rent, groceries, eating) = await NewHouseholdAsync();
-        await c.PutAsJsonAsync($"/api/budget/categories/{groceries}", new UpdateCategoryRequest("Groceries", CategoryType.Variable, 450_00, false, false, "permanent"), Json);
+        await c.PutAsJsonAsync($"/api/budget/categories/{groceries}", new UpdateCategoryRequest("Groceries", CategoryType.Variable, 450_00, null, false, "permanent"), Json);
         var s = await Summary(c);
         Assert.Equal(450_00, Limit(s, groceries));
         Assert.Contains(groceries, s.Auto!.SetByYou);
 
-        await c.PutAsJsonAsync($"/api/budget/categories/{groceries}", new UpdateCategoryRequest("Groceries", CategoryType.Variable, 450_00, false, false, "permanent", Automatic: true), Json);
+        await c.PutAsJsonAsync($"/api/budget/categories/{groceries}", new UpdateCategoryRequest("Groceries", CategoryType.Variable, 450_00, null, false, "permanent", Automatic: true), Json);
         s = await Summary(c);
         Assert.Equal(400_00, Limit(s, groceries));
         Assert.DoesNotContain(groceries, s.Auto!.SetByYou);
@@ -132,7 +132,7 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
 
         // Off: nothing moves on its own.
         await c.PutAsJsonAsync("/api/settings/budget", new BudgetSettingsDto(SweepTarget.Debt, 50, AutoBudget: false), Json);
-        await c.PutAsJsonAsync($"/api/budget/categories/{eating}", new UpdateCategoryRequest("Eating out", CategoryType.Variable, 300_00, true, false, "permanent"), Json);
+        await c.PutAsJsonAsync($"/api/budget/categories/{eating}", new UpdateCategoryRequest("Eating out", CategoryType.Variable, 300_00, CategoryPriority.Low, false, "permanent"), Json);
         Assert.False((await Summary(c)).Auto!.On);
     }
 }

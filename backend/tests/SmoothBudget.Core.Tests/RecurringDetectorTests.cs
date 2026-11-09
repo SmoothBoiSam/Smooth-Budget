@@ -134,4 +134,39 @@ public class RecurringDetectorTests
     [InlineData(Frequency.Quarterly, 90_00, 30_00)]
     [InlineData(Frequency.Yearly, 139_00, 11_58)]   // 11.583 → 11.58
     public void Monthly_equivalents(Frequency f, long cents, long monthly) => Assert.Equal(monthly, RecurringDetector.MonthlyCents(cents, f));
+
+    /// <summary>A store that bills two subscriptions, one of which went from 10.99 to 11.99 in July (DECISIONS.md 181).</summary>
+    private static List<RecurringTxn> TwoAppSubscriptions() =>
+        Monthly("APPLE.COM/BILL", 2_99, 14, 1, 10)
+            .Concat(Monthly("APPLE.COM/BILL", 10_99, 20, 1, 6))
+            .Concat(Monthly("APPLE.COM/BILL", 11_99, 20, 7, 10)).ToList();
+
+    [Fact]
+    public void A_new_price_at_a_store_that_bills_several_things_is_offered_as_the_same_bill()
+    {
+        var found = RecurringDetector.Detect(TwoAppSubscriptions(), Today);
+        Assert.Equal(3, found.Count); // tracked per price, so the new price is a bill of its own
+
+        var (older, newer) = Assert.Single(RecurringDetector.SameBillCandidates(found));
+        Assert.Equal((10_99L, new DateOnly(2026, 6, 20)), (older.AmountCents, older.LastDate));
+        Assert.Equal((11_99L, new DateOnly(2026, 7, 20)), (newer.AmountCents, newer.FirstDate));
+    }
+
+    [Fact]
+    public void Bills_that_overlap_or_differ_a_lot_are_not_offered_as_one()
+    {
+        // Both still going: two things, not a price change.
+        var both = Monthly("APPLE.COM/BILL", 2_99, 14, 1, 10).Concat(Monthly("APPLE.COM/BILL", 10_99, 20, 1, 10)).ToList();
+        Assert.Empty(RecurringDetector.SameBillCandidates(RecurringDetector.Detect(both, Today)));
+
+        // One stopped and a much bigger one began: more than 3× the price.
+        var swap = Monthly("APPLE.COM/BILL", 2_99, 14, 1, 10).Concat(Monthly("APPLE.COM/BILL", 0_99, 20, 1, 6))
+            .Concat(Monthly("APPLE.COM/BILL", 9_99, 20, 7, 10)).ToList();
+        Assert.Empty(RecurringDetector.SameBillCandidates(RecurringDetector.Detect(swap, Today)));
+
+        // A gap of months between them.
+        var later = Monthly("APPLE.COM/BILL", 2_99, 14, 1, 10).Concat(Monthly("APPLE.COM/BILL", 10_99, 20, 1, 3))
+            .Concat(Monthly("APPLE.COM/BILL", 11_99, 20, 7, 10)).ToList();
+        Assert.Empty(RecurringDetector.SameBillCandidates(RecurringDetector.Detect(later, Today)));
+    }
 }

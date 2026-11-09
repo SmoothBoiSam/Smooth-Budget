@@ -8,7 +8,7 @@ public record BudgetCategoryLineDto(
     Guid Id,
     string Name,
     string Type,
-    bool IsDiscretionary,
+    CategoryPriority Priority,
     long LimitCents,
     // True when this month's limit differs from the usual one ("this month only").
     bool HasMonthOverride,
@@ -118,7 +118,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
                 var items = data.Categories.Where(c => c.Type == g.Type).Select(c =>
                 {
                     var l = lines[c.Id];
-                    return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.IsDiscretionary, l.LimitCents, c.HasMonthOverride,
+                    return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.Priority, l.LimitCents, c.HasMonthOverride,
                         l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount,
                         (data.Contributions ?? []).Where(s => s.CategoryId == c.Id).Sum(s => s.ExpectedCents));
                 }).ToList();

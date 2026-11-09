@@ -3,13 +3,13 @@ using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Core.Budgeting;
 
-public sealed record GeneratorCategory(Guid Id, string Name, CategoryType Type, bool IsDiscretionary, long CurrentLimitCents);
+public sealed record GeneratorCategory(Guid Id, string Name, CategoryType Type, CategoryPriority Priority, long CurrentLimitCents);
 
 /// <param name="MonthlyCents">What was spent (or paid) in each history month, oldest first.</param>
 /// <param name="Explanation">Why this number, in plain words (SPEC 6.1 step 7: every suggestion is explainable).</param>
 public sealed record ProposedLimit(
     Guid CategoryId, string Name, CategoryType Type, long CurrentLimitCents, long MedianCents, long ProposedCents,
-    string Explanation, IReadOnlyList<long> MonthlyCents, bool IsDiscretionary = false);
+    string Explanation, IReadOnlyList<long> MonthlyCents, CategoryPriority Priority = CategoryPriority.Medium);
 
 /// <summary>A detected bill or subscription filed in a category, at its current price per month (milestone 6).</summary>
 /// <param name="Stopped">Canceled, or missed enough charges that it looks canceled: it no longer counts.</param>
@@ -44,7 +44,7 @@ public sealed record BudgetProposal(
 /// refunds netted, owner's share of splits).</item>
 /// <item>The median month is used, so a one-off purchase doesn't skew it. Months with no spending count as $0.</item>
 /// <item>Fixed bills: the median, to the cent. Spending categories: the median rounded up to the whole dollar,
-/// trimmed by <see cref="DiscretionaryTrimPercent"/>% for discretionary ones (eating out, shopping,
+/// trimmed by <see cref="DiscretionaryTrimPercent"/>% for nice-to-have ones (low priority: eating out, shopping,
 /// entertainment) while there's card debt. Debt payments and savings: the median paid.</item>
 /// <item>Income is the median monthly income from paychecks and other deposits; partner contributions are a
 /// separate median. What isn't allocated (income plus partner money, minus the plan) is shown
@@ -127,7 +127,7 @@ public static class BudgetGenerator
             }
             else if (c.Type == CategoryType.Variable)
             {
-                var trim = c.IsDiscretionary && hasCardDebt;
+                var trim = c.Priority == CategoryPriority.Low && hasCardDebt;
                 var basis = trim ? median * (100 - DiscretionaryTrimPercent) / 100 : median;
                 proposed = RoundUpToDollar(basis);
                 why = median == 0
@@ -160,7 +160,7 @@ public static class BudgetGenerator
                     _ => median == 0 ? $"No transfers to savings in the last {Months(n)}." : $"You moved a median of {Money(median)} a month to savings.",
                 };
             }
-            return new ProposedLimit(c.Id, c.Name, c.Type, c.CurrentLimitCents, median, proposed, why, monthly, c.IsDiscretionary);
+            return new ProposedLimit(c.Id, c.Name, c.Type, c.CurrentLimitCents, median, proposed, why, monthly, c.Priority);
         }).ToList();
 
         // Milestone 5 (DECISIONS.md 89): with your cards' minimums known, the card-payment category is the sum of the

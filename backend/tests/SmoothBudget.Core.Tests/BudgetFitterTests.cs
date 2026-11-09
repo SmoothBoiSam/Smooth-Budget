@@ -9,7 +9,7 @@ public class BudgetFitterTests
         Groceries = Guid.NewGuid(), Gas = Guid.NewGuid(), EatingOut = Guid.NewGuid(), Shopping = Guid.NewGuid();
 
     private static ProposedLimit L(Guid id, string name, CategoryType type, long cents, bool discretionary = false) =>
-        new(id, name, type, cents, cents, cents, $"Usually {cents / 100}.", [cents], discretionary);
+        new(id, name, type, cents, cents, cents, $"Usually {cents / 100}.", [cents], discretionary ? CategoryPriority.Low : CategoryPriority.Medium);
 
     /// <summary>Bills 1,650 + card minimums 160 + savings habit 100 + groceries 400 + gas 150 + eating out 200 + shopping 100 = 2,760.</summary>
     private static BudgetProposal Plan(long income) => new(3, income, "Payday forecast.", [], [
@@ -52,6 +52,22 @@ public class BudgetFitterTests
         Assert.Equal((320_00L, 120_00L, 0L, 0L), (Limit(f, Groceries), Limit(f, Gas), Limit(f, EatingOut), Limit(f, Shopping)));
         Assert.Equal((290_00L, 510_00L), (f.ShortCents, f.SqueezedCents));
         Assert.True(f.Proposal.SpendsMoreThanIncome);
+    }
+
+    [Fact]
+    public void Must_have_spending_is_squeezed_only_after_important_spending_is_at_its_floor()
+    {
+        // Groceries marked must have, gas left important (DECISIONS.md 182). $480 short: savings 100, nice-to-have 300,
+        // then gas gives its 30 (down to 80%, 120) before groceries gives 50 of its 80.
+        var plan = Plan(2_280_00);
+        plan = plan with { Categories = plan.Categories.Select(c => c.CategoryId == Groceries ? c with { Priority = CategoryPriority.High } : c).ToList() };
+        var f = BudgetFitter.Fit(plan, NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
+        Assert.Equal((120_00L, 350_00L), (Limit(f, Gas), Limit(f, Groceries)));
+        Assert.Equal((0L, 480_00L), (f.ShortCents, f.SqueezedCents));
+
+        // $360 short: the savings habit (100) and nice-to-have spending (260) cover it, so gas and groceries stay whole.
+        var light = BudgetFitter.Fit(Plan(2_400_00) with { Categories = plan.Categories }, NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
+        Assert.Equal((150_00L, 400_00L), (Limit(light, Gas), Limit(light, Groceries)));
     }
 
     [Fact]
@@ -98,7 +114,7 @@ public class BudgetFitterTests
         var month = new BudgetMonthCalendar().MonthContaining(new DateOnly(2026, 10, 20));
         var cats = new List<GeneratorCategory>
         {
-            new(Groceries, "Groceries", CategoryType.Variable, false, 0), new(EatingOut, "Eating out", CategoryType.Variable, true, 0),
+            new(Groceries, "Groceries", CategoryType.Variable, CategoryPriority.Medium, 0), new(EatingOut, "Eating out", CategoryType.Variable, CategoryPriority.Low, 0),
         };
         var txns = new List<BudgetTransaction>
         {
@@ -109,7 +125,7 @@ public class BudgetFitterTests
             overrides: new BudgetOverrides(1_234_00, "Your Payday forecast.", new Dictionary<Guid, long> { [EatingOut] = 99_00 }));
         Assert.Equal((1_234_00L, "Your Payday forecast."), (p.IncomeCents, p.IncomeExplanation));
         Assert.Equal((300_00L, 99_00L), (p.Categories[0].ProposedCents, p.Categories[1].ProposedCents));
-        Assert.True(p.Categories[1].IsDiscretionary);
+        Assert.Equal(CategoryPriority.Low, p.Categories[1].Priority);
         Assert.Equal("You set this limit, so it stays as you set it.", p.Categories[1].Explanation);
     }
 }

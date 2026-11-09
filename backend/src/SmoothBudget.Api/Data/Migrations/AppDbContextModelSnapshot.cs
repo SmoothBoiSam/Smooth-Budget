@@ -385,17 +385,20 @@ namespace SmoothBudget.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("HouseholdId")
                         .HasColumnType("uuid");
-
-                    b.Property<bool>("IsDiscretionary")
-                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsHidden")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsSplit")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("KeptUnusedUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("LimitSetByUser")
                         .HasColumnType("boolean");
@@ -411,6 +414,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
@@ -965,9 +971,15 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<int?>("Kind")
                         .HasColumnType("integer");
 
+                    b.Property<string>("MergedIntoKey")
+                        .HasColumnType("text");
+
                     b.Property<string>("Name")
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
+
+                    b.Property<string>("NotSameAsKey")
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("UpdatedUtc")
                         .HasColumnType("timestamp with time zone");

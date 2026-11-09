@@ -65,13 +65,13 @@ public static class CategoryMerge
                 var picked = all.Where(c => fromIds.Contains(c.Id)).ToList();
                 if (picked.Count == 0)
                     return (null, Error("fromIds", "Pick at least one category to merge."));
-                // The kind most of the money was budgeted as; discretionary only if every one was (essentials are squeezed last).
+                // The kind most of the money was budgeted as, at the highest priority among them (squeezed no sooner than any was).
                 var type = picked.GroupBy(c => c.Type)
                     .OrderByDescending(g => g.Sum(c => c.MonthlyLimitCents)).ThenByDescending(g => g.Count()).First().Key;
                 into = new Category
                 {
                     Id = Guid.NewGuid(), HouseholdId = householdId, Name = newName!, Type = type,
-                    IsDiscretionary = type == CategoryType.Variable && picked.All(c => c.IsDiscretionary),
+                    Priority = type == CategoryType.Variable ? picked.Max(c => c.Priority) : CategoryPriority.Medium,
                     IsSplit = picked.Any(c => c.IsSplit), SplitPercent = picked.FirstOrDefault(c => c.IsSplit)?.SplitPercent ?? 50m,
                     SortOrder = picked.Min(c => c.SortOrder),
                 };

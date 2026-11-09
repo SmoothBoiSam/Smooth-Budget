@@ -99,6 +99,18 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(0, s.UncategorizedCount);
         Assert.Equal("healthy", s.Status);
         Assert.NotNull(s.LastUpdatedUtc);
+        Assert.False(s.IncomeUnknown);
+    }
+
+    [Fact]
+    public async Task Home_says_when_no_income_is_set_to_check_the_plan_against()
+    {
+        // DECISIONS.md 182: with limits but no income figure, Left to Spend can't tell whether the plan fits.
+        SetDenverNoon(2026, 11, 20);
+        var (client, _) = await RegisterAsync();
+        Assert.False((await SummaryAsync(client)).IncomeUnknown);
+        await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Groceries", SmoothBudget.Core.Budgeting.CategoryType.Variable, 400_00), Json);
+        Assert.True((await SummaryAsync(client)).IncomeUnknown);
     }
 
     [Fact]

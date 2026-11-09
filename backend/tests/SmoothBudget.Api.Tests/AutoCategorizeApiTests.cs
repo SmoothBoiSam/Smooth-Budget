@@ -225,7 +225,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         var carCare = Assert.Single(suggestions);
         Assert.Equal(("Car care", "Variable", 2), (carCare.Name, carCare.Type, carCare.TransactionCount));
 
-        Assert.True((await c.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Car care", CategoryType.Variable, 100_00, false), Json)).IsSuccessStatusCode);
+        Assert.True((await c.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Car care", CategoryType.Variable, 100_00), Json)).IsSuccessStatusCode);
 
         Assert.All((await All(c)).Where(t => t.Merchant is "QUICK LUBE" or "TIRE SHOP"), t => Assert.Equal(("Car care", true), (t.CategoryName, t.NeedsReview)));
         Assert.Empty((await c.GetFromJsonAsync<List<SuggestedCategoryDto>>("/api/transactions/suggested-categories", Json))!);
@@ -598,7 +598,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         await c.PatchAsJsonAsync($"/api/transactions/{walmart.Id}", new UpdateTransactionRequest(Id("Groceries"), false, "WAL-MART"), Json);
         // A "this month only" limit on Groceries: the merged category gets it plus Eating out's usual limit this month.
         await c.PutAsJsonAsync($"/api/budget/categories/{Id("Groceries")}",
-            new UpdateCategoryRequest("Groceries", CategoryType.Variable, 500_00, false, false, "month"), Json);
+            new UpdateCategoryRequest("Groceries", CategoryType.Variable, 500_00, null, false, "month"), Json);
 
         // A name you already use (and isn't being merged) is turned away; so is a merge with nothing to merge.
         var taken = await c.PostAsJsonAsync("/api/budget/categories/merge", new MergeCategoriesRequest([Id("Groceries")], NewName: "gas"), Json);
@@ -614,7 +614,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
         Assert.DoesNotContain(cats, x => x.Name is "Groceries" or "Eating out");
         var food = cats.Single(x => x.Name == "Food");
-        Assert.Equal(("Variable", 600_00L, false), (food.Type, food.MonthlyLimitCents, food.IsDiscretionary)); // groceries were essential
+        Assert.Equal(("Variable", 600_00L, CategoryPriority.Medium), (food.Type, food.MonthlyLimitCents, food.Priority)); // groceries were essential, so not low priority
         Assert.All(await All(c), t => Assert.Equal("Food", t.CategoryName)); // the rule-filed Walmart charge too
         Assert.Equal("Food", (await c.GetFromJsonAsync<List<RuleDto>>("/api/rules", Json))!.Single(r => r.Pattern == "WAL-MART").CategoryName);
         using (var scope = app.Services.CreateScope())

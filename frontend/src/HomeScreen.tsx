@@ -247,6 +247,14 @@ function Summary({ summary: s }: { summary: HomeSummary }) {
             </a>
           </li>
         )}
+        {s.incomeUnknown && (
+          <li>
+            <a href="#/budget/plan" className="block rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
+              No income is set for this month, so Left to Spend can’t check your plan against your money.{' '}
+              <span className="font-semibold">Set it ›</span>
+            </a>
+          </li>
+        )}
         {(s.cashWarnings ?? []).map((w) => (
           <li key={w.account}>
             <a href="#/payday" className="flex justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-red-800">

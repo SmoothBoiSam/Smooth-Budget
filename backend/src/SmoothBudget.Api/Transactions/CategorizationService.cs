@@ -305,7 +305,7 @@ public class CategoryDiscoveryService(AppDbContext db, CategorizationService cat
                 t.IsTransfer && t.AmountCents > 0 && t.Category != null && t.Category.Type == CategoryType.SavingsTransfer,
                 t.CategorySource == CategorySource.User && !t.IsTransfer && t.Category != null ? t.Category.Name : null,
                 t.Category != null ? t.Category.Type : CategoryType.Variable,
-                t.Category != null && t.Category.IsDiscretionary))
+                t.Category != null && t.Category.Priority == CategoryPriority.Low))
             .ToListAsync(ct);
 
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId).ToListAsync(ct);
@@ -349,7 +349,7 @@ public class CategoryDiscoveryService(AppDbContext db, CategorizationService cat
                 c = new Category
                 {
                     Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = n.Type, MonthlyLimitCents = 0,
-                    IsDiscretionary = n.Type == CategoryType.Variable && n.IsDiscretionary, SortOrder = order++,
+                    Priority = n.Type == CategoryType.Variable && n.IsDiscretionary ? CategoryPriority.Low : CategoryPriority.Medium, SortOrder = order++,
                 };
                 db.Categories.Add(c);
                 categories.Add(c);

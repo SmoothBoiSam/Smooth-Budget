@@ -40,7 +40,7 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
         await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto("Jane Partner"), Json);
         var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
         var rent = cats.Single(x => x.Name == "Rent");
-        await c.PutAsJsonAsync($"/api/budget/categories/{rent.Id}", new UpdateCategoryRequest("Rent", CategoryType.FixedBill, 1_650_00, false, false, "permanent"), Json);
+        await c.PutAsJsonAsync($"/api/budget/categories/{rent.Id}", new UpdateCategoryRequest("Rent", CategoryType.FixedBill, 1_650_00, null, false, "permanent"), Json);
         var checking = (await (await c.PostAsJsonAsync("/api/accounts", new { name = "Test Checking", type = "Checking", mask = "1111" }, Json))
             .Content.ReadFromJsonAsync<AccountDto>(Json))!.Id;
         return (c, checking, rent.Id, cats.Single(x => x.Name == "Groceries").Id);

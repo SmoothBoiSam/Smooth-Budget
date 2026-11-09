@@ -104,7 +104,7 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         }
 
         // Review's "new bill category" sends no amount.
-        var created = await (await c.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Streamflix", CategoryType.FixedBill, 0, false), Json))
+        var created = await (await c.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Streamflix", CategoryType.FixedBill, 0), Json))
             .Content.ReadFromJsonAsync<JsonElement>(Json);
         var id = created.GetProperty("id").GetGuid();
         var r = await (await c.PatchAsJsonAsync($"/api/transactions/{charges[^1].Id}", new UpdateTransactionRequest(id, false, null), Json))

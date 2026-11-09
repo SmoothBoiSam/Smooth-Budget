@@ -91,7 +91,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
                       <span className="truncate text-sm font-medium">
                         {p.name}
                         {p.custom && <span className="ml-2 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">Just for you</span>}
-                        {p.status === 'hidden' && <span className="ml-2 text-xs font-normal text-slate-400">(hidden now)</span>}
+                        {p.status === 'hidden' && <span className="ml-2 text-xs font-normal text-slate-400">(archived now)</span>}
                       </span>
                       <span className="shrink-0 text-sm tabular-nums text-slate-600">~{formatCents(p.monthlyCents)}/mo</span>
                     </span>
@@ -110,7 +110,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
       {d.unused.length > 0 && (
         <section className="mt-6" aria-labelledby="setup-hide">
           <h3 id="setup-hide" className="text-sm font-semibold text-slate-700">Categories you don’t use</h3>
-          <p className="mt-1 text-xs text-slate-500">Checked ones are hidden. Hidden categories keep their history and can come back from the Budget tab.</p>
+          <p className="mt-1 text-xs text-slate-500">Checked ones are archived. Archived categories keep their history and can come back from Budget → Categories → Archived.</p>
           <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
             {d.unused.map((u) => (
               <li key={u.id}>

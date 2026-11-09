@@ -19,6 +19,7 @@ public static class RecurringEndpoints
             if (req.Name is { Length: > 120 }) errors["name"] = ["Use up to 120 characters."];
             if (req.DueDay is < 1 or > 31) errors["dueDay"] = ["Pick a day from 1 to 31."];
             if (req.Kind is { } k && !Enum.IsDefined(k)) errors["kind"] = ["Bill or Subscription."];
+            if (req.MergeInto is { Length: > 200 } || req.NotSameAs is { Length: > 200 }) errors["mergeInto"] = ["Unknown bill."];
             if (errors.Count > 0) return Results.ValidationProblem(errors);
             return await svc.UpdateAsync(ctx.User.HouseholdId(), req, ct) ? Results.NoContent() : Results.NotFound();
         });

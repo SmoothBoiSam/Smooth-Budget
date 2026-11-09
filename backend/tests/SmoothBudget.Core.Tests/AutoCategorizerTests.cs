@@ -162,7 +162,7 @@ public class GeneratorPartnerTests
             new BudgetTransaction(rent, m.Start.AddDays(1), 1_650_00),
         }).ToList();
 
-        var p = BudgetGenerator.Propose(months, [new GeneratorCategory(rent, "Rent", CategoryType.FixedBill, false, 1_650_00)], t, false);
+        var p = BudgetGenerator.Propose(months, [new GeneratorCategory(rent, "Rent", CategoryType.FixedBill, CategoryPriority.Medium, 1_650_00)], t, false);
 
         Assert.Equal(1_700_86 + 760_00, p.IncomeCents);
         Assert.Equal(800_00, p.PartnerCents);

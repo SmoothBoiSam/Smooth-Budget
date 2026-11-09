@@ -250,7 +250,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         Category New(string name, CategoryType type, long limit, bool discretionary = false) => new()
         {
             Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = type,
-            MonthlyLimitCents = limit, IsDiscretionary = discretionary, SortOrder = order++,
+            MonthlyLimitCents = limit, Priority = discretionary ? CategoryPriority.Low : CategoryPriority.Medium, SortOrder = order++,
         };
         return
         [

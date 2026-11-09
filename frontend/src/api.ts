@@ -29,6 +29,8 @@ export interface HomeSummary {
   unfiledSpendingCents: number
   /** How far the plan goes beyond the month's money (it comes off Left to Spend). */
   overplannedCents: number
+  /** No income figure this month while there is a plan: Left to Spend can't check the plan against your money. */
+  incomeUnknown: boolean
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */
@@ -114,7 +116,7 @@ export interface Category {
   name: string
   type: 'FixedBill' | 'Variable' | 'DebtPayment' | 'SavingsTransfer'
   monthlyLimitCents: number
-  isDiscretionary: boolean
+  priority: Priority
   sortOrder: number
 }
 
@@ -258,7 +260,7 @@ export interface BudgetCategoryLine {
   id: string
   name: string
   type: Category['type']
-  isDiscretionary: boolean
+  priority: Priority
   limitCents: number
   hasMonthOverride: boolean
   spentCents: number
@@ -462,15 +464,15 @@ export interface GeneratorProposal {
 export type SweepTarget = 'Debt' | 'Savings' | 'Split'
 
 export const budgetEditApi = {
-  createCategory: (name: string, type: Category['type'], limitCents: number, isDiscretionary: boolean) =>
-    request<{ id: string }>('POST', '/budget/categories', { name, type, limitCents, isDiscretionary }),
+  createCategory: (name: string, type: Category['type'], limitCents: number, priority?: Priority) =>
+    request<{ id: string }>('POST', '/budget/categories', { name, type, limitCents, priority: priority ?? null }),
   updateCategory: (
     id: string,
     body: {
       name: string
       type: Category['type']
       limitCents: number
-      isDiscretionary: boolean
+      priority: Priority
       isHidden: boolean
       applyTo: 'month' | 'permanent'
       /** Hand the limit back to the automatic budget. */
@@ -493,7 +495,14 @@ export const budgetEditApi = {
    */
   resetCategoriesFromBank: () =>
     request<{ cleared: number; filed: number; guesses: number; stillUncategorized: number; bankNotes: string[] }>('POST', '/budget/categories/reset-from-bank'),
-  hiddenCategories: () => request<{ id: string; name: string; type: Category['type']; monthlyLimitCents: number }[]>('GET', '/budget/categories/hidden'),
+  /** Archived categories (what "hidden" was), with when each was last used (DECISIONS.md 180). */
+  archivedCategories: () => request<ArchivedCategory[]>('GET', '/budget/categories/hidden'),
+  /** Spending and bill lines nothing has been filed under in about 3 months: suggested for archiving. */
+  unusedCategories: () => request<ArchivedCategory[]>('GET', '/budget/categories/unused'),
+  archiveCategory: (id: string) => request<{ name: string; releasedToReview: number }>('POST', `/budget/categories/${id}/archive`),
+  restoreCategory: (id: string) => request<{ name: string }>('POST', `/budget/categories/${id}/restore`),
+  /** "Keep it" on the archive suggestion: not suggested again for a while. */
+  keepCategory: (id: string) => request<void>('POST', `/budget/categories/${id}/keep`),
   setIncome: (incomeCents: number, partnerCents?: number, automatic = false) =>
     request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null, automatic }),
   closeMonth: (start: string) => request<void>('POST', `/budget/months/${start}/close`),
@@ -698,6 +707,18 @@ export interface RecurringItem {
   merchantWide: boolean
   /** Every charge found for it, newest first. */
   charges: { date: string; amountCents: number }[]
+  /** An older bill that may be this one before its price changed (DECISIONS.md 181). */
+  sameAs: { key: string; name: string; amountCents: number; firstDate: string; lastDate: string; occurrences: number } | null
+  /** While that's being asked: the newer bill this one may have become. */
+  replacedBy: string | null
+}
+
+export interface ArchivedCategory {
+  id: string
+  name: string
+  type: Category['type']
+  monthlyLimitCents: number
+  lastUsed: string | null
 }
 
 export interface RecurringSummary {
@@ -718,6 +739,10 @@ export interface RecurringUpdate {
   dismissed?: boolean
   canceled?: boolean
   acknowledgePrice?: boolean
+  /** This bill is the same as that one (its price changed): its charges join it (DECISIONS.md 181). */
+  mergeInto?: string
+  /** This bill isn't the same as that one: stop asking. */
+  notSameAs?: string
 }
 
 export const recurringApi = {
@@ -1116,4 +1141,17 @@ export const isNewFind = (i: RecurringItem) =>
 
 /** What Review → Bills asks about (DECISIONS.md 152): new finds, price changes, charges that stopped, possible duplicates. */
 export const needsLook = (i: RecurringItem) =>
-  isNewFind(i) || i.status === 'priceUp' || i.status === 'priceDown' || i.status === 'possiblyCanceled' || i.possibleDuplicate
+  isNewFind(i) ||
+  i.status === 'priceUp' ||
+  i.status === 'priceDown' ||
+  (i.status === 'possiblyCanceled' && !i.replacedBy) ||
+  i.possibleDuplicate ||
+  i.sameAs != null
+
+/**
+ * How much a spending category matters when money is short (DECISIONS.md 182): the automatic budget squeezes Low
+ * (nice to have) first, then Medium (important), then High (must have).
+ */
+export type Priority = 'Low' | 'Medium' | 'High'
+
+export const priorityLabels: Record<Priority, string> = { High: 'Must have', Medium: 'Important', Low: 'Nice to have' }

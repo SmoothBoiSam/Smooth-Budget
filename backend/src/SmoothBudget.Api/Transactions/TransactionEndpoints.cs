@@ -46,7 +46,7 @@ public record SearchResultDto(IReadOnlyList<TransactionDto> Items, int Total, lo
 /// <param name="BillChargesMoved">Filed under a bill: that bill's other charges that moved there too (DECISIONS.md 158).</param>
 public record UpdateTransactionResult(TransactionDto Transaction, int RuleAppliedTo, int BillChargesMoved = 0);
 
-public record CategoryDto(Guid Id, string Name, string Type, long MonthlyLimitCents, bool IsDiscretionary, int SortOrder);
+public record CategoryDto(Guid Id, string Name, string Type, long MonthlyLimitCents, CategoryPriority Priority, int SortOrder);
 public record RuleDto(Guid Id, string Pattern, Guid CategoryId, string CategoryName, DateTime CreatedUtc);
 
 public static partial class TransactionEndpoints
@@ -312,7 +312,7 @@ public static partial class TransactionEndpoints
         group.MapGet("/budget/categories", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
             await db.Categories.Where(c => c.HouseholdId == ctx.User.HouseholdId() && !c.IsHidden)
                 .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
-                .Select(c => new CategoryDto(c.Id, c.Name, c.Type.ToString(), c.MonthlyLimitCents, c.IsDiscretionary, c.SortOrder))
+                .Select(c => new CategoryDto(c.Id, c.Name, c.Type.ToString(), c.MonthlyLimitCents, c.Priority, c.SortOrder))
                 .ToListAsync(ct));
 
         group.MapGet("/rules", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>

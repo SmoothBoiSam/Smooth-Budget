@@ -12,8 +12,8 @@ public class CardInterestTests
     private static readonly Guid Groceries = Guid.NewGuid(), Interest = Guid.NewGuid();
     private static readonly GeneratorCategory[] Cats =
     [
-        new(Groceries, "Groceries", CategoryType.Variable, false, 400_00),
-        new(Interest, "Card interest", CategoryType.FixedBill, false, 0),
+        new(Groceries, "Groceries", CategoryType.Variable, CategoryPriority.Medium, 400_00),
+        new(Interest, "Card interest", CategoryType.FixedBill, CategoryPriority.Medium, 0),
     ];
     private static readonly DebtInput Visa = new(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);
     private static readonly DebtInput Store = new(Guid.NewGuid(), "Store Card", 800_00, 1999, 35_00);
@@ -98,7 +98,7 @@ public class CardInterestTests
     {
         // DECISIONS.md 172: the Visa's $60 minimum includes about $41.65 of interest, already on the Card interest line.
         var card = Guid.NewGuid();
-        GeneratorCategory[] cats = [.. Cats, new(card, "Credit card payment", CategoryType.DebtPayment, false, 0)];
+        GeneratorCategory[] cats = [.. Cats, new(card, "Credit card payment", CategoryType.DebtPayment, CategoryPriority.Medium, 0)];
         var p = BudgetGenerator.Propose(ThreeMonths, cats, History(), hasCardDebt: true, cardDebts: [Visa],
             overrides: new BudgetOverrides(DebtExtraCents: 100_00));
         var line = p.Categories.Single(c => c.CategoryId == card);

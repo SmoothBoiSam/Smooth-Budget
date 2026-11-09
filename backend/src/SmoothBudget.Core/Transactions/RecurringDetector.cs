@@ -161,6 +161,38 @@ public static class RecurringDetector
             charges[0].Date, last.Date, next, charges.Count, last.AccountId, last.CategoryId, charges.Select(c => c.Id).ToList());
     }
 
+    /// <summary>
+    /// Bills that may be one bill whose price changed (DECISIONS.md 181): one merchant that bills several amounts is
+    /// tracked per amount, so a new price starts a second bill. A pair qualifies when both are on the same schedule, from
+    /// the same merchant (or one whose name starts with the same word), the older one's last charge comes before the
+    /// newer one's first, about one interval apart, and the prices are within 3× of each other. The user decides.
+    /// </summary>
+    public static IReadOnlyList<(RecurringSeries Older, RecurringSeries Newer)> SameBillCandidates(IReadOnlyList<RecurringSeries> series)
+    {
+        var pairs = new List<(RecurringSeries, RecurringSeries)>();
+        foreach (var older in series)
+        {
+            var band = Bands.Single(b => b.F == older.Frequency);
+            var newer = series
+                .Where(n => n.Key != older.Key && n.Frequency == older.Frequency && SameMerchant(n.MerchantKey, older.MerchantKey)
+                            && n.FirstDate > older.LastDate
+                            && n.FirstDate.DayNumber - older.LastDate.DayNumber is var gap && gap >= band.Min - 5 && gap <= band.Max + 10
+                            && Math.Max(n.AmountCents, older.AmountCents) <= 3 * Math.Min(n.AmountCents, older.AmountCents))
+                .OrderBy(n => n.FirstDate).FirstOrDefault();
+            if (newer is not null)
+                pairs.Add((older, newer));
+        }
+        return pairs;
+    }
+
+    private static bool SameMerchant(string a, string b)
+    {
+        if (a == b) return true;
+        static string First(string k) => k.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+        var fa = First(a);
+        return fa.Length >= 4 && fa == First(b);
+    }
+
     /// <summary>Rent, phone, utilities and insurance, by theme or by the words bills use ("INS PREM", "WIRELESS", "POWER &amp; LIGHT").</summary>
     private static bool BillLike(SpendingTheme? theme, string merchant) =>
         theme is { Name: "Rent" or "Phone" or "Utilities & internet" or "Car insurance" }

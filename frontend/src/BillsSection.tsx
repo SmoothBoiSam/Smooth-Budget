@@ -29,6 +29,8 @@ export default function BillsSection({
   const [s, setS] = useState<RecurringSummary | null>(null)
   const [skipped, setSkipped] = useState<string[]>([])
   const [open, setOpen] = useState<RecurringItem | null>(null)
+  /** A bill tapped in the list (or linked from Budget): shown as its own card, with its charges and what to do. */
+  const [focus, setFocus] = useState<string | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -51,7 +53,7 @@ export default function BillsSection({
       // A link to one bill (#/review/bills/<key>, from the Budget tab) opens it.
       const key = decodeURIComponent(window.location.hash.replace(/^#\/?review\/bills\/?/, ''))
       if (key) {
-        setOpen(summary.items.find((i) => i.key === key) ?? null)
+        setFocus(summary.items.some((i) => i.key === key) ? key : null)
         window.history.replaceState(null, '', '#/review/bills')
       }
     } catch (e) {
@@ -69,6 +71,7 @@ export default function BillsSection({
       await recurringApi.update(u)
       setNotice(message)
       setOpen(null)
+      setFocus(null)
       await load()
     } catch (e) {
       fail(e)
@@ -80,6 +83,7 @@ export default function BillsSection({
       const r = await recurringApi.trackAsBill(i.key)
       setNotice(`${r.name} is its own bill line now, and its charges moved there. Future charges follow it.`)
       setOpen(null)
+      setFocus(null)
       await load()
     } catch (e) {
       fail(e)
@@ -91,7 +95,13 @@ export default function BillsSection({
   // Bills and subscriptions are one list (DECISIONS.md 143).
   const bills = s?.items ?? []
   const waiting = alerts.filter((i) => !skipped.includes(i.key))
-  const current = mode === 'cards' ? waiting[0] : undefined
+  const focused = focus ? s?.items.find((i) => i.key === focus) : undefined
+  const current = focused ?? (mode === 'cards' ? waiting[0] : undefined)
+  const show = (i: RecurringItem) => {
+    setNotice(null)
+    setFocus(i.key)
+    window.scrollTo(0, 0)
+  }
 
   return (
     <div>
@@ -107,26 +117,34 @@ export default function BillsSection({
 
       {s && current && (
         <>
-          <p className="mt-3 text-xs text-slate-500">
-            <span className="font-semibold text-slate-700">{waiting.length} to look at</span>
-            {skipped.length > 0 && (
-              <>
-                {' · '}
-                <button type="button" onClick={() => setSkipped([])} className="underline">
-                  show {skipped.length} skipped
-                </button>
-              </>
-            )}
-          </p>
+          {focused ? (
+            <button type="button" onClick={() => setFocus(null)} className="mt-3 text-xs font-medium text-slate-600 underline">
+              ‹ All bills
+            </button>
+          ) : (
+            <p className="mt-3 text-xs text-slate-500">
+              <span className="font-semibold text-slate-700">{waiting.length} to look at</span>
+              {skipped.length > 0 && (
+                <>
+                  {' · '}
+                  <button type="button" onClick={() => setSkipped([])} className="underline">
+                    show {skipped.length} skipped
+                  </button>
+                </>
+              )}
+            </p>
+          )}
           <BillCard
             key={current.key}
             item={current}
             onUpdate={update}
             onOpen={() => setOpen(current)}
             onTrackAsBill={trackAsBill}
+            skipLabel={focused ? 'Back to all bills' : 'Skip for now'}
             onSkip={() => {
               setNotice(null)
-              setSkipped((k) => [...k, current.key])
+              if (focused) setFocus(null)
+              else setSkipped((k) => [...k, current.key])
             }}
           />
         </>
@@ -159,14 +177,14 @@ export default function BillsSection({
               <ul className="mt-2 space-y-2">
                 {alerts.map((i) => (
                   <li key={i.key}>
-                    <Alert item={i} onUpdate={update} onOpen={() => setOpen(i)} onTrackAsBill={trackAsBill} />
+                    <Alert item={i} onUpdate={update} onOpen={() => show(i)} onTrackAsBill={trackAsBill} />
                   </li>
                 ))}
               </ul>
             </section>
           )}
 
-          <List title="All bills" items={bills} counted={counted} onOpen={setOpen} />
+          <List title="All bills" items={bills} counted={counted} onOpen={show} />
 
           {s.items.length === 0 && (
             <p className="mt-6 rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
@@ -209,6 +227,37 @@ function Alert({
   onTrackAsBill: (i: RecurringItem) => void
 }) {
   const box = 'rounded-xl px-4 py-3 text-sm ring-1'
+  // One store, two prices: maybe one bill whose price changed (DECISIONS.md 181). Asked before anything else about it.
+  if (i.sameAs) {
+    const old = i.sameAs
+    const started = i.charges.length > 0 ? i.charges[i.charges.length - 1].date : i.lastDate
+    return (
+      <div className={`${box} bg-amber-50 text-amber-900 ring-amber-200`}>
+        <p>
+          <span className="font-semibold">Same bill, new price?</span> {i.name} at <span className="font-semibold tabular-nums">{formatCents(i.amountCents)}</span>{' '}
+          started {formatDay(started)}, right after the <span className="tabular-nums">{formatCents(old.amountCents)}</span> one
+          {old.name !== i.name && ` (${old.name})`} stopped on {formatDay(old.lastDate)}.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() =>
+              onUpdate(
+                { key: old.key, mergeInto: i.key },
+                `${i.name} is one bill now: ${formatCents(old.amountCents)} until ${formatDay(old.lastDate)}, ${formatCents(i.amountCents)} since.`,
+              )
+            }
+            className="underline"
+          >
+            Yes, merge them
+          </button>
+          <button type="button" onClick={() => onUpdate({ key: old.key, notSameAs: i.key }, `Kept ${i.name} and the ${formatCents(old.amountCents)} one apart.`)} className="underline">
+            No, they’re different
+          </button>
+        </div>
+      </div>
+    )
+  }
   if (isNewFind(i))
     return (
       <div className={`${box} bg-white text-slate-700 ring-slate-200`}>
@@ -265,6 +314,7 @@ function Alert({
         </div>
       </div>
     )
+  if (!i.possibleDuplicate) return null
   return (
     <div className={`${box} bg-amber-50 text-amber-900 ring-amber-200`}>
       <p>
@@ -340,12 +390,14 @@ function BillCard({
   onOpen,
   onTrackAsBill,
   onSkip,
+  skipLabel,
 }: {
   item: RecurringItem
   onUpdate: (u: RecurringUpdate, m: string) => void
   onOpen: () => void
   onTrackAsBill: (i: RecurringItem) => void
   onSkip: () => void
+  skipLabel: string
 }) {
   return (
     <article className="mt-2 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
@@ -358,16 +410,18 @@ function BillCard({
       <p className="truncate text-xs text-slate-500">
         {[i.accountName, i.categoryName ?? 'No category'].filter(Boolean).join(' · ')}
       </p>
-      <div className="mt-3">
-        <Alert item={i} onUpdate={onUpdate} onOpen={onOpen} onTrackAsBill={onTrackAsBill} />
-      </div>
+      {needsLook(i) && (
+        <div className="mt-3">
+          <Alert item={i} onUpdate={onUpdate} onOpen={onOpen} onTrackAsBill={onTrackAsBill} />
+        </div>
+      )}
       <ChargeHistory item={i} />
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium">
         <button type="button" onClick={onOpen} className="rounded-xl bg-slate-100 py-2.5 text-slate-700">
           Edit
         </button>
         <button type="button" onClick={onSkip} className="rounded-xl bg-slate-100 py-2.5 text-slate-700">
-          Skip for now
+          {skipLabel}
         </button>
       </div>
     </article>

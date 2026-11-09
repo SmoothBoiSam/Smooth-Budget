@@ -6,11 +6,13 @@ using SmoothBudget.Core.Budgeting;
 
 namespace SmoothBudget.Api.Budget;
 
-public record CategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary);
+/// <param name="Priority">For spending categories (DECISIONS.md 182); left out, important.</param>
+public record CategoryRequest(string Name, CategoryType Type, long LimitCents, CategoryPriority? Priority = null);
 
 /// <param name="ApplyTo">"permanent" changes the usual limit from now on; "month" changes only the current budget month.</param>
 /// <param name="Automatic">Hand the limit back to the automatic budget (it stops being yours).</param>
-public record UpdateCategoryRequest(string Name, CategoryType Type, long LimitCents, bool IsDiscretionary, bool IsHidden, string ApplyTo, bool Automatic = false);
+/// <param name="Priority">Left out, it stays as it is.</param>
+public record UpdateCategoryRequest(string Name, CategoryType Type, long LimitCents, CategoryPriority? Priority, bool IsHidden, string ApplyTo, bool Automatic = false);
 
 public record ReorderRequest(List<Guid> Ids);
 /// <param name="Automatic">Go back to income from the Payday forecast.</param>
@@ -59,7 +61,7 @@ public static class BudgetEndpoints
             var c = new Category
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = req.Type, MonthlyLimitCents = req.LimitCents,
-                IsDiscretionary = req.IsDiscretionary, SortOrder = order + 1,
+                Priority = req.Priority ?? CategoryPriority.Medium, SortOrder = order + 1,
                 // A limit you typed is yours; one added with no amount (from Review) is the automatic budget's to set (DECISIONS.md 158).
                 LimitSetByUser = req.LimitCents > 0,
             };
@@ -81,7 +83,7 @@ public static class BudgetEndpoints
 
             c.Name = name;
             c.Type = req.Type;
-            c.IsDiscretionary = req.IsDiscretionary;
+            if (req.Priority is { } priority) c.Priority = priority;
             c.IsHidden = req.IsHidden;
 
             var current = await months.EnsureCurrentAsync(householdId, ct);
@@ -202,9 +204,21 @@ public static class BudgetEndpoints
         g.MapPost("/categories/discover/apply", async (ApplyDiscoveryRequest req, HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>
             await discovery.ApplyAsync(ctx.User.HouseholdId(), req, ct));
 
-        g.MapGet("/categories/hidden", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
-            await db.Categories.Where(c => c.HouseholdId == ctx.User.HouseholdId() && c.IsHidden)
-                .OrderBy(c => c.Name).Select(c => new { c.Id, c.Name, Type = c.Type.ToString(), c.MonthlyLimitCents }).ToListAsync(ct));
+        // Archive (DECISIONS.md 180): archived is what "hidden" was. It can come back, and unused ones are suggested.
+        g.MapGet("/categories/hidden", async (HttpContext ctx, CategoryArchiveService archive, CancellationToken ct) =>
+            await archive.ArchivedAsync(ctx.User.HouseholdId(), ct));
+
+        g.MapGet("/categories/unused", async (HttpContext ctx, CategoryArchiveService archive, CancellationToken ct) =>
+            await archive.UnusedAsync(ctx.User.HouseholdId(), ct));
+
+        g.MapPost("/categories/{id:guid}/archive", async (Guid id, HttpContext ctx, CategoryArchiveService archive, CancellationToken ct) =>
+            await archive.ArchiveAsync(ctx.User.HouseholdId(), id, ct) is { } r ? Results.Ok(r) : Results.NotFound());
+
+        g.MapPost("/categories/{id:guid}/restore", async (Guid id, HttpContext ctx, CategoryArchiveService archive, CancellationToken ct) =>
+            await archive.RestoreAsync(ctx.User.HouseholdId(), id, ct) is { } name ? Results.Ok(new { Name = name }) : Results.NotFound());
+
+        g.MapPost("/categories/{id:guid}/keep", async (Guid id, HttpContext ctx, CategoryArchiveService archive, CancellationToken ct) =>
+            await archive.KeepAsync(ctx.User.HouseholdId(), id, ct) ? Results.NoContent() : Results.NotFound());
 
         // ---- Months: income, closing, sweeps
 
@@ -352,7 +366,7 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
             .ToListAsync(ct);
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && !c.IsHidden)
             .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
-            .Select(c => new GeneratorCategory(c.Id, c.Name, c.Type, c.IsDiscretionary, c.MonthlyLimitCents)).ToListAsync(ct);
+            .Select(c => new GeneratorCategory(c.Id, c.Name, c.Type, c.Priority, c.MonthlyLimitCents)).ToListAsync(ct);
         var hasCardDebt = await db.Accounts.AnyAsync(a => a.HouseholdId == householdId && a.IncludedInBudget
             && a.Type == AccountType.CreditCard && a.CurrentBalanceCents < 0, ct);
 

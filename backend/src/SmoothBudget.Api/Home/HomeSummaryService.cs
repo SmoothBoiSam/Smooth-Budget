@@ -38,7 +38,9 @@ public record HomeSummaryDto(
     IReadOnlyList<CashWarningDto>? CashWarnings = null,
     // What else comes off Left to Spend (DECISIONS.md 177-178): spending not filed yet, and a plan beyond the month's money.
     long UnfiledSpendingCents = 0,
-    long OverplannedCents = 0);
+    long OverplannedCents = 0,
+    // No income figure for this month while there is a plan: Left to Spend can't check the plan against your money (DECISIONS.md 182).
+    bool IncomeUnknown = false);
 
 /// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
 public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
@@ -156,7 +158,8 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
                 : null,
             CashWarnings: await CashWarningsAsync(householdId, ct),
             UnfiledSpendingCents: r.UnfiledSpendingCents,
-            OverplannedCents: r.OverplannedCents);
+            OverplannedCents: r.OverplannedCents,
+            IncomeUnknown: MonthData.MoneyIn(data.Row, data.Contributions) <= 0 && data.Categories.Any(c => c.LimitCents > 0));
     }
 
     /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>

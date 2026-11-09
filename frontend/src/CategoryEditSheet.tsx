@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { budgetEditApi, type BudgetCategoryLine, type Category } from './api'
+import { budgetEditApi, priorityLabels, type BudgetCategoryLine, type Category, type Priority } from './api'
 import { centsToInput, parseDollars } from './format'
 
 const typeLabels: Record<Category['type'], string> = {
@@ -11,7 +11,7 @@ const typeLabels: Record<Category['type'], string> = {
 
 /**
  * Add or edit a category (SPEC 4.3). Editing a limit asks whether it's for this month only or from now on.
- * Move up/down reorders within its group; Hide removes it from the budget without deleting history.
+ * Move up/down reorders within its group; Archive removes it from the budget without deleting history.
  */
 export default function CategoryEditSheet({
   line,
@@ -33,7 +33,7 @@ export default function CategoryEditSheet({
   const [name, setName] = useState(line?.name ?? '')
   const [type, setType] = useState<Category['type']>(line?.type ?? 'Variable')
   const [limit, setLimit] = useState(line ? centsToInput(line.limitCents) : '')
-  const [discretionary, setDiscretionary] = useState(line?.isDiscretionary ?? false)
+  const [priority, setPriority] = useState<Priority>(line?.priority ?? 'Medium')
   const [applyTo, setApplyTo] = useState<'month' | 'permanent'>(line?.hasMonthOverride ? 'month' : 'permanent')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +47,7 @@ export default function CategoryEditSheet({
     setError(null)
     try {
       await budgetEditApi.updateCategory(line.id, {
-        name: line.name, type: line.type, limitCents: line.limitCents, isDiscretionary: line.isDiscretionary, isHidden: false, applyTo: 'permanent', automatic: true,
+        name: line.name, type: line.type, limitCents: line.limitCents, priority: line.priority, isHidden: false, applyTo: 'permanent', automatic: true,
       })
       onSaved(`${line.name} is automatic again.`)
     } catch (err) {
@@ -56,25 +56,40 @@ export default function CategoryEditSheet({
     }
   }
 
-  async function save(e: FormEvent, hide = false) {
+  /** Archive (DECISIONS.md 180): out of the budget, history kept, back from Budget → Categories → Archived. */
+  async function archive() {
+    if (!line) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await budgetEditApi.archiveCategory(line.id)
+      const moved = r.releasedToReview > 0 ? ` ${r.releasedToReview} recent transactions filed under it wait in Review for another category.` : ''
+      onSaved(`${r.name} is archived.${moved}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not archive it.')
+      setBusy(false)
+    }
+  }
+
+  async function save(e: FormEvent) {
     e.preventDefault()
     if (limitCents === null) return setError('Enter the limit in dollars, like 450 or 450.00.')
     setBusy(true)
     setError(null)
     try {
       if (isNew) {
-        await budgetEditApi.createCategory(name, type, limitCents, type === 'Variable' && discretionary)
+        await budgetEditApi.createCategory(name, type, limitCents, type === 'Variable' ? priority : 'Medium')
         onSaved(`Added ${name.trim()}.`)
       } else {
         await budgetEditApi.updateCategory(line.id, {
           name,
           type,
           limitCents,
-          isDiscretionary: type === 'Variable' && discretionary,
-          isHidden: hide,
+          priority: type === 'Variable' ? priority : 'Medium',
+          isHidden: false,
           applyTo,
         })
-        onSaved(hide ? `${name.trim()} is hidden.` : applyTo === 'month' && limitChanged ? `Saved for this month only.` : 'Saved.')
+        onSaved(applyTo === 'month' && limitChanged ? `Saved for this month only.` : 'Saved.')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.')
@@ -176,13 +191,26 @@ export default function CategoryEditSheet({
         )}
 
         {type === 'Variable' && (
-          <label className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-            <input type="checkbox" checked={discretionary} onChange={(e) => setDiscretionary(e.target.checked)} className="size-5" />
-            <span className="text-sm">
-              Nice-to-have spending
-              <span className="block text-xs text-slate-500">Like eating out or shopping: trimmed first when money is tight</span>
-            </span>
-          </label>
+          <fieldset className="mt-4">
+            <legend className="text-sm font-medium text-slate-700">Priority</legend>
+            <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+              {(['High', 'Medium', 'Low'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  role="radio"
+                  aria-checked={priority === p}
+                  onClick={() => setPriority(p)}
+                  className={`rounded-md px-1 py-2 text-sm font-medium ${priority === p ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'}`}
+                >
+                  {priorityLabels[p]}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              When money is short, Nice to have is trimmed first, then Important, then Must have (never below 80% of usual).
+            </p>
+          </fieldset>
         )}
 
         {error && (
@@ -217,12 +245,12 @@ export default function CategoryEditSheet({
             <button
               type="button"
               disabled={busy}
-              onClick={(e) => {
-                if (window.confirm(`Hide ${line.name}? It leaves the budget; its past transactions stay.`)) void save(e as unknown as FormEvent, true)
+              onClick={() => {
+                if (window.confirm(`Archive ${line.name}? It leaves the budget; its history stays, and you can restore it from Budget → Categories.`)) void archive()
               }}
               className="font-medium text-red-600"
             >
-              Hide category
+              Archive category
             </button>
           </div>
         )}

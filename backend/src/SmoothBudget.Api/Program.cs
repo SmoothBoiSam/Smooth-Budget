@@ -96,6 +96,7 @@ builder.Services.AddScoped<SmoothBudget.Api.Savings.SavingsService>();
 builder.Services.AddScoped<SmoothBudget.Api.Payday.PaydayService>();
 builder.Services.AddSingleton<BudgetRefreshTracker>();
 builder.Services.AddScoped<AutoBudgetService>();
+builder.Services.AddScoped<CategoryArchiveService>();
 
 // Plaid (milestone 3). Credentials and the token-encryption key come only from environment variables.
 var plaidOptions = new PlaidOptions

@@ -126,8 +126,11 @@ public class Category
     /// <summary>You set this limit yourself, so the automatic budget leaves it alone (until you put it back to automatic).</summary>
     public bool LimitSetByUser { get; set; }
 
-    /// <summary>Eating out, shopping, entertainment: trimmed first when income falls short (SPEC section 3).</summary>
-    public bool IsDiscretionary { get; set; }
+    /// <summary>
+    /// When the month's money runs short, the automatic budget squeezes low priority spending first, then medium, then
+    /// high (DECISIONS.md 182). It replaced "nice-to-have" (which became low).
+    /// </summary>
+    public SmoothBudget.Core.Budgeting.CategoryPriority Priority { get; set; } = SmoothBudget.Core.Budgeting.CategoryPriority.Medium;
 
     public bool IsSplit { get; set; }
     public decimal SplitPercent { get; set; } = 50m;
@@ -139,6 +142,12 @@ public class Category
     /// them land here instead, so merging "Groceries" into "Food" keeps catching groceries.
     /// </summary>
     public List<string> MergedNames { get; set; } = [];
+
+    /// <summary>When it was added. Categories from before this was kept read as long ago (DECISIONS.md 180).</summary>
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>"Keep it" on the suggestion to archive it: it isn't suggested again for a while (DECISIONS.md 180).</summary>
+    public DateTime? KeptUnusedUtc { get; set; }
 }
 
 public class Transaction
@@ -356,6 +365,10 @@ public class RecurringItem
     public DateOnly? CanceledOn { get; set; }
     /// <summary>The price you acknowledged after a change, so the flag clears until it changes again.</summary>
     public long? AcknowledgedAmountCents { get; set; }
+    /// <summary>You said this is the same bill as another one (its price changed), so its charges join that one (DECISIONS.md 181).</summary>
+    public string? MergedIntoKey { get; set; }
+    /// <summary>You said it isn't the same bill as this one, so the app stops asking.</summary>
+    public string? NotSameAsKey { get; set; }
     public DateTime UpdatedUtc { get; set; }
 }
 

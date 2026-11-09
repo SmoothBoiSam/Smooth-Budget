@@ -55,6 +55,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [month, setMonth] = useState<Transaction[]>([])
   const [bills, setBills] = useState<RecurringItem[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [unusedCount, setUnusedCount] = useState(0)
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
   const [error, setError] = useState<string | null>(null)
@@ -73,16 +74,18 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   const load = useCallback(async () => {
     try {
-      const [s, m, c, rec] = await Promise.all([
+      const [s, m, c, rec, unused] = await Promise.all([
         budgetSummaryApi.get(),
         budgetApi.monthTransactions(),
         budgetApi.categories(),
         recurringApi.summary().catch(() => null), // the bill list is extra: the budget still shows without it
+        budgetEditApi.unusedCategories().catch(() => []), // so is the archive suggestion (DECISIONS.md 180)
       ])
       setSummary(s)
       setMonth(m.items)
       setBills(rec?.items ?? [])
       setCategories(c)
+      setUnusedCount(unused.length)
       setError(null)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onSignedOut()
@@ -172,7 +175,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {!summary && !error && <Loading />}
 
       {summary && view.kind === 'overview' && (
-        <Overview summary={summary} bills={bills} />
+        <Overview summary={summary} bills={bills} unusedCount={unusedCount} />
       )}
 
       {/* Budget settings (DECISIONS.md 168): one card for this month, then the planner. With the automatic budget off,
@@ -230,7 +233,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           usualLimitCents={editing ? categories.find((c) => c.id === editing.id)?.monthlyLimitCents : undefined}
           onClose={() => setEditing(undefined)}
           onSaved={(message) => {
-            if (editing && message.endsWith('is hidden.')) window.location.hash = '#/budget'
+            if (editing && message.includes(' is archived.')) window.location.hash = '#/budget'
             saved(message)
           }}
           onMove={editing ? (d) => move(editing, d) : undefined}
@@ -241,7 +244,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   )
 }
 
-function Overview({ summary: s, bills }: { summary: BudgetSummary; bills: RecurringItem[] }) {
+function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; bills: RecurringItem[]; unusedCount: number }) {
   // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
   return (
     <>
@@ -261,6 +264,12 @@ function Overview({ summary: s, bills }: { summary: BudgetSummary; bills: Recurr
       {s.auto?.on && s.auto.shortCents > 0 && (
         <a href="#/budget/plan" role="alert" className="mt-3 block rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
           This month is {formatCents(s.auto.shortCents)} short even with spending squeezed as far as it sensibly goes. Budget settings ›
+        </a>
+      )}
+
+      {unusedCount > 0 && (
+        <a href="#/budget/categories" className="mt-3 block rounded-xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
+          {unusedCount === 1 ? '1 category hasn’t' : `${unusedCount} categories haven’t`} been used in about 3 months. Archive or keep {unusedCount === 1 ? 'it' : 'them'} ›
         </a>
       )}
 

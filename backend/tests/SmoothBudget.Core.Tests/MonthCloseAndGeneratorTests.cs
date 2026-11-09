@@ -119,11 +119,11 @@ public class BudgetGeneratorTests
 
     private static readonly GeneratorCategory[] Cats =
     [
-        new(Groceries, "Groceries", CategoryType.Variable, false, 400_00),
-        new(EatingOut, "Eating out", CategoryType.Variable, true, 150_00),
-        new(Rent, "Rent", CategoryType.FixedBill, false, 1_650_00),
-        new(Card, "Credit card payment", CategoryType.DebtPayment, false, 300_00),
-        new(Savings, "Rainy-day fund", CategoryType.SavingsTransfer, false, 100_00),
+        new(Groceries, "Groceries", CategoryType.Variable, CategoryPriority.Medium, 400_00),
+        new(EatingOut, "Eating out", CategoryType.Variable, CategoryPriority.Low, 150_00),
+        new(Rent, "Rent", CategoryType.FixedBill, CategoryPriority.Medium, 1_650_00),
+        new(Card, "Credit card payment", CategoryType.DebtPayment, CategoryPriority.Medium, 300_00),
+        new(Savings, "Rainy-day fund", CategoryType.SavingsTransfer, CategoryPriority.Medium, 100_00),
     ];
 
     private static BudgetTransaction In(BudgetMonthRange m, Guid? cat, long cents, bool transfer = false, TransactionKind kind = TransactionKind.Purchase) =>

@@ -12,8 +12,9 @@ public sealed record FittedBudget(BudgetProposal Proposal, long ShortCents, long
 /// still costs more than the month brings in, it squeezes, in this order:
 /// <list type="number">
 /// <item>savings transfers that aren't part of your goals plan (a habit, not a bill);</item>
-/// <item>discretionary spending (eating out, shopping, entertainment), in proportion to the room each has;</item>
-/// <item>everyday spending (groceries, gas…), never below <see cref="EssentialFloorPercent"/>% of its usual amount.</item>
+/// <item>spending by priority (DECISIONS.md 182): nice to have first, as far as what's already spent; then important,
+/// then must have, each never below <see cref="EssentialFloorPercent"/>% of its usual amount. Within a priority, in
+/// proportion to the room each has.</item>
 /// </list>
 /// Bill, card and savings lines are first raised to whatever was already paid on them this month.
 /// Nothing goes below what's already been spent this month, limits you set yourself are never touched, and bills,
@@ -50,12 +51,13 @@ public static class BudgetFitter
         var available = p.IncomeCents + p.PartnerCents;
         var over = p.AllocatedCents - available;
         if (over <= 0) return new FittedBudget(p, 0, 0);
+        long Floor80(ProposedLimit l) => Math.Max(Spent(l.CategoryId), RoundUpToDollar(l.MedianCents * EssentialFloorPercent / 100));
         var stages = new (Func<ProposedLimit, bool> Pick, Func<ProposedLimit, long> Floor, string Reason)[]
         {
             (l => l.Type == CategoryType.SavingsTransfer && !savingsFromGoals, l => Spent(l.CategoryId), "Savings transfers are squeezed first"),
-            (l => l.Type == CategoryType.Variable && IsDiscretionary(l), l => Spent(l.CategoryId), "Discretionary spending is squeezed next"),
-            (l => l.Type == CategoryType.Variable && !IsDiscretionary(l),
-                l => Math.Max(Spent(l.CategoryId), RoundUpToDollar(l.MedianCents * EssentialFloorPercent / 100)), $"Everyday spending is squeezed last, to no less than {EssentialFloorPercent}% of usual"),
+            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.Low, l => Spent(l.CategoryId), "Nice-to-have spending is squeezed next"),
+            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.Medium, Floor80, $"Important spending is next, to no less than {EssentialFloorPercent}% of usual"),
+            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.High, Floor80, $"Must-have spending is squeezed last, to no less than {EssentialFloorPercent}% of usual"),
         };
 
         long squeezed = 0;
@@ -94,8 +96,6 @@ public static class BudgetFitter
         var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = available - allocated, SpendsMoreThanIncome = allocated > available };
         return new FittedBudget(fitted, Math.Max(0, allocated - available), squeezed);
     }
-
-    private static bool IsDiscretionary(ProposedLimit l) => l.IsDiscretionary;
 
     private static long RoundUpToDollar(long cents) => cents <= 0 ? 0 : (cents + 99) / 100 * 100;
     private static long RoundDownToDollar(long cents) => cents <= 0 ? 0 : cents / 100 * 100;

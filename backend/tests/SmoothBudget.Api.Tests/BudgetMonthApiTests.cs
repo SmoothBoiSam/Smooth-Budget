@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Budget;
@@ -95,7 +96,7 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
         var groceriesId = Cat(b, "Groceries").Id;
         await client.PutAsJsonAsync($"/api/budget/categories/{groceriesId}",
             new CategoryUpdate("Groceries", CategoryType.Variable, 300_00, false, false, "permanent"), Json);
-        await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 75_00, false), Json);
+        await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 75_00), Json);
         Assert.Equal(450_00, (await Budget(client)).LastMonth!.SurplusCents);
         await client.PutAsJsonAsync($"/api/budget/categories/{groceriesId}",
             new CategoryUpdate("Groceries", CategoryType.Variable, 450_00, false, false, "permanent"), Json);
@@ -208,11 +209,11 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
     public async Task Categories_can_be_added_hidden_and_reordered()
     {
         var (client, _, _) = await NewHouseholdAsync();
-        var add = await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 75_00, false), Json);
+        var add = await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 75_00), Json);
         Assert.True(add.IsSuccessStatusCode);
         var b = await Budget(client);
         Assert.Equal(1_085_00, b.TotalVariableLimitCents);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 1, false), Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 1), Json)).StatusCode);
 
         var pets = Cat(b, "Pets");
         await client.PutAsJsonAsync($"/api/budget/categories/{pets.Id}", new CategoryUpdate("Pets", CategoryType.Variable, 75_00, false, true, "permanent"), Json);
@@ -225,11 +226,61 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(spending, (await Budget(client)).Groups.Single(g => g.Type == "Variable").Categories.Select(c => c.Id));
     }
 
+    private record Unused(Guid Id, string Name, string Type, long MonthlyLimitCents, DateOnly? LastUsed);
+
+    [Fact]
+    public async Task Unused_categories_are_suggested_and_can_be_archived_kept_or_restored()
+    {
+        var (client, household, card) = await NewHouseholdAsync();
+        Guid groceries;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Categories.Where(c => c.HouseholdId == household).ExecuteUpdateAsync(u => u.SetProperty(c => c.CreatedUtc, new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+            groceries = await db.Categories.Where(c => c.HouseholdId == household && c.Name == "Groceries").Select(c => c.Id).SingleAsync();
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, AccountId = card, Date = new DateOnly(2026, 10, 10), AmountCents = 42_00, Merchant = "TEST MARKET",
+                Description = "TEST MARKET", Kind = SmoothBudget.Core.Transactions.TransactionKind.Purchase, CategoryId = groceries,
+                CategorySource = SmoothBudget.Core.Transactions.CategorySource.User, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        async Task<List<Unused>> UnusedList() => (await client.GetFromJsonAsync<List<Unused>>("/api/budget/categories/unused", Json))!;
+
+        // Used lately, savings, and debt lines are never suggested; spending lines with nothing in 90 days are.
+        var unused = (await UnusedList()).Select(u => u.Name).ToList();
+        Assert.DoesNotContain("Groceries", unused);
+        Assert.DoesNotContain("Rainy-day fund", unused);
+        Assert.DoesNotContain("Credit card payment", unused);
+        Assert.Contains("Eating out", unused);
+        Assert.Contains("Gas", unused);
+
+        // Keep it: not suggested again for a while.
+        var eatingOut = (await UnusedList()).Single(u => u.Name == "Eating out");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/budget/categories/{eatingOut.Id}/keep", null)).StatusCode);
+        Assert.DoesNotContain(await UnusedList(), u => u.Name == "Eating out");
+
+        // Archive: it leaves the budget and shows under Archived, then comes back.
+        var gas = (await UnusedList()).Single(u => u.Name == "Gas");
+        Assert.True((await client.PostAsync($"/api/budget/categories/{gas.Id}/archive", null)).IsSuccessStatusCode);
+        Assert.DoesNotContain((await Budget(client)).Groups.SelectMany(g => g.Categories), c => c.Name == "Gas");
+        Assert.Equal(["Gas"], (await client.GetFromJsonAsync<List<Unused>>("/api/budget/categories/hidden", Json))!.Select(c => c.Name));
+        Assert.True((await client.PostAsync($"/api/budget/categories/{gas.Id}/restore", null)).IsSuccessStatusCode);
+        Assert.Contains((await Budget(client)).Groups.SelectMany(g => g.Categories), c => c.Name == "Gas");
+        Assert.DoesNotContain(await UnusedList(), u => u.Name == "Gas"); // just brought back
+
+        // Archiving one with spending this month sends that spending to Review, so it never drops out of Left to Spend.
+        var res = await (await client.PostAsync($"/api/budget/categories/{groceries}/archive", null)).Content.ReadFromJsonAsync<ArchiveResult>(Json);
+        Assert.Equal(("Groceries", 1), (res!.Name, res.ReleasedToReview));
+        Assert.Equal(42_00, (await Home(client)).UnfiledSpendingCents);
+    }
+
     [Fact]
     public async Task Hiding_a_category_never_hides_this_months_spending_in_it()
     {
         var (client, household, card) = await NewHouseholdAsync();
-        await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 75_00, false), Json);
+        await client.PostAsJsonAsync("/api/budget/categories", new CategoryRequest("Pets", CategoryType.Variable, 75_00), Json);
         var pets = Cat(await Budget(client), "Pets");
         using (var scope = app.Services.CreateScope())
         {

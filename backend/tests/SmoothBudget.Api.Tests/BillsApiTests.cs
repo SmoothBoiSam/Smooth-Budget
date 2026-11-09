@@ -68,6 +68,55 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         return c;
     }
 
+    /// <summary>An app store billing $2.99 all year and $10.99 until June, then $11.99 from July (DECISIONS.md 181).</summary>
+    private async Task<HttpClient> AppStoreAsync()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        string Row(int m, int day, string amount) => $"{m:00}/{day:00}/2026,{m:00}/{day:00}/2026,APPLE.COM/BILL,Shopping,Sale,-{amount},";
+        await ImportAsync(c, card, ChaseCard, Enumerable.Range(1, 10).Select(m => Row(m, 14, "2.99"))
+            .Concat(Enumerable.Range(1, 6).Select(m => Row(m, 20, "10.99")))
+            .Concat(Enumerable.Range(7, 4).Select(m => Row(m, 20, "11.99"))));
+        return c;
+    }
+
+    [Fact]
+    public async Task A_bill_whose_price_changed_can_be_merged_into_one()
+    {
+        var c = await AppStoreAsync();
+        var s = (await Bills(c))!;
+        var older = s.Items.Single(i => i.AmountCents == 10_99);
+        var newer = s.Items.Single(i => i.AmountCents == 11_99);
+        // Asked once, on the new price; the old one doesn't also ask whether it stopped.
+        Assert.Equal((older.Key, 10_99L, new DateOnly(2026, 6, 20)), (newer.SameAs!.Key, newer.SameAs.AmountCents, newer.SameAs.LastDate));
+        Assert.Equal(("possiblyCanceled", newer.Key), (older.Status, older.ReplacedBy));
+        Assert.Null(s.Items.Single(i => i.AmountCents == 2_99).SameAs);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(older.Key, MergeInto: newer.Key), Json)).StatusCode);
+        var after = (await Bills(c))!;
+        Assert.Equal(2, after.Items.Count);
+        var merged = after.Items.Single(i => i.Key == newer.Key);
+        Assert.Equal((11_99L, 10_99L, new DateOnly(2026, 7, 20), 10, "active"),
+            (merged.AmountCents, merged.PreviousAmountCents!.Value, merged.PriceChangedOn!.Value, merged.Occurrences, merged.Status));
+        Assert.Equal(10, merged.Charges.Count);
+        Assert.Null(merged.SameAs);
+    }
+
+    [Fact]
+    public async Task Saying_two_bills_are_different_stops_the_question()
+    {
+        var c = await AppStoreAsync();
+        var s = (await Bills(c))!;
+        var older = s.Items.Single(i => i.AmountCents == 10_99);
+        var newer = s.Items.Single(i => i.AmountCents == 11_99);
+
+        await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(older.Key, NotSameAs: newer.Key), Json);
+        var after = (await Bills(c))!;
+        Assert.Equal(3, after.Items.Count);
+        Assert.All(after.Items, i => Assert.Null(i.SameAs));
+        Assert.Null(after.Items.Single(i => i.Key == older.Key).ReplacedBy); // now it asks whether it stopped, as usual
+    }
+
     [Fact]
     public async Task Recurring_items_are_found_and_the_price_change_is_flagged()
     {

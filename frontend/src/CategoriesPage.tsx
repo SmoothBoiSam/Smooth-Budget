@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from 'react'
-import { budgetEditApi, type Category } from './api'
-import { formatCents } from './format'
+import { useEffect, useState, type FormEvent } from 'react'
+import { budgetEditApi, priorityLabels, type ArchivedCategory, type Category } from './api'
+import { formatCents, formatDay } from './format'
 
 const groups: { type: Category['type']; label: string }[] = [
   { type: 'Variable', label: 'Spending' },
@@ -9,9 +9,18 @@ const groups: { type: Category['type']; label: string }[] = [
   { type: 'SavingsTransfer', label: 'Savings' },
 ]
 
+/** "Oct 3, 2025": an archived category can be over a year old. */
+function lastUsedText(c: ArchivedCategory) {
+  if (!c.lastUsed) return 'Never used'
+  const [y, m, d] = c.lastUsed.split('-').map(Number)
+  const thisYear = new Date().getFullYear() === y
+  return `Last used ${thisYear ? formatDay(c.lastUsed) : new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+}
+
 /**
- * Budget → Categories (DECISIONS.md 169): add a category, or delete one. Deleting replaces "Combine categories": you
- * pick where its transactions go, or send them to Review to file one by one.
+ * Budget → Categories (DECISIONS.md 169, 180): add a category, archive one you don't use (it can come back), or
+ * delete one. Deleting replaces "Combine categories": you pick where its transactions go, or send them to Review.
+ * Categories nothing has been filed under in about 3 months are suggested for archiving at the top.
  */
 export default function CategoriesPage({
   categories,
@@ -24,12 +33,90 @@ export default function CategoriesPage({
 }) {
   const [deleting, setDeleting] = useState<Category | null>(null)
   const [resetting, setResetting] = useState(false)
+  const [unused, setUnused] = useState<ArchivedCategory[]>([])
+  const [archived, setArchived] = useState<ArchivedCategory[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Fresh whenever the categories change (an archive, restore, add or delete reloads them).
+  useEffect(() => {
+    let live = true
+    Promise.all([budgetEditApi.unusedCategories(), budgetEditApi.archivedCategories()])
+      .then(([u, a]) => {
+        if (!live) return
+        setUnused(u)
+        setArchived(a)
+      })
+      .catch(() => {}) // the lists are extra: the page works without them
+    return () => {
+      live = false
+    }
+  }, [categories])
+
+  async function act(id: string, run: () => Promise<string>) {
+    setBusy(id)
+    setError(null)
+    try {
+      onDeleted(await run())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const archive = (c: { id: string; name: string }) =>
+    act(c.id, async () => {
+      const r = await budgetEditApi.archiveCategory(c.id)
+      const moved = r.releasedToReview > 0 ? ` ${r.releasedToReview} recent ${r.releasedToReview === 1 ? 'transaction filed under it waits' : 'transactions filed under it wait'} in Review for another category.` : ''
+      return `Archived ${r.name}. It’s under Archived below if you need it again.${moved}`
+    })
+  const restore = (c: ArchivedCategory) =>
+    act(c.id, async () => `${(await budgetEditApi.restoreCategory(c.id)).name} is back in your budget.`)
+  const keep = (c: ArchivedCategory) =>
+    act(c.id, async () => {
+      await budgetEditApi.keepCategory(c.id)
+      return `Keeping ${c.name}. It won’t be suggested again for a few months.`
+    })
 
   return (
     <div className="pb-6">
       <button type="button" onClick={onAdd} className="mt-4 w-full rounded-xl bg-slate-900 py-3 text-sm font-semibold text-white">
         + Add a category
       </button>
+
+      {error && (
+        <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      {unused.length > 0 && (
+        <section className="mt-4 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200" aria-labelledby="unused-h">
+          <h2 id="unused-h" className="text-sm font-semibold text-amber-900">
+            Not used in about 3 months
+          </h2>
+          <p className="mt-0.5 text-xs text-amber-800">Archive one to take its limit out of your budget. Its history stays, and you can bring it back.</p>
+          <ul className="mt-2 space-y-2">
+            {unused.map((c) => (
+              <li key={c.id} className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-amber-100">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{c.name}</span>
+                  <span className="block truncate text-xs text-slate-500 tabular-nums">
+                    {formatCents(c.monthlyLimitCents)} a month · {lastUsedText(c)}
+                  </span>
+                </span>
+                <button type="button" disabled={busy !== null} onClick={() => void keep(c)} className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 disabled:opacity-40">
+                  Keep
+                </button>
+                <button type="button" disabled={busy !== null} onClick={() => void archive(c)} className="shrink-0 rounded-full bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+                  Archive
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {groups.map((g) => {
         const list = categories.filter((c) => c.type === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
@@ -44,8 +131,20 @@ export default function CategoriesPage({
                 <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
                   <a href={`#/budget/c/${c.id}`} className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{c.name}</span>
-                    <span className="text-xs text-slate-500 tabular-nums">{formatCents(c.monthlyLimitCents)} a month</span>
+                    <span className="text-xs text-slate-500 tabular-nums">
+                      {c.type === 'Variable' && `${priorityLabels[c.priority]} · `}
+                      {formatCents(c.monthlyLimitCents)} a month
+                    </span>
                   </a>
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => void archive(c)}
+                    aria-label={`Archive ${c.name}`}
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 disabled:opacity-40"
+                  >
+                    {busy === c.id ? '…' : 'Archive'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => setDeleting(c)}
@@ -60,6 +159,32 @@ export default function CategoriesPage({
           </section>
         )
       })}
+
+      {archived.length > 0 && (
+        <details className="mt-6">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700">Archived ({archived.length})</summary>
+          <p className="mt-1 text-xs text-slate-500">Out of your budget, with their history kept. Restore one to use it again.</p>
+          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+            {archived.map((c) => (
+              <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{c.name}</span>
+                  <span className="block truncate text-xs text-slate-500">{lastUsedText(c)}</span>
+                </span>
+                <button
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => void restore(c)}
+                  aria-label={`Restore ${c.name}`}
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 disabled:opacity-40"
+                >
+                  {busy === c.id ? '…' : 'Restore'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {/* Moved here from More → Bank connections (DECISIONS.md 176). Fixed colors so the dark theme keeps them. */}
       <section className="mt-8 rounded-xl bg-white p-4 ring-1 ring-slate-200" aria-labelledby="reset-cats-h">

@@ -651,7 +651,7 @@ function NewCategory({
           onClick={async () => {
             setBusy(true)
             try {
-              const r = await budgetEditApi.createCategory(name.trim() || fallback, type, 0, false)
+              const r = await budgetEditApi.createCategory(name.trim() || fallback, type, 0)
               await onCreated(r.id)
             } catch (e) {
               onError(e)
