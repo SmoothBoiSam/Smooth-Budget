@@ -1,21 +1,21 @@
-// Bottom tab bar (DECISIONS.md 147): five tabs with their names under the icons. Plan holds the payday plan with Debt and
-// Savings under it; Bills, Partner and Settings live under More.
+// Bottom tab bar (DECISIONS.md 147, 206): five tabs with their names under the icons. Tasks holds everything waiting on
+// you (transactions, bills, pay period tasks); Plan the paycheck forecast with Debt and Savings; Shared and Settings live under More.
 import type { ReactNode } from 'react'
 
 import { icons } from './icons'
 
-export type Route = 'home' | 'transactions' | 'budget' | 'review' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'more' | 'partner'
+export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'more' | 'partner' | 'shared'
 
 const tabs: { label: string; route: Route; icon: ReactNode; also: Route[] }[] = [
   { label: 'Home', route: 'home', icon: icons.home, also: ['transactions'] },
   { label: 'Budget', route: 'budget', icon: icons.budget, also: [] },
-  { label: 'Review', route: 'review', icon: icons.review, also: [] },
-  // Payday setup, Debt and Savings live under Plan; Partner under More; Bills under Review.
+  { label: 'Tasks', route: 'tasks', icon: icons.tasks, also: ['review', 'paytasks'] },
+  // Payday setup, Debt and Savings live under Plan; Partner and Shared under More.
   { label: 'Plan', route: 'payday', icon: icons.payday, also: ['paysetup', 'debt', 'savings'] },
-  { label: 'More', route: 'more', icon: icons.more, also: ['partner'] },
+  { label: 'More', route: 'more', icon: icons.more, also: ['partner', 'shared'] },
 ]
 
-/** A count in a red bubble on a tab: Review (what to look at) and Plan (payday steps still to do). */
+/** A count in a red bubble on a tab: Tasks (transactions and bills to look at, payday steps still to do). */
 export default function BottomNav({ route, badges }: { route: Route; badges: Partial<Record<Route, number>> }) {
   return (
     <nav
@@ -31,7 +31,7 @@ export default function BottomNav({ route, badges }: { route: Route; badges: Par
               <a
                 href={`#/${tab.route === 'home' ? '' : tab.route}`}
                 aria-current={active ? 'page' : undefined}
-                aria-label={count > 0 ? `${tab.label}, ${count} ${tab.route === 'review' ? 'to review' : 'to do'}` : tab.label}
+                aria-label={count > 0 ? `${tab.label}, ${count} to do` : tab.label}
                 className={`flex flex-col items-center gap-1 pb-2 ${active ? "text-accent" : "text-ink-faint"}`}
               >
                 <span className={`relative block rounded-2xl px-3.5 py-1.5 transition-shadow duration-200 ${active ? 'neu-inset' : ''}`}>

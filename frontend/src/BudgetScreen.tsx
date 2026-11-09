@@ -28,7 +28,7 @@ import TransactionSheet from './TransactionSheet'
 
 // Sub-views of the Budget tab, from the URL hash:
 //   #/budget            categories overview
-//   (#/budget/inbox moved to the Review tab, #/review)
+//   (#/budget/inbox moved to Tasks, #/tasks/transactions)
 //   #/transactions      every transaction and search, opened from Home (DECISIONS.md 171; #/budget/all still works)
 //   #/budget/c/<id>     one category's transactions
 //   #/budget/plan       budget settings and the budget generator
@@ -396,7 +396,7 @@ function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: st
             : [`Next ${formatDay(b.nextExpected)}`, 'text-ink-faint']
   return (
     <li>
-      <a href={`#/review/bills/${encodeURIComponent(b.key)}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
+      <a href={`#/tasks/bills/${encodeURIComponent(b.key)}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
         <span className="min-w-0">
           <span className="block truncate">{b.name}</span>
           <span className={`block text-xs ${cls}`}>

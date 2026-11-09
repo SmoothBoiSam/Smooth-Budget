@@ -81,6 +81,7 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 builder.Services.AddProblemDetails();
 builder.Services.AddScoped<CurrentMonthLoader>();
 builder.Services.AddScoped<HomeSummaryService>();
+builder.Services.AddScoped<SmoothBudget.Api.Shared.SharedService>();
 builder.Services.AddScoped<BudgetSummaryService>();
 builder.Services.AddScoped<BudgetMonthService>();
 builder.Services.AddScoped<BudgetGeneratorService>();
@@ -179,6 +180,7 @@ app.MapTransactionEndpoints();
 app.MapBudgetEndpoints();
 app.MapPlaidEndpoints();
 app.MapPartnerEndpoints();
+SmoothBudget.Api.Shared.SharedEndpoints.MapSharedEndpoints(app);
 SmoothBudget.Api.Debt.DebtEndpoints.MapDebtEndpoints(app);
 SmoothBudget.Api.Bills.RecurringEndpoints.MapRecurringEndpoints(app);
 SmoothBudget.Api.Savings.SavingsEndpoints.MapSavingsEndpoints(app);

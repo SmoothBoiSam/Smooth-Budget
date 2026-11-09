@@ -108,7 +108,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   me: () => request<Me>('GET', '/auth/me'),
   login: (email: string, password: string) => request<Me>('POST', '/auth/login', { email, password }),
-  register: (email: string, password: string) => request<Me>('POST', '/auth/register', { email, password }),
+  /** With a partner's invite (DECISIONS.md 205), sign-up works even while it's closed, and links the two accounts. */
+  register: (email: string, password: string, invite?: string, name?: string) => request<Me>('POST', '/auth/register', { email, password, invite, name }),
   options: () => request<{ signUpOpen: boolean }>('GET', '/auth/options'),
   logout: () => request<void>('POST', '/auth/logout'),
   homeSummary: () => request<HomeSummary>('GET', '/home/summary'),
@@ -828,6 +829,51 @@ export interface PartnerOverview {
   earlyCandidates: EarlyDeposit[]
   /** Transfers you counted toward this month though they came before it started. */
   countedEarly: EarlyDeposit[]
+}
+
+/** Someone you share costs with (DECISIONS.md 205): just a name, or linked with their own account. */
+export interface Friend {
+  id: string
+  name: string
+  linked: boolean
+  linkedSince: string | null
+  /** An invite you sent that hasn't been used yet. */
+  inviteExpiresUtc: string | null
+}
+
+/** Your friends, and your name as they see it. Each linked account keeps its own budget. */
+export interface SharedOverview {
+  yourName: string | null
+  friends: Friend[]
+}
+
+export interface InvitePeek {
+  valid: boolean
+  fromName: string | null
+  problem: string | null
+}
+
+export const sharedApi = {
+  overview: () => request<SharedOverview>('GET', '/shared'),
+  setName: (name: string) => request<void>('PUT', '/shared/name', { name }),
+  addFriend: (name: string) => request<Friend>('POST', '/shared/friends', { name }),
+  renameFriend: (id: string, name: string) => request<void>('PUT', `/shared/friends/${id}`, { name }),
+  removeFriend: (id: string) => request<void>('DELETE', `/shared/friends/${id}`),
+  /** A new one-time invite for this friend; the token is only ever shown now, in the link. */
+  invite: (id: string) => request<{ token: string; expiresUtc: string }>('POST', `/shared/friends/${id}/invite`),
+  cancelInvite: (id: string) => request<void>('DELETE', `/shared/friends/${id}/invite`),
+  unlink: (id: string) => request<void>('DELETE', `/shared/friends/${id}/link`),
+  peek: (token: string) => request<InvitePeek>('GET', `/shared/invites/${encodeURIComponent(token)}`),
+  join: (token: string) => request<void>('POST', '/shared/join', { token }),
+}
+
+/** The link to send: opens the app on the join screen. */
+export const inviteLink = (token: string) => `${window.location.origin}/#/join/${token}`
+
+/** The invite token in the address (#/join/<token>), if the app was opened from one. */
+export function joinToken(): string | null {
+  const m = window.location.hash.match(/^#\/join\/([A-Za-z0-9_-]+)$/)
+  return m ? m[1] : null
 }
 
 export const partnerPlanApi = {

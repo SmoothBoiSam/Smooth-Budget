@@ -526,6 +526,73 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("DebtAccounts");
                 });
 
+            modelBuilder.Entity("SmoothBudget.Api.Data.Friend", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("LinkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId");
+
+                    b.HasIndex("LinkId");
+
+                    b.ToTable("Friends");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.FriendInvite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FriendId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UsedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FriendId");
+
+                    b.HasIndex("HouseholdId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("FriendInvites");
+                });
+
             modelBuilder.Entity("SmoothBudget.Api.Data.Household", b =>
                 {
                     b.Property<Guid>("Id")
@@ -543,6 +610,10 @@ namespace SmoothBudget.Api.Data.Migrations
 
                     b.Property<int>("DebtStrategy")
                         .HasColumnType("integer");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
 
                     b.Property<long?>("ExtraDebtPaymentCents")
                         .HasColumnType("bigint");
@@ -581,6 +652,33 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Households");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.HouseholdLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EndedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HouseholdAId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("HouseholdBId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdAId");
+
+                    b.HasIndex("HouseholdBId");
+
+                    b.ToTable("HouseholdLinks");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.ImportBatch", b =>
@@ -1383,6 +1481,23 @@ namespace SmoothBudget.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.Friend", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.HouseholdLink", null)
+                        .WithMany()
+                        .HasForeignKey("LinkId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.FriendInvite", b =>
+                {
+                    b.HasOne("SmoothBudget.Api.Data.Friend", null)
+                        .WithMany()
+                        .HasForeignKey("FriendId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.ImportBatch", b =>

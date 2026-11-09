@@ -68,7 +68,7 @@ export default function CategoriesPage({
   const archive = (c: { id: string; name: string }) =>
     act(c.id, async () => {
       const r = await budgetEditApi.archiveCategory(c.id)
-      const moved = r.releasedToReview > 0 ? ` ${r.releasedToReview} recent ${r.releasedToReview === 1 ? 'transaction filed under it waits' : 'transactions filed under it wait'} in Review for another category.` : ''
+      const moved = r.releasedToReview > 0 ? ` ${r.releasedToReview} recent ${r.releasedToReview === 1 ? 'transaction filed under it waits' : 'transactions filed under it wait'} in Tasks for another category.` : ''
       return `Archived ${r.name}. It’s under Archived below if you need it again.${moved}`
     })
   const restore = (c: ArchivedCategory) =>
@@ -239,7 +239,7 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
       const waiting = r.filed + r.guesses
       onDone(
         [
-          `Started over: ${waiting} ${waiting === 1 ? 'transaction has' : 'transactions have'} a new category to confirm in Review`,
+          `Started over: ${waiting} ${waiting === 1 ? 'transaction has' : 'transactions have'} a new category to confirm in Tasks`,
           r.stillUncategorized > 0 ? `, and ${r.stillUncategorized} need${r.stillUncategorized === 1 ? 's' : ''} one picked.` : '.',
           ...r.bankNotes.map((n) => ` ${n}`),
         ].join(''),
@@ -271,7 +271,7 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
             This clears the category on <strong>every</strong> transaction, including the ones you picked yourself, downloads what your bank says
             about each one again, and files them all from the bank’s info and the app’s guesses.
           </p>
-          <p>Everything it files waits in Review for you to confirm. Ones it can’t place wait there with no category.</p>
+          <p>Everything it files waits in Tasks for you to confirm. Ones it can’t place wait there with no category.</p>
           <p>Your merchant rules, transfers, and what you said about money from your partner stay as they are.</p>
           <p className="font-semibold text-danger">
             This can’t be undone.
@@ -324,7 +324,7 @@ function DeleteSheet({
       onDeleted(
         r.movedTo
           ? `Deleted ${r.name}. ${r.movedTransactions} ${r.movedTransactions === 1 ? 'transaction' : 'transactions'} moved to ${r.movedTo}.`
-          : `Deleted ${r.name}. ${r.toReview} ${r.toReview === 1 ? 'transaction is' : 'transactions are'} in Review for a new category.`,
+          : `Deleted ${r.name}. ${r.toReview} ${r.toReview === 1 ? 'transaction is' : 'transactions are'} in Tasks for a new category.`,
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete it.')
@@ -369,7 +369,7 @@ function DeleteSheet({
           </select>
           <span className="mt-1 block text-xs text-ink-soft">
             {to === REVIEW
-              ? 'They lose their category and wait in Review, with the app’s best guess where it has one, for you to pick a new one.'
+              ? 'They lose their category and wait in Tasks, with the app’s best guess where it has one, for you to pick a new one.'
               : target
                 ? `They move to ${target.name}, and new ones like them go there too. ${target.name} keeps its own limit.`
                 : 'Pick a category, or send them to Review to file one at a time.'}

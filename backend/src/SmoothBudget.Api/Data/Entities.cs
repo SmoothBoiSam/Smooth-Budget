@@ -34,6 +34,9 @@ public class Household
 
     /// <summary>The partner's name as it appears on incoming transfers ("Zelle payment from ..."); set in Settings.</summary>
     public string? PartnerName { get; set; }
+
+    /// <summary>Your name as a linked partner sees it ("Sam asks for $800…", DECISIONS.md 205).</summary>
+    public string? DisplayName { get; set; }
     /// <summary>
     /// Labeling transfers between you starts after this day (DECISIONS.md 92, 100): the day before you first named your
     /// partner. Money from her on or before it is her contribution, as it always was; after it, transfers wait for a label.
@@ -528,4 +531,46 @@ public class NotificationLog
     public Guid HouseholdId { get; set; }
     public required string Key { get; set; }
     public DateTime SentUtc { get; set; }
+}
+
+/// <summary>
+/// Someone you share costs with (DECISIONS.md 205): a partner, a roommate, a friend. As many as you like. Without an
+/// account they're just a name you keep a tab with; once they link their own account (LinkId), what you send each other
+/// shows up on both sides. Unlinking makes them a name again, keeping the history.
+/// </summary>
+public class Friend
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string Name { get; set; }
+    public Guid? LinkId { get; set; }
+    public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>
+/// A one-time link inviting a friend to link their own account (DECISIONS.md 205). Only a hash of the token is stored;
+/// the token itself is shown once, in the link. It works for 7 days, once. One per friend at a time.
+/// </summary>
+public class FriendInvite
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public Guid FriendId { get; set; }
+    public required string TokenHash { get; set; }
+    public DateTime CreatedUtc { get; set; }
+    public DateTime ExpiresUtc { get; set; }
+    public DateTime? UsedUtc { get; set; }
+}
+
+/// <summary>
+/// Two accounts linked to share a tab (DECISIONS.md 205); each side has a Friend pointing at it. Each keeps its own budget; only what you send each other
+/// crosses over. Unlinking ends it (EndedUtc) without deleting it, so what was shared keeps its history.
+/// </summary>
+public class HouseholdLink
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdAId { get; set; }
+    public Guid HouseholdBId { get; set; }
+    public DateTime CreatedUtc { get; set; }
+    public DateTime? EndedUtc { get; set; }
 }

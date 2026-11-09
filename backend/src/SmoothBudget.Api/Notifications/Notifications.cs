@@ -140,7 +140,7 @@ public class NotificationService(
             if (!sent.Contains(n.Key) && !household.NotificationsOff.Contains(n.Type)) news.Add((n.Key, n.Message));
         // Several over-budget categories (or price rises) at once arrive as one notification.
         Merge(news, "over:", "Over budget", "#/budget", "over");
-        Merge(news, "price:", "Bill prices went up", "#/review/bills", "price");
+        Merge(news, "price:", "Bill prices went up", "#/tasks/bills", "price");
 
         foreach (var (key, message) in news)
         {
@@ -175,13 +175,13 @@ public class NotificationService(
         var check = (await payday.GetAsync(householdId, ct)).Checks.FirstOrDefault(c => c.PayDate == today);
         if (check is not null)
             list.Add(("payday", $"payday:{today:yyyy-MM-dd}", new PushMessage("Payday",
-                $"About {PayEngine.Dollars(check.NetCents)} lands today. Your plan says where it goes.", "#/payday", "payday")));
+                $"About {PayEngine.Dollars(check.NetCents)} lands today. Your plan says where it goes.", "#/tasks/payday", "payday")));
 
         var tomorrow = today.AddDays(1);
         var due = (await recurring.UpcomingAsync(householdId, 20, ct)).Where(b => b.Date == tomorrow).ToList();
         if (due.Count > 0)
             list.Add(("bills", $"bills:{tomorrow:yyyy-MM-dd}", new PushMessage(due.Count == 1 ? "Bill due tomorrow" : "Bills due tomorrow",
-                string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/review/bills", "bills")));
+                string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/tasks/bills", "bills")));
 
         var b = await budget.GetAsync(householdId, ct);
         foreach (var line in b.Groups.Where(g => g.CountsTowardLeftToSpend).SelectMany(g => g.Categories).Where(c => c.RemainingCents < 0 && c.LimitCents > 0))
@@ -204,7 +204,7 @@ public class NotificationService(
         // A price rise you haven't said "Got it" to, once per new price.
         foreach (var i in (await recurring.SummaryAsync(householdId, ct)).Items.Where(i => i.Status == "priceUp"))
             list.Add(("price", $"price:{i.Key}:{i.AmountCents}", new PushMessage("Bill price went up",
-                $"{i.Name} went up{(i.PreviousAmountCents is { } was ? $" from {PayEngine.Dollars(was)}" : "")} to {PayEngine.Dollars(i.AmountCents)}.", "#/review/bills", "price")));
+                $"{i.Name} went up{(i.PreviousAmountCents is { } was ? $" from {PayEngine.Dollars(was)}" : "")} to {PayEngine.Dollars(i.AmountCents)}.", "#/tasks/bills", "price")));
 
         var partner = household.PartnerName is { Length: > 0 } p ? p.Split(' ')[0] : "Your partner";
         foreach (var c in (h.Contributions ?? []).Where(c => c.State == "late"))
@@ -223,7 +223,7 @@ public class NotificationService(
         var waiting = h.ReviewCount + h.UncategorizedCount;
         if (local.DayOfWeek == DayOfWeek.Sunday && local.Hour >= ReviewHour && waiting > 0)
             list.Add(("review", $"review:{today:yyyy-MM-dd}", new PushMessage("A few minutes of review",
-                $"{waiting} {(waiting == 1 ? "purchase is" : "purchases are")} waiting for you to confirm this month.", "#/review", "review")));
+                $"{waiting} {(waiting == 1 ? "purchase is" : "purchases are")} waiting for you to confirm this month.", "#/tasks/transactions", "review")));
         return list;
     }
 

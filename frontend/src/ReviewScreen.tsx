@@ -12,12 +12,12 @@ import {
   listedType,
 } from './api'
 import BillsSection from './BillsSection'
-import { ErrorNotice, Loading, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
+import { CountBubble, ErrorNotice, Loading, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
 import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
 
-const partFromHash = () => (window.location.hash.startsWith('#/review/bills') ? 'bills' : 'transactions')
+const partFromHash = () => (window.location.hash.startsWith('#/tasks/bills') ? 'bills' : 'transactions')
 
 
 /** Partner money first, then purchases with no category, then the app's least certain guesses, then likely ones. */
@@ -28,7 +28,7 @@ function rank(t: Transaction) {
 }
 
 /**
- * The Review tab (DECISIONS.md 87): one place to categorize and confirm everything the app sorted on its own.
+ * Review transactions and Review bills, under Tasks (DECISIONS.md 87, 206): one place to categorize and confirm everything the app sorted on its own.
  * Cards go one at a time with the app's guess up front; the list is for confirming the likely ones in bulk.
  * Nothing here is settled until the user says so (DECISIONS.md 80).
  */
@@ -90,17 +90,12 @@ export default function ReviewScreen({
       .catch(fail)
   }, [fail])
 
-  // A link to #/review/bills (a bill line on the Budget tab, a notification) switches parts even while Review is open.
+  // A link to #/tasks/bills (a bill line on the Budget tab, a notification) switches pages even while one is open.
   useEffect(() => {
     const onHash = () => setPart(partFromHash())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
-
-  function goTo(p: 'transactions' | 'bills') {
-    setPart(p)
-    window.history.replaceState(null, '', p === 'bills' ? '#/review/bills' : '#/review')
-  }
 
   /**
    * After one card: drop it locally (no jumpy reload), refresh the counts and the badge. A new merchant rule may have
@@ -140,31 +135,13 @@ export default function ReviewScreen({
 
   return (
     <Page>
-      <PageHeader title="Review" />
-      {/* Two parts (DECISIONS.md 152): transactions to confirm, and bills the app found or that changed. */}
-      <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1.5 rounded-2xl neu-inset p-1 text-sm font-semibold">
-        {(['transactions', 'bills'] as const).map((p) => {
-          const n = p === 'transactions' ? todoCount : billsCount
-          return (
-            <button
-              key={p}
-              role="tab"
-              type="button"
-              aria-selected={part === p}
-              onClick={() => goTo(p)}
-              className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 ${part === p ? 'neu-sm text-accent' : 'text-ink-soft'}`}
-            >
-              {p === 'transactions' ? 'Transactions' : 'Bills'}
-              {n != null && n > 0 && (
-                <span className="inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] leading-5" style={{ backgroundColor: '#DC2626', color: '#fff' }}>
-                  {n > 99 ? '99+' : n}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-      {/* The view switch sits under the two parts, on a row of its own, and applies to both (DECISIONS.md 201). */}
+      {/* Two pages under Tasks (DECISIONS.md 206): transactions to confirm, and bills the app found or that changed. */}
+      <PageHeader
+        title={part === 'bills' ? 'Review bills' : 'Review transactions'}
+        back={{ href: '#/tasks', label: 'Tasks' }}
+        action={(part === 'bills' ? billsCount : (todoCount ?? 0)) > 0 ? <CountBubble n={part === 'bills' ? billsCount : (todoCount ?? 0)} /> : undefined}
+      />
+      {/* The view switch sits on a row of its own under the title (DECISIONS.md 201). */}
       <div className="mt-3 flex justify-center">
         <div role="tablist" aria-label="View" className="flex rounded-full neu-inset p-1 text-xs font-medium">
           {(['cards', 'list'] as const).map((m) => (

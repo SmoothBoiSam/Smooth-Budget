@@ -7,7 +7,10 @@ import HomeScreen from './HomeScreen'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
 import PartnerScreen from './PartnerScreen'
+import SharedScreen from './SharedScreen'
 import ReviewScreen from './ReviewScreen'
+import TasksScreen from './TasksScreen'
+import PayTasksScreen from './PayTasksScreen'
 import PaydayScreen from './PaydayScreen'
 import PaySetupScreen from './PaySetupScreen'
 import SavingsScreen from './SavingsScreen'
@@ -20,19 +23,26 @@ import { OfflineBar } from './ui'
 if (window.location.pathname.startsWith('/plaid-oauth') && !window.location.hash.startsWith('#/more/banks')) window.location.hash = '#/more/banks'
 
 function currentRoute(): Route {
-  const hash = window.location.hash.replace(/^#\/?/, '')
-  // Bills moved into Review (DECISIONS.md 152); old links land there.
-  if (hash === 'bills' || hash.startsWith('bills/')) {
-    window.history.replaceState(null, '', '#/review/' + hash)
-    return 'review'
-  }
-  if (hash === 'budget/inbox') {
-    // Reviewing moved to its own tab; old links land there.
-    window.history.replaceState(null, '', '#/review')
-    return 'review'
+  let hash = window.location.hash.replace(/^#\/?/, '')
+  // Old links land where their page lives now: Bills moved into Review (DECISIONS.md 152), the inbox became Review, and
+  // Review became Tasks (DECISIONS.md 206), whose plain #/review meant transactions.
+  const moved =
+    hash === 'bills' || hash.startsWith('bills/')
+      ? 'tasks/' + hash
+      : hash === 'budget/inbox' || hash === 'review'
+        ? 'tasks/transactions'
+        : hash.startsWith('review/')
+          ? 'tasks/' + hash.slice('review/'.length)
+          : null
+  if (moved) {
+    window.history.replaceState(null, '', '#/' + moved)
+    hash = moved
   }
   if (hash === 'transactions') return 'transactions' // all transactions and search, from Home (DECISIONS.md 171)
-  return hash.startsWith('budget') ? 'budget' : hash === 'review' || hash.startsWith('review/') ? 'review' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'partner' ? 'partner' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
+  if (hash === 'tasks') return 'tasks'
+  if (hash === 'tasks/payday') return 'paytasks'
+  if (hash.startsWith('tasks/')) return 'review' // tasks/transactions, tasks/bills[/<key>]
+  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'partner' ? 'partner' : hash === 'shared' || hash.startsWith('join/') ? 'shared' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {
@@ -70,7 +80,7 @@ export default function App() {
     if (me) refreshInbox()
   }, [me, route, refreshInbox])
 
-  // Bills that need a look count on the Review badge too; worked out once per sign-in, then kept current by Review.
+  // Bills that need a look count on the Tasks badge too; worked out once per sign-in, then kept current by Tasks and Bills.
   const [billsCount, setBillsCount] = useState(0)
   useEffect(() => {
     if (!me) return
@@ -80,11 +90,11 @@ export default function App() {
       .catch(() => undefined)
   }, [me])
 
-  // Plan's badge: payday steps still to do on the check you're on (DECISIONS.md 188). Checked as you move around, since a
-  // sync can tick steps off on its own; Plan reports its own count while it's open.
+  // Payday steps still to do on the check you're on count on the Tasks badge (DECISIONS.md 188, 206). Checked as you move
+  // around, since a sync can tick steps off on its own; the screens that show the plan report their own count.
   const [planCount, setPlanCount] = useState(0)
   useEffect(() => {
-    if (!me || route === 'payday') return
+    if (!me || route === 'payday' || route === 'tasks' || route === 'paytasks') return
     paydayApi
       .summary()
       .then((s) => setPlanCount(openPlanItems(s)))
@@ -135,15 +145,28 @@ export default function App() {
       <div ref={screen}>
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
       {(route === 'budget' || route === 'transactions') && <BudgetScreen key={route} onChanged={refreshInbox} onSignedOut={signedOut} />}
+      {route === 'tasks' && (
+        <TasksScreen
+          inboxCount={inboxCount}
+          billsCount={billsCount}
+          planCount={planCount}
+          onInboxCount={setInboxCount}
+          onBillsCount={setBillsCount}
+          onPlanCount={setPlanCount}
+          onSignedOut={signedOut}
+        />
+      )}
+      {route === 'paytasks' && <PayTasksScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} billsCount={billsCount} onBillsCount={setBillsCount} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
       {route === 'partner' && <PartnerScreen onSignedOut={signedOut} />}
+      {route === 'shared' && <SharedScreen onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
       </div>
-      <BottomNav route={route} badges={{ review: inboxCount + billsCount, payday: planCount }} />
+      <BottomNav route={route} badges={{ tasks: inboxCount + billsCount + planCount }} />
     </>
   )
 }

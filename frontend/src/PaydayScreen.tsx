@@ -1,22 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, debtApi, openPlanItems, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type PlanItem, type SavingsSummary } from './api'
+import { ApiError, debtApi, openPlanItems, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type SavingsSummary } from './api'
 import { icons } from './icons'
 import { useRemembered } from './offline'
-import { Card, Caret, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows, smallBtn, smallBtnOn } from './ui'
+import { Card, Caret, Chevron, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows } from './ui'
 import { formatCents, formatDay } from './format'
+import { finished, weekday } from './paycheck'
 
-const weekday = (iso: string) => {
-  const [y, m, d] = iso.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-}
 const monthName = (iso: string) => {
   const [y, m] = iso.split('-').map(Number)
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' })
 }
 
 /**
- * The Plan tab (SPEC 4.6; DECISIONS.md 147), with links to Debt and Savings under the checks: the next checks with a low/likely/high range, the payday plan for each, and predicted vs
- * actual once a deposit lands. Setup (schedule, pay stubs, profile, rules) is on its own screen.
+ * The Plan tab (SPEC 4.6; DECISIONS.md 147), with links to Debt and Savings: the next checks with a low/likely/high range, and predicted vs
+ * actual once a deposit lands. The payday plan for each check is checked off under Tasks (DECISIONS.md 206). Setup is on its own screen.
  */
 export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut: () => void; onOpenItems: (n: number) => void }) {
   const [s, setS] = useState<PaydaySummary | null>(null)
@@ -48,16 +45,6 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
     void load()
   }, [load])
 
-  async function toggle(check: PayCheck, item: PlanItem, skip?: boolean) {
-    try {
-      if (skip !== undefined) await paydayApi.setSkipped(check.payDate, item.key, skip)
-      else await paydayApi.setDone(check.payDate, item.key, !item.done)
-      await load()
-    } catch (e) {
-      fail(e)
-    }
-  }
-
   const empty = s && s.scheduleMonths.length === 0 && s.stubCount === 0
   const [historyOpen, setHistoryOpen] = useRemembered('payday.history', true)
   const [doneOpen, setDoneOpen] = useState(false)
@@ -86,7 +73,7 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
               .filter((c) => !finished(c))
               .map((c) => (
                 <li key={c.payDate}>
-                  <CheckCard c={c} onToggle={(item, skip) => void toggle(c, item, skip)} />
+                  <CheckCard c={c} />
                 </li>
               ))}
           </ul>
@@ -105,7 +92,7 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
                 <ul className="mt-2 space-y-3">
                   {s.checks.filter(finished).map((c) => (
                     <li key={c.payDate}>
-                      <CheckCard c={c} onToggle={(item, skip) => void toggle(c, item, skip)} />
+                      <CheckCard c={c} />
                     </li>
                   ))}
                 </ul>
@@ -160,9 +147,6 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
   )
 }
 
-/** A paid check whose every plan item is done. */
-const finished = (c: PayCheck) => c.isCurrent && !!c.plan && c.plan.items.length > 0 && c.plan.items.every((i) => i.done)
-
 /** Debt, Savings, and Schedule & pay stubs, one tap away under the plan (they used to be tabs of their own). */
 function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings: SavingsSummary | null }) {
   const debtLine = !debt
@@ -190,9 +174,8 @@ const monthYear = (iso: string) => {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
-function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, skip?: boolean) => void }) {
+function CheckCard({ c }: { c: PayCheck }) {
   const [open, setOpen] = useState(false)
-  const [planOpen, setPlanOpen] = useState(c.isCurrent)
   // Future checks start folded to one line (DECISIONS.md 154); the one you're on starts open.
   const [folded, setFolded] = useState(!c.isCurrent || finished(c))
   const known = c.hasSchedule || c.landedNetCents !== null
@@ -280,104 +263,20 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, sk
             </dl>
           )}
 
-          {c.plan && (
-            <section className="mt-3 border-t border-ink/10 pt-3">
-              <button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex w-full items-center justify-between text-sm font-semibold">
-                Payday plan
-                <span className="text-xs font-normal text-ink-soft">
-                  {c.plan.items.filter((i) => i.done || i.skipped).length} of {c.plan.items.length} done
-                </span>
-              </button>
-              {planOpen && (
-                <>
-                  {c.plan.shortCents > 0 && (
-                    <p className="mt-2 rounded-lg neu-inset px-3 py-2 text-xs text-danger">
-                      This check is {formatCents(c.plan.shortCents)} short of everything planned for it.
-                    </p>
-                  )}
-                  <ul className="mt-2 space-y-1">
-                    {c.plan.items.map((item) => (
-                      <li key={item.key}>
-                        <PlanRow item={item} onToggle={() => onToggle(item)} onSkip={(skip) => onToggle(item, skip)} />
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </section>
+          {/* The steps for this check are checked off under Tasks (DECISIONS.md 206). */}
+          {c.plan && c.plan.items.length > 0 && (
+            <a href="#/tasks/payday" className="mt-3 flex items-center justify-between gap-3 border-t border-ink/10 pt-3 text-sm">
+              <span className="font-semibold">Payday plan</span>
+              <span className="flex items-center gap-1 text-xs text-ink-soft">
+                {c.plan.items.filter((i) => i.done || i.skipped).length} of {c.plan.items.length} done in Tasks
+                <Chevron />
+              </span>
+            </a>
           )}
         </>
       )}
     </article>
   )
-}
-
-/** One part of the payday plan: check it off, or it's done on its own from your accounts. */
-function PlanRow({ item, onToggle, onSkip }: { item: PlanItem; onToggle: () => void; onSkip: (skip: boolean) => void }) {
-  const [billsOpen, setBillsOpen] = useState(false)
-  const body = (
-    <span className="min-w-0 flex-1">
-      <span className={`block text-sm ${item.done || item.skipped ? 'text-ink-faint line-through' : ''}`}>{planText(item)}</span>
-      {item.status && <span className={`block text-xs ${item.done ? 'text-good' : item.skipped ? 'text-ink-soft' : 'text-gold-ink'}`}>{item.status}</span>}
-      <span className="block text-xs text-ink-soft">{item.why}</span>
-    </span>
-  )
-  return (
-    <div className="px-1 py-1.5">
-      <label className="flex cursor-pointer items-start gap-3">
-        <input
-          type="checkbox"
-          checked={item.done}
-          disabled={item.auto || item.skipped}
-          onChange={onToggle}
-          aria-label={item.auto ? `${planText(item)}: done, from your accounts` : planText(item)}
-          className="mt-1 size-4 shrink-0 accent-accent"
-        />
-        {body}
-      </label>
-      {item.skippable && !item.done && (
-        <div className="ml-7 mt-1">
-          <button type="button" onClick={() => onSkip(!item.skipped)} className={item.skipped ? smallBtnOn : `${smallBtn} text-danger`}>
-            {item.skipped ? 'Pay it off after all' : 'Skip this time'}
-          </button>
-          {!item.skipped && <span className="ml-1 text-xs text-ink-faint">The charges stay on the card as debt.</span>}
-        </div>
-      )}
-      {item.bills && item.bills.length > 0 && (
-        <div className="ml-7">
-          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-accent">
-            <Caret open={billsOpen} />
-            {billsOpen ? 'Hide the bills' : 'Show the bills'}
-          </button>
-          {billsOpen && (
-            <ul className="mt-1 divide-y divide-ink/[0.07] text-xs">
-              {item.bills.map((b) => (
-                <li key={b.name + b.due} className="flex justify-between gap-3 py-1">
-                  <span>
-                    {b.name} <span className="text-ink-faint">· {formatDay(b.due)}</span>
-                  </span>
-                  <span className="tabular-nums">{formatCents(b.cents)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function planText(i: PlanItem) {
-  const amount = formatCents(i.cents)
-  switch (i.kind) {
-    case 'keep':
-      return `Keep ${amount} in ${i.destination} for ${i.label}`
-    case 'cardspend':
-      // What you charged to a card: paid from the spending money left in checking, not from this check.
-      return `Pay ${amount} to ${i.destination} for what you charged${i.label === 'Charged so far' ? ' so far' : ''}`
-    default:
-      return `Send ${amount} to ${i.destination} (${i.label.toLowerCase()})`
-  }
 }
 
 function Row({ label, cents, note, strong }: { label: string; cents: number; note?: string; strong?: boolean }) {

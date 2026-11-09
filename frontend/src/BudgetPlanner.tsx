@@ -104,7 +104,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         <p className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
           {waiting} automatically sorted {waiting === 1 ? 'purchase is' : 'purchases are'} counted here but not confirmed yet
           {p.categorization.guesses > 0 && <> ({p.categorization.guesses} of them rough guesses)</>}. Confirming them in{' '}
-          <a href="#/review" className={`${smallBtn} py-1! text-accent`}>
+          <a href="#/tasks/transactions" className={`${smallBtn} py-1! text-accent`}>
             To review
           </a>{' '}
           makes this proposal more accurate.
@@ -123,7 +123,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         Find categories from my history
       </button>
       {p.uncategorizedCount > 0 && (
-        <a href="#/review" className="mt-3 block rounded-2xl neu-inset px-4 py-3 text-sm text-gold-ink">
+        <a href="#/tasks/transactions" className="mt-3 block rounded-2xl neu-inset px-4 py-3 text-sm text-gold-ink">
           {p.uncategorizedCount} {p.uncategorizedCount === 1 ? 'purchase' : 'purchases'} in that period had no category and weren't counted. Categorize them for a better proposal ›
         </a>
       )}

@@ -169,6 +169,20 @@ export function Button({
   )
 }
 
+/** A count in a red bubble, like the tab bar's (fixed colors, so the dark theme doesn't swap them). Nothing at zero. */
+export function CountBubble({ n }: { n: number }) {
+  if (n <= 0) return null
+  return (
+    <span
+      key={n}
+      className="animate-pop inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-5"
+      style={{ backgroundColor: '#DC2626', backgroundImage: 'linear-gradient(160deg, #f05a5a, #c81e1e)', color: '#fff' }}
+    >
+      {n > 99 ? '99+' : n}
+    </span>
+  )
+}
+
 export function Chevron() {
   return (
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-4 shrink-0 text-ink-faint">

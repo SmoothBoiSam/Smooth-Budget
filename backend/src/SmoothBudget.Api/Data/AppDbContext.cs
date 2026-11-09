@@ -31,6 +31,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<PaydayChecklistItem> PaydayChecklistItems => Set<PaydayChecklistItem>();
     public DbSet<PushDevice> PushDevices => Set<PushDevice>();
     public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
+    public DbSet<Friend> Friends => Set<Friend>();
+    public DbSet<FriendInvite> FriendInvites => Set<FriendInvite>();
+    public DbSet<HouseholdLink> HouseholdLinks => Set<HouseholdLink>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -41,6 +44,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.TimeZoneId).HasMaxLength(64);
             e.Property(x => x.PartnerName).HasMaxLength(100);
+            e.Property(x => x.DisplayName).HasMaxLength(60);
             e.HasMany(x => x.Users).WithOne(u => u.Household).HasForeignKey(u => u.HouseholdId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -168,6 +172,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Name).HasMaxLength(120);
             e.HasOne(x => x.Account).WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => x.HouseholdId);
+        });
+
+        b.Entity<Friend>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(60);
+            e.HasIndex(x => x.HouseholdId);
+            e.HasOne<HouseholdLink>().WithMany().HasForeignKey(x => x.LinkId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<FriendInvite>(e =>
+        {
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasIndex(x => x.HouseholdId);
+            e.HasOne<Friend>().WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<HouseholdLink>(e =>
+        {
+            e.HasIndex(x => x.HouseholdAId);
+            e.HasIndex(x => x.HouseholdBId);
         });
 
         b.Entity<PartnerArrangement>(e =>

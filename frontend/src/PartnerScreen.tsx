@@ -166,7 +166,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
                       {formatDay(r.date)} · {purposeLabel[r.purpose]}
                       {r.categoryName && <span className="text-ink-soft"> · {r.categoryName}</span>}
                       {r.purpose === 'waiting' && (
-                        <a href="#/review" className={`${smallBtn} ml-1 py-1! text-gold-ink`}>
+                        <a href="#/tasks/transactions" className={`${smallBtn} ml-1 py-1! text-gold-ink`}>
                           label it
                         </a>
                       )}

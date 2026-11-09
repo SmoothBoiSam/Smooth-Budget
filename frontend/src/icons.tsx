@@ -16,7 +16,7 @@ const outlined = (children: ReactNode) => (
   </g>
 )
 
-/** Every icon, for the tab bar and for the Debt and Savings links on the Plan tab. */
+/** Every icon: the tab bar, the Debt and Savings links on Plan, and the parts of Tasks. */
 export const icons = {
   home: <img src="/brand/logo.png" alt="" aria-hidden className="mx-auto size-7" />,
   budget: art(
@@ -30,7 +30,7 @@ export const icons = {
       <path d="M18 3.5a11 11 0 0 1 10.5 10.5" fill="none" stroke={C.coinRim} strokeWidth={1} />
     </>,
   ),
-  review: art(
+  tasks: art(
     <>
       {outlined(
         <>
@@ -98,6 +98,75 @@ export const icons = {
         strokeWidth={1.3}
         strokeLinecap="round"
       />
+    </>,
+  ),
+  // The four parts of Tasks (DECISIONS.md 206).
+  /** A receipt with a coin: purchases to confirm. */
+  transactions: art(
+    <>
+      {outlined(
+        <>
+          <path d="M7.5 5.5A1.5 1.5 0 0 1 9 4h14a1.5 1.5 0 0 1 1.5 1.5V28l-2.8-2-2.8 2-2.9-2-2.9 2-2.8-2-2.8 2z" fill={C.body} />
+          <circle cx="22" cy="20.5" r="5.4" fill={C.coinRim} />
+        </>,
+      )}
+      <rect x="11" y="8.5" width="10" height="2.2" rx="1.1" fill={C.ring} />
+      <rect x="11" y="13.5" width="6" height="2.2" rx="1.1" fill={C.ring} />
+      <circle cx="22" cy="20.5" r="4.1" fill={C.coin} />
+      <path d="M22 18.3v4.4" stroke={C.dollar} strokeWidth={1.5} strokeLinecap="round" />
+    </>,
+  ),
+  /** An envelope sealed with a coin, and a red dot for one that's due: bills. */
+  bills: art(
+    <>
+      {outlined(
+        <>
+          <rect x="3.5" y="8" width="25" height="17.5" rx="3" fill={C.body} />
+        </>,
+      )}
+      <path d="m5 10 11 8.2L27 10" fill="none" stroke={C.ring} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="16" cy="19" r="4.7" fill={C.coinRim} stroke="#fff" strokeWidth={1.2} />
+      <circle cx="16" cy="19" r="3.4" fill={C.coin} />
+      <circle cx="26" cy="8" r="3.3" fill={C.red} stroke="#fff" strokeWidth={1.4} />
+    </>,
+  ),
+  /** Two coins passing between friends: the running tab. */
+  tab: art(
+    <>
+      {[
+        'M18.5 5.5h5a2.5 2.5 0 0 1 2.5 2.5v4.5m-2.6-2.4 2.6 2.6 2.6-2.6',
+        'M13.5 26.5h-5A2.5 2.5 0 0 1 6 24v-4.5m2.6 2.4L6 19.3l-2.6 2.6',
+      ].map((d) => (
+        <g key={d} fill="none" strokeLinecap="round" strokeLinejoin="round">
+          <path d={d} stroke="#fff" strokeWidth={4.6} />
+          <path d={d} stroke={C.body} strokeWidth={2.2} />
+        </g>
+      ))}
+      {outlined(
+        <>
+          <circle cx="11.5" cy="11.5" r="6" fill={C.coinRim} />
+          <circle cx="20.5" cy="20.5" r="6" fill={C.body} />
+        </>,
+      )}
+      <circle cx="11.5" cy="11.5" r="4.6" fill={C.coin} />
+      <circle cx="20.5" cy="20.5" r="2.6" fill={C.blush} />
+    </>,
+  ),
+  /** A checklist with gold checks: the steps for a paycheck. */
+  payTasks: art(
+    <>
+      {outlined(
+        <>
+          <rect x="5" y="4" width="22" height="25" rx="3.5" fill={C.body} />
+        </>,
+      )}
+      {[9.5, 16.5, 23.5].map((y, i) => (
+        <g key={y}>
+          <rect x="8.5" y={y - 2.2} width="4.4" height="4.4" rx="1.2" fill={i < 2 ? C.ring : C.blush} />
+          <rect x="15" y={y - 1.1} width="8.5" height="2.2" rx="1.1" fill={C.ring} />
+          {i < 2 && <path d={`m8.6 ${y - 0.2} 2 2 4-4.6`} fill="none" stroke={C.coin} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />}
+        </g>
+      ))}
     </>,
   ),
   more: art(

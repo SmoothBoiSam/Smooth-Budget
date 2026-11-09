@@ -64,7 +64,7 @@ export default function CategoryEditSheet({
     setError(null)
     try {
       const r = await budgetEditApi.archiveCategory(line.id)
-      const moved = r.releasedToReview > 0 ? ` ${r.releasedToReview} recent transactions filed under it wait in Review for another category.` : ''
+      const moved = r.releasedToReview > 0 ? ` ${r.releasedToReview} recent transactions filed under it wait in Tasks for another category.` : ''
       onSaved(`${r.name} is archived.${moved}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not archive it.')

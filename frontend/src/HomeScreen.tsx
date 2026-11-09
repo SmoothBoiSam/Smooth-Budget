@@ -366,9 +366,9 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
     })
   if (s.incomeUnknown) notices.push({ key: 'income', tone: 'todo', href: '#/budget/plan', text: 'Set this month’s income' })
   if (s.uncategorizedCount > 0)
-    notices.push({ key: 'uncat', tone: 'todo', href: '#/review', text: `${s.uncategorizedCount} ${s.uncategorizedCount === 1 ? 'purchase needs' : 'purchases need'} a category` })
+    notices.push({ key: 'uncat', tone: 'todo', href: '#/tasks/transactions', text: `${s.uncategorizedCount} ${s.uncategorizedCount === 1 ? 'purchase needs' : 'purchases need'} a category` })
   if (s.reviewCount > 0)
-    notices.push({ key: 'review', tone: 'todo', href: '#/review', text: `${s.reviewCount} ${s.reviewCount === 1 ? 'purchase' : 'purchases'} to confirm` })
+    notices.push({ key: 'review', tone: 'todo', href: '#/tasks/transactions', text: `${s.reviewCount} ${s.reviewCount === 1 ? 'purchase' : 'purchases'} to confirm` })
   for (const p of s.pendingSweeps)
     notices.push({
       key: `sweep-${p.id}`,
@@ -429,7 +429,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
             href="#/budget"
           />
           {s.carriedInDeficitCents > 0 && <Row label="Carried over" value={`−${formatCents(s.carriedInDeficitCents)}`} tone="danger" />}
-          {s.unfiledSpendingCents > 0 && <Row label="Not in a category" value={`−${formatCents(s.unfiledSpendingCents)}`} tone="danger" href="#/review" />}
+          {s.unfiledSpendingCents > 0 && <Row label="Not in a category" value={`−${formatCents(s.unfiledSpendingCents)}`} tone="danger" href="#/tasks/transactions" />}
           {s.overplannedCents > 0 && <Row label="Planned beyond your money" value={`−${formatCents(s.overplannedCents)}`} tone="danger" href="#/budget/plan" />}
           {s.cash && <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />}
           {s.nextPayday && (

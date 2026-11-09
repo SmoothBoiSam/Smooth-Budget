@@ -54,11 +54,11 @@ export default function BillsSection({
       setCategories(cats)
       setError(null)
       onCount(summary.items.filter(needsLook).length)
-      // A link to one bill (#/review/bills/<key>, from the Budget tab) opens it.
-      const key = decodeURIComponent(window.location.hash.replace(/^#\/?review\/bills\/?/, ''))
+      // A link to one bill (#/tasks/bills/<key>, from the Budget tab) opens it.
+      const key = decodeURIComponent(window.location.hash.replace(/^#\/?tasks\/bills\/?/, ''))
       if (key) {
         setFocus(summary.items.some((i) => i.key === key) ? key : null)
-        window.history.replaceState(null, '', '#/review/bills')
+        window.history.replaceState(null, '', '#/tasks/bills')
       }
     } catch (e) {
       fail(e)
@@ -727,7 +727,7 @@ function ItemSheet({
                 {moved
                   ? i.merchantWide
                     ? 'Its past charges move there, and future ones go there too.'
-                    : 'Its past charges move there. This store bills more than one thing, so check new charges in Review.'
+                    : 'Its past charges move there. This store bills more than one thing, so check new charges in Tasks.'
                   : 'Pick another category to move its charges there.'}
               </span>
             </label>
