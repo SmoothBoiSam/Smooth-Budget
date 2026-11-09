@@ -239,7 +239,7 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
                   </option>
                 ))}
               </select>
-              <button type="button" onClick={() => setAdding(true)} className="neu-sm rounded-xl px-3.5 text-sm font-semibold text-primary">
+              <button type="button" onClick={() => setAdding(true)} className="neu-sm rounded-xl px-3.5 text-sm font-semibold text-accent">
                 New
               </button>
             </div>
@@ -287,7 +287,7 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
               <>
                 {' '}
                 ·{' '}
-                <a href="#/budget" className={`${smallBtn} py-1! text-ink`}>
+                <a href="#/budget" className={`${smallBtn} py-1! text-accent`}>
                   Review
                 </a>
               </>

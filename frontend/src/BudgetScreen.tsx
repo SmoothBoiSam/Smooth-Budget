@@ -15,6 +15,7 @@ import {
   type SearchFilters,
   recurringApi,
   type Transaction,
+  listedType,
 } from './api'
 import { useRemembered } from './offline'
 import { Caret, ErrorNotice, headerActionCls, Loading, Notice, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
@@ -558,7 +559,7 @@ function SearchableList({
           aria-expanded={open}
           aria-controls="search-filters"
           onClick={() => setOpen(!open)}
-          className={`shrink-0 rounded-xl px-3.5 text-sm font-semibold ${open || filterCount > 0 ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu-sm text-ink-soft'}`}
+          className={`shrink-0 rounded-xl px-3.5 text-sm font-semibold ${open || filterCount > 0 ? 'bg-accent shadow-neu-sm text-accent-ink' : 'neu-sm text-ink-soft'}`}
         >
           Filters{filterCount > 0 && ` · ${filterCount}`}
         </button>
@@ -571,7 +572,7 @@ function SearchableList({
             <select value={f.categoryId} onChange={(e) => set({ categoryId: e.target.value })} className={`mt-1 ${field}`}>
               <option value="">Any category</option>
               {groupOrder.map((type) => {
-                const inType = categories.filter((c) => c.type === type)
+                const inType = categories.filter((c) => listedType(c) === type)
                 return inType.length === 0 ? null : (
                   <optgroup key={type} label={groupNames[type]}>
                     {inType.map((c) => (
@@ -613,7 +614,7 @@ function SearchableList({
                   type="button"
                   onClick={() => set({ from: p.from, to: p.to })}
                   aria-pressed={f.from === p.from && f.to === p.to}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.from === p.from && f.to === p.to ? 'bg-primary text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.from === p.from && f.to === p.to ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {p.label}
                 </button>
@@ -710,7 +711,7 @@ function dateLabel(from: string, to: string) {
 
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary py-1 pr-1 pl-2.5 text-xs font-medium text-primary-ink">
+    <span className="inline-flex items-center gap-1 rounded-full bg-accent py-1 pr-1 pl-2.5 text-xs font-medium text-accent-ink">
       {label}
       <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="rounded-full px-1.5 leading-none text-ink-faint">
         ×
@@ -796,7 +797,7 @@ function LastMonthCard({ last }: { last: LastMonth }) {
           {pending.length > 0 && (
             <>
               {' '}
-              <a href="#/payday" className={`${smallBtn} py-1! text-ink`}>
+              <a href="#/payday" className={`${smallBtn} py-1! text-accent`}>
                 Where to send it: your Plan
               </a>
             </>
@@ -876,7 +877,7 @@ function IncomeCard({
           This month
         </h2>
         {!editing && (
-          <button type="button" onClick={() => setEditing(true)} className={`${smallBtn} text-ink`}>
+          <button type="button" onClick={() => setEditing(true)} className={`${smallBtn} text-accent`}>
             Edit income
           </button>
         )}
@@ -907,7 +908,7 @@ function IncomeCard({
           {fixed.length > 0 ? (
             <p className="text-xs text-ink-soft">
               {partnerLabel}: set on the{' '}
-              <a href="#/partner" className={`${smallBtn} py-1! text-ink`}>
+              <a href="#/partner" className={`${smallBtn} py-1! text-accent`}>
                 Partner screen
               </a>
               .
@@ -980,7 +981,7 @@ function IncomeCard({
           )}
           {!s.partnerName && (
             <p className="mt-2 text-xs text-ink-soft">
-              <a href="#/partner" className={`${smallBtn} py-1! text-ink`}>
+              <a href="#/partner" className={`${smallBtn} py-1! text-accent`}>
                 Set your partner's name
               </a>{' '}
               to track her contributions apart from your income.
@@ -991,7 +992,7 @@ function IncomeCard({
       {s.incomeExpectedCents === 0 && !editing && (
         <p className="mt-2 text-xs text-ink-soft">
           Set your expected income, or{' '}
-          <a href="#/budget/plan" className={`${smallBtn} py-1! text-ink`}>
+          <a href="#/budget/plan" className={`${smallBtn} py-1! text-accent`}>
             build a budget from your history
           </a>
           .
@@ -1043,7 +1044,7 @@ function ContributionRow({ f, who }: { f: ContributionStatus; who: string }) {
         {formatCents(f.expectedCents)} <span className={`block text-xs ${note.cls}`}>{note.text}</span>
         {f.state !== 'received' && (
           // Sent before the budget month started? The Partner screen can count it here (DECISIONS.md 166).
-          <a href="#/partner" className="block text-xs font-medium text-primary">
+          <a href="#/partner" className="block text-xs font-medium text-accent">
             Sent early? ›
           </a>
         )}

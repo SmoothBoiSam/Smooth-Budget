@@ -228,7 +228,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, sk
         <span className="shrink-0 text-xs text-ink-soft">
           Covers {formatDay(c.periodStart)}–{formatDay(c.periodEnd)}
           {(!c.isCurrent || finished(c)) && (
-            <button type="button" onClick={() => setFolded(true)} className="ml-2 font-medium text-primary">
+            <button type="button" onClick={() => setFolded(true)} className="ml-2 font-medium text-accent">
               Fold
             </button>
           )}
@@ -237,7 +237,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, sk
       {!c.hasSchedule && c.landedNetCents === null ? (
         <p className="mt-2 text-sm text-ink-soft">
           Import your {monthName(c.periodStart)} schedule to forecast this check.{' '}
-          <a href="#/payday/setup" className="font-medium text-primary">
+          <a href="#/payday/setup" className="font-medium text-accent">
             Import
           </a>
         </p>
@@ -260,7 +260,7 @@ function CheckCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, sk
             </p>
           ))}
           {c.hasSchedule && (
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 text-xs font-medium text-primary">
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 text-xs font-medium text-accent">
             {open ? 'Hide' : 'How this is figured'}
           </button>
           )}
@@ -331,7 +331,7 @@ function PlanRow({ item, onToggle, onSkip }: { item: PlanItem; onToggle: () => v
           disabled={item.auto || item.skipped}
           onChange={onToggle}
           aria-label={item.auto ? `${planText(item)}: done, from your accounts` : planText(item)}
-          className="mt-1 size-4 shrink-0 accent-primary"
+          className="mt-1 size-4 shrink-0 accent-accent"
         />
         {body}
       </label>
@@ -345,7 +345,7 @@ function PlanRow({ item, onToggle, onSkip }: { item: PlanItem; onToggle: () => v
       )}
       {item.bills && item.bills.length > 0 && (
         <div className="ml-7">
-          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-primary">
+          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-accent">
             <Caret open={billsOpen} />
             {billsOpen ? 'Hide the bills' : 'Show the bills'}
           </button>

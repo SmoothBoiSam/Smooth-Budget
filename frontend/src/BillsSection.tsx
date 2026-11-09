@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ApiError, budgetApi, isNewFind, needsLook, recurringApi, type Category, type RecurringItem, type RecurringSummary, type RecurringUpdate } from './api'
+import { ApiError, budgetApi, isNewFind, needsLook, recurringApi, type Category, type RecurringItem, type RecurringSummary, type RecurringUpdate, listedType } from './api'
 import { Chevron, ErrorNotice, Loading, sheetCls, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay } from './format'
 
@@ -157,12 +157,15 @@ export default function BillsSection({
             onUpdate={update}
             onOpen={(part = 'edit') => setOpen({ item: current, part })}
             onTrackAsBill={trackAsBill}
-            skipLabel={focused ? 'Back to all bills' : 'Skip for now'}
-            onSkip={() => {
-              setNotice(null)
-              if (focused) setFocus(null)
-              else setSkipped((k) => [...k, current.key])
-            }}
+            // Opened from All bills: the back pill above the card goes back, so the card has no second one.
+            onSkip={
+              focused
+                ? undefined
+                : () => {
+                    setNotice(null)
+                    setSkipped((k) => [...k, current.key])
+                  }
+            }
           />
         </>
       )}
@@ -343,7 +346,7 @@ function Alert({
           <button type="button" onClick={() => onUpdate({ key: i.key, acknowledgePrice: true }, `Noted the new price for ${i.name}.`)} className={smallBtnOn}>
             Got it
           </button>
-          <button type="button" onClick={onOpen} className={`${smallBtn} text-ink`}>
+          <button type="button" onClick={onOpen} className={`${smallBtn} text-accent`}>
             Details
           </button>
         </div>
@@ -376,7 +379,7 @@ function Alert({
         {i.accountName && ` (this one on ${i.accountName})`}.
       </p>
       <div className={actions}>
-        <button type="button" onClick={onOpen} className={`${smallBtn} text-ink`}>
+        <button type="button" onClick={onOpen} className={`${smallBtn} text-accent`}>
           Details
         </button>
       </div>
@@ -439,7 +442,7 @@ function ChargeHistory({ item: i }: { item: RecurringItem }) {
             })}
           </ul>
           {charges.length > 6 && (
-            <button type="button" onClick={() => setAll(!all)} className={`${smallBtn} mt-2 text-ink-soft`}>
+            <button type="button" onClick={() => setAll(!all)} className={`${smallBtn} mt-2 text-accent`}>
               {all ? 'Show fewer' : `Show all ${charges.length}`}
             </button>
           )}
@@ -456,14 +459,13 @@ function BillCard({
   onOpen,
   onTrackAsBill,
   onSkip,
-  skipLabel,
 }: {
   item: RecurringItem
   onUpdate: (u: RecurringUpdate, m: string) => void
   onOpen: (part?: SheetPart) => void
   onTrackAsBill: (i: RecurringItem) => void
-  onSkip: () => void
-  skipLabel: string
+  /** Skip for now; left out when the card was opened from All bills, whose back pill goes back. */
+  onSkip?: () => void
 }) {
   // The quick choices on the card; every other option is in the bill sheet ("More options"), the same one everywhere.
   const confirmable = !i.confirmed && i.status !== 'canceled' && !needsLook(i)
@@ -496,9 +498,11 @@ function BillCard({
         <button type="button" onClick={() => onOpen('edit')} className="rounded-xl neu py-2.5">
           More options
         </button>
-        <button type="button" onClick={onSkip} className="col-span-2 rounded-xl neu py-2.5 text-danger">
-          {skipLabel}
-        </button>
+        {onSkip && (
+          <button type="button" onClick={onSkip} className="col-span-2 rounded-xl neu py-2.5 text-danger">
+            Skip for now
+          </button>
+        )}
       </div>
     </article>
   )
@@ -707,7 +711,7 @@ function ItemSheet({
               <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base">
                 {categoryId === '' && <option value="">No category</option>}
                 {categoryGroups.map((g) => {
-                  const list = categories.filter((c) => c.type === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
+                  const list = categories.filter((c) => listedType(c) === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
                   return list.length === 0 ? null : (
                     <optgroup key={g.type} label={g.label}>
                       {list.map((c) => (

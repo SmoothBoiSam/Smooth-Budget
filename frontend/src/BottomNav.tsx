@@ -32,7 +32,7 @@ export default function BottomNav({ route, badges }: { route: Route; badges: Par
                 href={`#/${tab.route === 'home' ? '' : tab.route}`}
                 aria-current={active ? 'page' : undefined}
                 aria-label={count > 0 ? `${tab.label}, ${count} ${tab.route === 'review' ? 'to review' : 'to do'}` : tab.label}
-                className={`flex flex-col items-center gap-1 pb-2 ${active ? "text-primary" : "text-ink-faint"}`}
+                className={`flex flex-col items-center gap-1 pb-2 ${active ? "text-accent" : "text-ink-faint"}`}
               >
                 <span className={`relative block rounded-2xl px-3.5 py-1.5 transition-shadow duration-200 ${active ? 'neu-inset' : ''}`}>
                   <span className={`block transition-opacity duration-200 ${active ? '' : 'opacity-60'}`}>{tab.icon}</span>

@@ -212,7 +212,7 @@ function BalanceEditor({ cents, onSave }: { cents: number; onSave: (cents: numbe
   const [value, setValue] = useState(centsToInput(cents))
   if (!open)
     return (
-      <button type="button" onClick={() => setOpen(true)} className={`${smallBtn} shrink-0 text-sm! tabular-nums text-ink`}>
+      <button type="button" onClick={() => setOpen(true)} className={`${smallBtn} shrink-0 text-sm! tabular-nums text-accent`}>
         {formatCents(cents)}
       </button>
     )

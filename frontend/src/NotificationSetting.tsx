@@ -134,7 +134,7 @@ function Switch({ on, disabled, onClick, labelledBy, small }: { on: boolean; dis
       aria-labelledby={labelledBy}
       disabled={disabled}
       onClick={onClick}
-      className={`relative shrink-0 rounded-full transition-colors disabled:opacity-60 ${small ? 'h-6 w-10' : 'h-7 w-12'} ${on ? 'bg-good' : 'bg-ink/15'}`}
+      className={`relative shrink-0 rounded-full transition-colors disabled:opacity-60 ${small ? 'h-6 w-10' : 'h-7 w-12'} ${on ? 'bg-accent' : 'bg-ink/15'}`}
     >
       <span
         aria-hidden

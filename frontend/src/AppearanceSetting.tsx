@@ -25,7 +25,7 @@ export default function AppearanceSetting() {
               role="radio"
               aria-checked={selected}
               onClick={() => setChoice(o.value)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${selected ? 'neu-sm text-primary' : 'text-ink-soft'}`}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${selected ? 'neu-sm text-accent' : 'text-ink-soft'}`}
             >
               {o.label}
             </button>

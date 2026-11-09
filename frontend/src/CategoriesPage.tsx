@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { budgetEditApi, priorityLabels, type ArchivedCategory, type Category } from './api'
+import { budgetEditApi, priorityLabels, type ArchivedCategory, type Category, listedType } from './api'
 import { formatCents, formatDay } from './format'
 
 const groups: { type: Category['type']; label: string }[] = [
@@ -119,7 +119,7 @@ export default function CategoriesPage({
       )}
 
       {groups.map((g) => {
-        const list = categories.filter((c) => c.type === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
+        const list = categories.filter((c) => listedType(c) === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
         if (list.length === 0) return null
         return (
           <section key={g.type} className="mt-6" aria-labelledby={`cats-${g.type}`}>
@@ -355,7 +355,7 @@ function DeleteSheet({
             </option>
             <option value={REVIEW}>Nowhere: send them to Review</option>
             {groups.map((g) => {
-              const list = others.filter((o) => o.type === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
+              const list = others.filter((o) => listedType(o) === g.type).sort((a, b) => a.sortOrder - b.sortOrder)
               return list.length === 0 ? null : (
                 <optgroup key={g.type} label={g.label}>
                   {list.map((o) => (

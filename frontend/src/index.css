@@ -4,7 +4,8 @@
   The app's palette, taken from the cat logo (DECISIONS.md 187), as Tailwind colors (bg-surface, text-ink, bg-primary, ...):
   - surface: the one soft surface everything sits on (neumorphism: cards are the page's own color, raised by shadow);
   - ink / ink-soft / ink-faint: text, from the cat's charcoal;
-  - primary (green): actions, and what's selected or can be picked;
+  - primary (green): confirm, save, enter: the button that does the thing;
+  - accent (blue): toggles and switches, what you picked, links, and opening or expanding something;
   - danger (red, like the notification bubbles): back, cancel, delete, and problems;
   - gold: the coin, for the money that matters (Left to Spend's ring, progress);
   - good: on track (always with words, never color alone).
@@ -17,6 +18,8 @@
   --color-ink-faint: #8d93a1;
   --color-primary: #17914f;
   --color-primary-ink: #ffffff;
+  --color-accent: #2160d9; /* blue: toggles, links and what you picked (DECISIONS.md 203) */
+  --color-accent-ink: #ffffff;
   --color-gold: #f2b53a;
   --color-gold-ink: #94630a; /* gold as text: dark enough to read on the light surface */
   --color-good: #23885a;
@@ -81,6 +84,7 @@ body {
   --color-ink-soft: #a8a8a8;
   --color-ink-faint: #808080;
   --color-primary: #23a05c;
+  --color-accent: #4a8af4;
   --color-gold: #f4bd4a;
   --color-gold-ink: #f4bd4a;
   --color-good: #4cc38a;
@@ -149,6 +153,7 @@ body {
    its own color in both themes. Motion: short and soft, opacity and transform wherever possible, never blocking a tap.
    --------------------------------------------------------------------------------------------------------------------- */
 .bg-primary,
+.bg-accent,
 .bg-good,
 .bg-gold,
 .bg-danger {

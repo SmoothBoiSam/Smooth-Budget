@@ -111,7 +111,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
     </>
   )
   const previewCard = preview && (
-        <div id="schedule-preview" className="mt-3 scroll-mt-4 neu rounded-3xl p-5 ring-2 ring-primary">
+        <div id="schedule-preview" className="mt-3 scroll-mt-4 neu rounded-3xl p-5 ring-2 ring-accent">
           <p className="text-sm font-semibold">
             {monthLabel(preview.month.year, preview.month.month)}: {preview.month.trips.length} trips, {hm(preview.month.creditMinutes)} credit
             {preview.replaces ? ' (replaces the month you imported before)' : ''}
@@ -244,7 +244,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 
 function FileButton({ label, accept, onChange }: { label: string; accept: string; onChange: (e: ChangeEvent<HTMLInputElement>) => void }) {
   return (
-    <label className="block cursor-pointer rounded-2xl neu py-3 text-center text-sm font-medium focus-within:ring-2 focus-within:ring-primary">
+    <label className="block cursor-pointer rounded-2xl neu py-3 text-center text-sm font-medium focus-within:ring-2 focus-within:ring-accent">
       {label}
       <input type="file" accept={accept} onChange={onChange} className="sr-only" />
     </label>
@@ -276,13 +276,13 @@ function MonthBody({ m, onOvertime, onPaid, onDropped }: { m: ScheduleMonth; onO
             <p className="text-xs text-ink-faint">{t.days.map((d) => `${formatDay(d.date)} ${d.route} (${hm(d.creditMinutes)})`).join(' · ')}</p>
             {onOvertime && (
               <label className="mt-1 flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={t.overtime} onChange={() => onOvertime(t.key)} className="accent-primary" />
+                <input type="checkbox" checked={t.overtime} onChange={() => onOvertime(t.key)} className="accent-accent" />
                 Flown as overtime (1.5×)
               </label>
             )}
             {onDropped && (
               <label className="mt-1 flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={t.dropped} onChange={() => onDropped(t.key)} className="accent-primary" />
+                <input type="checkbox" checked={t.dropped} onChange={() => onDropped(t.key)} className="accent-accent" />
                 I dropped this trip (left out of pay)
               </label>
             )}
@@ -293,7 +293,7 @@ function MonthBody({ m, onOvertime, onPaid, onDropped }: { m: ScheduleMonth; onO
             <span className="font-medium">{e.code}</span> · {formatDay(e.start.slice(0, 10))}–{formatDay(e.end.slice(0, 10))} · {hm(e.creditMinutes)} credit
             {onPaid ? (
               <label className="mt-1 flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={e.paid} onChange={() => onPaid(e.key)} className="accent-primary" />
+                <input type="checkbox" checked={e.paid} onChange={() => onPaid(e.key)} className="accent-accent" />
                 This is paid (treated as unpaid unless you switch it on)
               </label>
             ) : (
@@ -347,7 +347,7 @@ function MonthCard({ m, busy, act, onUpdate }: { m: ScheduleMonth; busy: boolean
       {open && (
         <>
       <label className="mt-2 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={m.reserve} disabled={busy} onChange={() => save(!m.reserve, overtime, paid)} className="accent-primary" />
+        <input type="checkbox" checked={m.reserve} disabled={busy} onChange={() => save(!m.reserve, overtime, paid)} className="accent-accent" />
         Reserve this month (the 76-hour guarantee, split across the two checks)
       </label>
       <MonthBody
@@ -375,7 +375,7 @@ function MonthCard({ m, busy, act, onUpdate }: { m: ScheduleMonth; busy: boolean
 function StubReviewCard({ r, busy, onCancel, onSave }: { r: StubReview; busy: boolean; onCancel: () => void; onSave: () => void }) {
   const s = r.stub
   return (
-    <div className="mt-3 neu rounded-3xl p-5 ring-2 ring-primary">
+    <div className="mt-3 neu rounded-3xl p-5 ring-2 ring-accent">
       <p className="text-sm font-semibold">
         Paid {formatDay(s.payDate)} for {formatDay(s.periodStart)}–{formatDay(s.periodEnd)}
         {r.replaces ? ' (replaces the stub you saved for this date)' : ''}
@@ -480,11 +480,11 @@ function ProfileSection({ p, busy, act }: { p: PayProfile; busy: boolean; act: A
           </label>
         )}
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={d.fullTime} onChange={() => setD({ ...d, fullTime: !d.fullTime })} className="accent-primary" />
+          <input type="checkbox" checked={d.fullTime} onChange={() => setD({ ...d, fullTime: !d.fullTime })} className="accent-accent" />
           Full-time (80-hour line guarantee; part-time is 40)
         </label>
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={d.holidayPay} onChange={() => setD({ ...d, holidayPay: !d.holidayPay })} className="accent-primary" />
+          <input type="checkbox" checked={d.holidayPay} onChange={() => setD({ ...d, holidayPay: !d.holidayPay })} className="accent-accent" />
           Eligible for holiday pay
         </label>
         <label className="flex items-center justify-between gap-2">

@@ -114,7 +114,7 @@ export default function PartnerScreen({ onSignedOut }: { onSignedOut: () => void
               </ul>
             )}
             {o.contributions.length > 0 && (
-              <button type="button" onClick={() => setEditing(null)} className={`${smallBtn} mt-3 text-ink`}>
+              <button type="button" onClick={() => setEditing(null)} className={`${smallBtn} mt-3 text-accent`}>
                 Add another
               </button>
             )}

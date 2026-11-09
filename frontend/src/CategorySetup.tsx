@@ -84,7 +84,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
                     type="checkbox"
                     checked={create.has(p.name)}
                     onChange={() => setCreate(toggle(create, p.name))}
-                    className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                    className="mt-1 h-4 w-4 shrink-0 accent-accent"
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2">
@@ -115,7 +115,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
             {d.unused.map((u) => (
               <li key={u.id}>
                 <label className="flex cursor-pointer gap-3 px-4 py-3">
-                  <input type="checkbox" checked={hide.has(u.id)} onChange={() => setHide(toggle(hide, u.id))} className="mt-1 h-4 w-4 shrink-0 accent-primary" />
+                  <input type="checkbox" checked={hide.has(u.id)} onChange={() => setHide(toggle(hide, u.id))} className="mt-1 h-4 w-4 shrink-0 accent-accent" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium">Hide {u.name}</span>
                     <span className="block text-xs text-ink-soft">{u.reason}</span>

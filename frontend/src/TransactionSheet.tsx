@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { budgetApi, type Category, type Transaction } from './api'
+import { budgetApi, type Category, type Transaction, listedType } from './api'
 import { formatDay, formatSigned, titleCase } from './format'
 
 const groupLabels: Record<Category['type'], string> = {
@@ -49,7 +49,7 @@ export default function TransactionSheet({
 
   const grouped = (Object.keys(groupLabels) as Category['type'][]).map((type) => ({
     type,
-    items: categories.filter((c) => c.type === type),
+    items: categories.filter((c) => listedType(c) === type),
   }))
 
   return (

@@ -137,7 +137,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
           <div className="mt-6">
             <Notice tone="danger">
               Couldn’t load Left to Spend. {error}{' '}
-              <button type="button" onClick={refresh} className="font-semibold text-primary">
+              <button type="button" onClick={refresh} className="font-semibold text-accent">
                 Try again
               </button>
             </Notice>
@@ -151,7 +151,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
           <div className="mt-6">
             <Notice tone="todo">
               Showing your numbers from {formatTime(savedAt)}.{' '}
-              <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-primary disabled:opacity-50">
+              <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-accent disabled:opacity-50">
                 {loading ? 'Trying…' : 'Try again'}
               </button>
             </Notice>
@@ -169,7 +169,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
                 ? `Updated ${formatTime(summary.lastUpdatedUtc)}`
                 : 'No transactions yet'}
             {' · '}
-            <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-primary disabled:opacity-50">
+            <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-accent disabled:opacity-50">
               {loading ? 'Syncing…' : 'Refresh'}
             </button>
           </p>
@@ -480,7 +480,7 @@ function RecentTransactions({ summary, onChanged }: { summary: HomeSummary; onCh
         <h2 id="recent-h" className="px-1 text-sm font-semibold text-ink-soft">
           Recent
         </h2>
-        <a href="#/transactions" className="text-sm font-semibold text-primary">
+        <a href="#/transactions" className="text-sm font-semibold text-accent">
           See all
         </a>
       </div>

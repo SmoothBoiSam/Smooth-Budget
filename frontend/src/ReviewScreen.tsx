@@ -9,9 +9,10 @@ import {
   type ReviewSummary,
   type Transaction,
   type TransactionContext,
+  listedType,
 } from './api'
 import BillsSection from './BillsSection'
-import { ErrorNotice, Loading, Page, PageHeader, smallBtnOn } from './ui'
+import { ErrorNotice, Loading, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
 import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
@@ -151,7 +152,7 @@ export default function ReviewScreen({
               type="button"
               aria-selected={part === p}
               onClick={() => goTo(p)}
-              className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 ${part === p ? 'neu-sm text-ink' : 'text-ink-soft'}`}
+              className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 ${part === p ? 'neu-sm text-accent' : 'text-ink-soft'}`}
             >
               {p === 'transactions' ? 'Transactions' : 'Bills'}
               {n != null && n > 0 && (
@@ -173,7 +174,7 @@ export default function ReviewScreen({
               aria-selected={mode === m}
               type="button"
               onClick={() => setMode(m)}
-              className={`rounded-full px-4 py-1 ${mode === m ? 'neu-sm text-ink' : 'text-ink-soft'}`}
+              className={`rounded-full px-4 py-1 ${mode === m ? 'neu-sm text-accent' : 'text-ink-soft'}`}
             >
               {m === 'cards' ? 'One by one' : 'List'}
             </button>
@@ -201,7 +202,7 @@ export default function ReviewScreen({
                     setQueue(null)
                     setNotice(null)
                   }}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-primary text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
                   {n != null && n > 0 && <span className="ml-1 opacity-70">{n}</span>}
@@ -257,7 +258,7 @@ export default function ReviewScreen({
             {scope === 'todo' ? 'Everything this month has a category you confirmed.' : scope === 'earlier' ? 'Nothing from these months is waiting.' : 'Nothing older is waiting.'}
           </p>
           {scope === 'todo' && (summary?.earlier.total ?? 0) > 0 && (
-            <button type="button" onClick={() => setScope('earlier')} className={`${smallBtnOn} mt-4`}>
+            <button type="button" onClick={() => setScope('earlier')} className={`${smallBtn} mt-4 text-accent`}>
               Review {summary!.earlier.total} from earlier months
             </button>
           )}
@@ -360,7 +361,10 @@ function ReviewCard({
     !partnerIn ? null : t.kind === 'PartnerContribution' ? 'contribution' : t.suggestedCategoryId ? 'payback' : null,
   )
   const [categoryId, setCategoryId] = useState<string | null>(pick)
-  const [group, setGroup] = useState<Category['type']>(categories.find((c) => c.id === pick)?.type ?? 'Variable')
+  const [group, setGroup] = useState<Category['type']>(() => {
+    const c = categories.find((x) => x.id === pick)
+    return c ? listedType(c) : 'Variable'
+  })
   const [rule, setRule] = useState(false)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -396,14 +400,16 @@ function ReviewCard({
   const selected = categories.find((c) => c.id === categoryId) ?? null
   const needsCategory = partnerIn ? mode === 'payback' : true
   // Every category in the chosen group at once, in your budget's order (DECISIONS.md 145).
-  const inGroup = useMemo(() => categories.filter((c) => c.type === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
+  const inGroup = useMemo(() => categories.filter((c) => listedType(c) === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
 
   function chooseGroup(g: Category['type']) {
     setGroup(g)
     setAdding(false)
-    const list = categories.filter((c) => c.type === g)
+    const list = categories.filter((c) => listedType(c) === g)
     // Most people have one card payment or one savings line: pick it for them.
-    setCategoryId(list.some((c) => c.id === categoryId) ? categoryId : list.length === 1 ? list[0].id : null)
+    // Card interest listed with the debt lines doesn't count: picking Debt still lands on your one card payment line.
+    const own = list.filter((c) => c.type === g)
+    setCategoryId(list.some((c) => c.id === categoryId) ? categoryId : own.length === 1 ? own[0].id : null)
   }
 
   async function save() {
@@ -486,12 +492,12 @@ function ReviewCard({
             ).map(([value, label, hint]) => (
               <label
                 key={value}
-                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ${mode === value ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu'}`}
+                className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ${mode === value ? 'bg-accent shadow-neu-sm text-accent-ink' : 'neu'}`}
               >
                 <input type="radio" name={`purpose-${t.id}`} checked={mode === value} onChange={() => setMode(value)} className="sr-only" />
                 <span>
                   <span className="block text-sm font-semibold">{label}</span>
-                  <span className={`block text-xs ${mode === value ? 'text-primary-ink/85' : 'text-ink-soft'}`}>{hint}</span>
+                  <span className={`block text-xs ${mode === value ? 'text-accent-ink/85' : 'text-ink-soft'}`}>{hint}</span>
                 </span>
               </label>
             ))}
@@ -514,7 +520,7 @@ function ReviewCard({
                   aria-pressed={group === g.type}
                   aria-label={g.label}
                   onClick={() => chooseGroup(g.type)}
-                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-primary text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
+                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {g.short}
                 </button>
@@ -531,7 +537,7 @@ function ReviewCard({
                   type="button"
                   aria-pressed={c.id === categoryId}
                   onClick={() => setCategoryId(c.id)}
-                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-primary font-semibold text-primary-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
+                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-accent font-semibold text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {c.name}
                 </button>
@@ -539,7 +545,7 @@ function ReviewCard({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="rounded-full bg-ink/[0.06] px-3 py-1 text-sm font-semibold text-primary"
+                className="rounded-full bg-ink/[0.06] px-3 py-1 text-sm font-semibold text-accent"
               >
                 + New category
               </button>

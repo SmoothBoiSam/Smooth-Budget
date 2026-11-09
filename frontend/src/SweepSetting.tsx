@@ -47,7 +47,7 @@ export default function SweepSetting() {
             role="radio"
             aria-checked={target === o.value}
             onClick={() => save(o.value, percent)}
-            className={`rounded-md py-2 text-sm font-medium ${target === o.value ? 'neu-sm text-ink' : 'text-ink-soft'}`}
+            className={`rounded-md py-2 text-sm font-medium ${target === o.value ? 'neu-sm text-accent' : 'text-ink-soft'}`}
           >
             {o.label}
           </button>

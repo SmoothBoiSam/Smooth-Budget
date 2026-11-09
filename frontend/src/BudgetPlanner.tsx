@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { budgetEditApi, type Category, type GeneratorProposal } from './api'
+import { budgetEditApi, type Category, type GeneratorProposal, listedType } from './api'
 import CategorySetup from './CategorySetup'
 import { centsToInput, formatCents, formatDay, parseDollars } from './format'
 import { smallBtn } from './ui'
@@ -104,7 +104,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
         <p className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
           {waiting} automatically sorted {waiting === 1 ? 'purchase is' : 'purchases are'} counted here but not confirmed yet
           {p.categorization.guesses > 0 && <> ({p.categorization.guesses} of them rough guesses)</>}. Confirming them in{' '}
-          <a href="#/review" className={`${smallBtn} py-1! text-ink`}>
+          <a href="#/review" className={`${smallBtn} py-1! text-accent`}>
             To review
           </a>{' '}
           makes this proposal more accurate.
@@ -172,7 +172,7 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
       </section>
 
       {groups.map((g) => {
-        const rows = parsed.filter((x) => x.c.type === g.type)
+        const rows = parsed.filter((x) => listedType(x.c) === g.type)
         if (rows.length === 0) return null
         return (
           <section key={g.type} className="mt-6" aria-labelledby={`plan-${g.type}`}>
@@ -231,7 +231,7 @@ function AutomaticView({ p, top, busy, error, onTurnOff }: { p: GeneratorProposa
     <div className="pb-6">
       {top}
       {groups.map((g) => {
-        const rows = p.categories.filter((c) => c.type === g.type)
+        const rows = p.categories.filter((c) => listedType(c) === g.type)
         if (rows.length === 0) return null
         return (
           <section key={g.type} className="mt-6" aria-labelledby={`auto-${g.type}`}>

@@ -182,7 +182,7 @@ export default function CategoryEditSheet({
                   role="radio"
                   aria-checked={applyTo === v}
                   onClick={() => setApplyTo(v)}
-                  className={`rounded-md py-2 text-sm font-medium ${applyTo === v ? 'neu-sm text-ink' : 'text-ink-soft'}`}
+                  className={`rounded-md py-2 text-sm font-medium ${applyTo === v ? 'neu-sm text-accent' : 'text-ink-soft'}`}
                 >
                   {v === 'month' ? 'This month only' : 'From now on'}
                 </button>
@@ -202,7 +202,7 @@ export default function CategoryEditSheet({
                   role="radio"
                   aria-checked={priority === p}
                   onClick={() => setPriority(p)}
-                  className={`rounded-md px-1 py-2 text-sm font-medium ${priority === p ? 'neu-sm text-ink' : 'text-ink-soft'}`}
+                  className={`rounded-md px-1 py-2 text-sm font-medium ${priority === p ? 'neu-sm text-accent' : 'text-ink-soft'}`}
                 >
                   {priorityLabels[p]}
                 </button>

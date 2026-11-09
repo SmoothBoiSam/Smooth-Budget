@@ -133,6 +133,14 @@ export interface Category {
   sortOrder: number
 }
 
+/**
+ * The group a category is listed under (DECISIONS.md 196, 202). Card interest works as a bill line underneath (it's
+ * added to the card, not paid on its own), but it's shown with the debt payments everywhere you pick or see categories.
+ */
+export function listedType(c: { name: string; type: Category['type'] }): Category['type'] {
+  return c.type === 'FixedBill' && c.name.trim().toLowerCase() === 'card interest' ? 'DebtPayment' : c.type
+}
+
 export interface Transaction {
   id: string
   date: string

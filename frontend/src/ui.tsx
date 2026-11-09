@@ -36,7 +36,7 @@ export const smallBtn = 'inline-flex items-center justify-center gap-1 rounded-f
 export const smallBtnOn = 'inline-flex items-center justify-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-ink transition-colors disabled:opacity-50'
 
 /** A small raised pill button for a header's action ("Add", "Edit"). */
-export const headerActionCls = 'neu-sm shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-primary'
+export const headerActionCls = 'neu-sm shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-accent'
 
 /** The bottom sheet's panel (sheets slide up over a dim backdrop). */
 export const sheetCls = 'max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]'
@@ -195,7 +195,7 @@ export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: (
     <div role="alert" className="neu mt-4 rounded-2xl px-4 py-3 text-sm">
       <p className="text-danger">{message}</p>
       {onRetry && (
-        <button type="button" onClick={onRetry} className="mt-2 font-semibold text-primary">
+        <button type="button" onClick={onRetry} className="mt-2 font-semibold text-accent">
           Try again
         </button>
       )}

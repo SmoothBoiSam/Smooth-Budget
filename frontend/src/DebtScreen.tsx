@@ -168,10 +168,10 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
                 role="radio"
                 aria-checked={currentStrategy === st}
                 onClick={() => whatIf(currentExtra, st)}
-                className={`rounded-xl px-3 py-2 text-left ${currentStrategy === st ? 'bg-primary shadow-neu-sm text-primary-ink' : 'neu'}`}
+                className={`rounded-xl px-3 py-2 text-left ${currentStrategy === st ? 'bg-accent shadow-neu-sm text-accent-ink' : 'neu'}`}
               >
                 <span className="block text-sm font-semibold">{st}</span>
-                <span className={`block text-xs ${currentStrategy === st ? 'text-primary-ink/85' : 'text-ink-soft'}`}>
+                <span className={`block text-xs ${currentStrategy === st ? 'text-accent-ink/85' : 'text-ink-soft'}`}>
                   {st === 'Avalanche' ? 'Highest APR first · least interest' : 'Smallest balance first · quick wins'}
                 </span>
               </button>
@@ -193,7 +193,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
               value={currentExtra}
               onChange={(e) => whatIf(Number(e.target.value), currentStrategy)}
               aria-valuetext={`${formatCents(currentExtra)} extra a month`}
-              className="mt-2 w-full accent-primary"
+              className="mt-2 w-full accent-accent"
             />
           </label>
           <p className="mt-1 text-xs text-ink-soft">
@@ -247,7 +247,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
             {hidden.map((d, i) => (
               <span key={d.id}>
                 {i > 0 && ', '}
-                <button type="button" onClick={() => setEditing(d)} className={`${smallBtn} py-1! text-ink`}>
+                <button type="button" onClick={() => setEditing(d)} className={`${smallBtn} py-1! text-accent`}>
                   {d.name}
                 </button>
               </span>
