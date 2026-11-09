@@ -331,4 +331,41 @@ public class ImportApiTests(TestApp app) : IClassFixture<TestApp>
         var accounts = (await other.Client.GetFromJsonAsync<List<AccountDto>>("/api/accounts", Json))!;
         Assert.DoesNotContain(accounts, a => a.Id == mine.Checking);
     }
+
+    // Chase savings, newest first as Chase exports it (DECISIONS.md 186).
+    private const string ChaseSavings = """
+        Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #
+        CREDIT,11/21/2026,"Online Transfer from CHK ...1111 transaction#: 1234567890",100.00,ACCT_XFER,2600.00,,
+        CREDIT,11/21/2026,"INTEREST PAYMENT",0.42,MISC_CREDIT,2500.00,,
+        DEBIT,11/02/2026,"Online Transfer to CHK ...1111 transaction#: 1234567891",-50.00,ACCT_XFER,2499.58,,
+        """;
+
+    private const string OlderChaseSavings = """
+        Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #
+        CREDIT,10/15/2026,"Online Transfer from CHK ...1111 transaction#: 1234567892",25.00,ACCT_XFER,2549.58,,
+        """;
+
+    [Fact]
+    public async Task A_savings_csv_sets_the_balance_from_its_newest_line_and_an_older_file_does_not_roll_it_back()
+    {
+        var s = await SetupAsync();
+        var res = await s.Client.PostAsJsonAsync("/api/accounts", new { name = "Chase Savings", type = "Savings", mask = "8810" }, Json);
+        var savings = (await res.Content.ReadFromJsonAsync<AccountDto>(Json))!.Id;
+
+        async Task<long> Balance()
+        {
+            using var scope = app.Services.CreateScope();
+            return (await scope.ServiceProvider.GetRequiredService<AppDbContext>().Accounts.SingleAsync(a => a.Id == savings)).CurrentBalanceCents;
+        }
+
+        Assert.Equal(2_600_00L, (await Import(s.Client, savings, ChaseSavings)).BalanceSetCents);
+        Assert.Equal(2_600_00L, await Balance());
+
+        Assert.Null((await Import(s.Client, savings, OlderChaseSavings)).BalanceSetCents);
+        Assert.Equal(2_600_00L, await Balance());
+
+        // Importing the same file again (nothing new) still keeps the balance current.
+        Assert.Equal(2_600_00L, (await Import(s.Client, savings, ChaseSavings)).BalanceSetCents);
+        Assert.Null((await Import(s.Client, s.Chase, ChaseCard)).BalanceSetCents); // cards: no Balance column
+    }
 }

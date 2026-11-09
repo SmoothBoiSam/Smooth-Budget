@@ -128,6 +128,21 @@ public class BankCsvParserTests
     }
 
     [Fact]
+    public void Chase_debit_keeps_the_balance_after_the_newest_row_in_either_order()
+    {
+        Assert.Equal(new EndingBalance(new DateOnly(2026, 11, 22), 3_266_56L), BankCsvParser.Parse(ChaseDebit).Balance);
+
+        const string newestFirst = """
+            Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #
+            CREDIT,11/21/2026,"INTEREST PAYMENT",0.42,MISC_CREDIT,2600.42,,
+            CREDIT,11/21/2026,"Online Transfer from CHK",100.00,ACCT_XFER,2600.00,,
+            DEBIT,11/02/2026,"Online Transfer to CHK",-50.00,ACCT_XFER, ,,
+            """;
+        Assert.Equal(2_600_42L, BankCsvParser.Parse(newestFirst).Balance!.Cents);
+        Assert.Null(BankCsvParser.Parse(ChaseCredit).Balance);
+    }
+
+    [Fact]
     public void Chase_credit_uses_the_purchase_date_and_flips_sign()
     {
         var r = BankCsvParser.Parse(ChaseCredit);

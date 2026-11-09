@@ -38,7 +38,10 @@ public sealed record ParsedRow(
 
 public sealed record RowError(int RowNumber, string Message);
 
-public sealed record ParsedCsv(BankCsvFormat Format, IReadOnlyList<ParsedRow> Rows, IReadOnlyList<RowError> Errors)
+/// <summary>The account's balance after the newest row of a Chase checking or savings export (its Balance column).</summary>
+public sealed record EndingBalance(DateOnly Date, long Cents);
+
+public sealed record ParsedCsv(BankCsvFormat Format, IReadOnlyList<ParsedRow> Rows, IReadOnlyList<RowError> Errors, EndingBalance? Balance = null)
 {
     public bool IsCardFormat => Format is BankCsvFormat.ChaseCredit or BankCsvFormat.AppleCard;
 }
@@ -79,24 +82,47 @@ public static class BankCsvParser
 
         var rows = new List<ParsedRow>();
         var errors = new List<RowError>();
+        var balances = new List<EndingBalance>(); // Chase checking/savings only, in file order
         for (var n = 1; n < lines.Count; n++)
         {
             var rowNumber = n + 1; // 1-based, counting the header line
             try
             {
-                rows.Add(format switch
+                var row = format switch
                 {
                     BankCsvFormat.ChaseDebit => ParseChaseDebit(lines[n], rowNumber, Get),
                     BankCsvFormat.ChaseCredit => ParseChaseCredit(lines[n], rowNumber, Get),
                     _ => ParseApple(lines[n], rowNumber, Get),
-                });
+                };
+                rows.Add(row);
+                if (format == BankCsvFormat.ChaseDebit && TryCents(Get(lines[n], "balance")) is { } balance)
+                    balances.Add(new EndingBalance(row.Date, balance));
             }
             catch (FormatException ex)
             {
                 errors.Add(new RowError(rowNumber, ex.Message));
             }
         }
-        return new ParsedCsv(format, rows, errors);
+        return new ParsedCsv(format, rows, errors, Newest(balances));
+    }
+
+    /// <summary>
+    /// The balance on the newest row. Chase lists newest first; within the newest day, the row nearest that end of the
+    /// file is the latest. Only this one number is kept: the running balances themselves are not stored.
+    /// </summary>
+    private static EndingBalance? Newest(List<EndingBalance> balances)
+    {
+        if (balances.Count == 0) return null;
+        var newestFirst = balances[0].Date >= balances[^1].Date;
+        var last = balances.Max(b => b.Date);
+        return newestFirst ? balances.First(b => b.Date == last) : balances.Last(b => b.Date == last);
+    }
+
+    private static long? TryCents(string? value)
+    {
+        if (value is null) return null;
+        try { return ParseCents(value, "Balance"); }
+        catch (FormatException) { return null; }
     }
 
     private delegate string? Getter(string[] row, string name);

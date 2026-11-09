@@ -3,7 +3,7 @@ import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportRe
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import BankConnections from './BankConnections'
-import { formatTime } from './format'
+import { formatCents, formatTime } from './format'
 
 const accountTypeLabel: Record<Account['type'], string> = { Checking: 'Checking', Savings: 'Savings', CreditCard: 'Credit card' }
 
@@ -295,6 +295,7 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
           <p className="font-semibold">
             {result.format}: {result.imported} new, {result.duplicates} already imported
           </p>
+          {result.balanceSetCents !== null && <p>Balance set to {formatCents(result.balanceSetCents)}, from the file’s newest line.</p>}
           {(result.alreadySynced > 0 || result.coveredBySync > 0) && (
             <p>
               Skipped so nothing counts twice: {result.alreadySynced} already synced from your bank

@@ -20,7 +20,9 @@ public record ImportResultDto(
     // Lines that are the same transaction as one your bank already synced through Plaid.
     int AlreadySynced = 0,
     // Lines with no exact match, dated well inside the period bank sync already covers.
-    int CoveredBySync = 0);
+    int CoveredBySync = 0,
+    // The account's balance, set from the file's newest row (Chase checking or savings not synced from the bank).
+    long? BalanceSetCents = null);
 
 public class ImportException(string message) : Exception(message);
 
@@ -126,6 +128,16 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
         }).ToList();
         db.Transactions.AddRange(created);
 
+        // A checking or savings account the bank doesn't sync takes its balance from the file, unless the account
+        // already has newer transactions than the file (an older export shouldn't roll it back) (DECISIONS.md 186).
+        long? balanceSet = null;
+        if (parsed.Balance is { } ending && account.PlaidAccountId is null && account.Type != AccountType.CreditCard)
+        {
+            var newest = await db.Transactions.Where(t => t.AccountId == accountId).MaxAsync(t => (DateOnly?)t.Date, ct);
+            if (newest is null || ending.Date >= newest)
+                account.CurrentBalanceCents = (balanceSet = ending.Cents).Value;
+        }
+
         await using (var tx = await db.Database.BeginTransactionAsync(ct))
         {
             await db.SaveChangesAsync(ct);
@@ -141,7 +153,7 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
             Transfers: created.Count(t => t.IsTransfer),
             Categorized: created.Count(t => t.CategoryId is not null && !t.IsTransfer),
             NeedsCategory: created.Count(t => TransactionRules.NeedsCategory(t.CategoryId is not null, t.IsTransfer, t.Kind, t.AmountCents)),
-            parsed.Errors, alreadySynced, coveredBySync);
+            parsed.Errors, alreadySynced, coveredBySync, balanceSet);
     }
 
     /// <summary>Removes everything one import added.</summary>

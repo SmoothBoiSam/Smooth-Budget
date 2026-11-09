@@ -162,6 +162,8 @@ export interface ImportResult {
   errors: { rowNumber: number; message: string }[]
   alreadySynced: number
   coveredBySync: number
+  /** Set from the file's newest row, for a checking or savings account the bank doesn't sync. */
+  balanceSetCents: number | null
 }
 
 export interface ImportBatch {
