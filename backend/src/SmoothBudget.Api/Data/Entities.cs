@@ -374,6 +374,8 @@ public class RecurringItem
     public string? MergedIntoKey { get; set; }
     /// <summary>You said it isn't the same bill as this one, so the app stops asking.</summary>
     public string? NotSameAsKey { get; set; }
+    /// <summary>You said it's still going ("keep looking", DECISIONS.md 200): the day you said so. Its later charges are found even at a new price.</summary>
+    public DateOnly? KeepLookingOn { get; set; }
     public DateTime UpdatedUtc { get; set; }
 }
 

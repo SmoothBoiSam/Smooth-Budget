@@ -185,6 +185,103 @@ public static class RecurringDetector
         return pairs;
     }
 
+    /// <summary>What <see cref="KeepLooking"/> found: the bill carried on, the bills it took in, and how many new charges.</summary>
+    public sealed record LookResult(RecurringSeries Series, IReadOnlyList<string> Absorbed, int Found, bool Varies);
+
+    /// <summary>
+    /// "Still going: keep looking" (DECISIONS.md 200): you said a bill that looks stopped is still going, maybe at a new
+    /// price. Walks forward one interval at a time from its last charge and takes the charge from the same merchant
+    /// (or one whose name starts with the same word) within the grace window of each expected date, whose price is
+    /// within 2× of the one before, closest in price. One missed interval is allowed. A charge that's part of another
+    /// bill that only started after this one's last charge brings that whole bill in (it's this bill at its new price);
+    /// a bill that ran alongside it is a different subscription and is never touched. While nothing has turned up, it
+    /// isn't flagged as stopped: the budget keeps expecting it. Once new charges are found, it's flagged again only if
+    /// those stop too. Charges whose price moves around (tax, usage) are planned at the middle of the last 6, with no
+    /// price alert.
+    /// </summary>
+    public static LookResult KeepLooking(RecurringSeries s, IReadOnlyList<RecurringTxn> txns, IReadOnlyList<RecurringSeries> others, DateOnly today)
+    {
+        var band = Bands.Single(b => b.F == s.Frequency);
+        var grace = Math.Max(5, band.Max / 3);
+        var owner = new Dictionary<Guid, RecurringSeries>();
+        foreach (var o in others.Where(o => o.Key != s.Key))
+            foreach (var id in o.TransactionIds)
+                owner.TryAdd(id, o);
+        var mine = s.TransactionIds.ToHashSet();
+        var pool = txns.Where(t => t.AmountCents > 0 && t.Date > s.LastDate && !mine.Contains(t.Id)
+                                   && SameMerchant(CategoryDiscovery.MerchantKey(t.Merchant), s.MerchantKey)
+                                   && (!owner.TryGetValue(t.Id, out var o) || o.FirstDate > s.LastDate))
+            .ToList();
+
+        var picked = new List<RecurringTxn>();
+        var absorbed = new List<string>();
+        var last = s.LastDate;
+        var price = s.AmountCents;
+        var expected = Next(last, s.Frequency);
+        var missed = 0;
+        while (expected.DayNumber - grace <= today.DayNumber)
+        {
+            var at = expected;
+            var hit = pool
+                .Where(t => Math.Abs(t.Date.DayNumber - at.DayNumber) <= grace && Math.Max(t.AmountCents, price) <= 2 * Math.Min(t.AmountCents, price))
+                .OrderBy(t => Math.Abs(t.AmountCents - price)).ThenBy(t => Math.Abs(t.Date.DayNumber - at.DayNumber)).ThenBy(t => t.Id)
+                .FirstOrDefault();
+            if (hit is null)
+            {
+                if (++missed > 1) break;
+                expected = Next(expected, s.Frequency);
+                continue;
+            }
+            missed = 0;
+            if (owner.TryGetValue(hit.Id, out var bill))
+            {
+                // This bill at its new price, already found on its own: take all of it.
+                var theirs = bill.TransactionIds.ToHashSet();
+                picked.AddRange(txns.Where(t => theirs.Contains(t.Id)));
+                pool.RemoveAll(t => theirs.Contains(t.Id));
+                absorbed.Add(bill.Key);
+                last = bill.LastDate;
+                price = bill.AmountCents;
+            }
+            else
+            {
+                picked.Add(hit);
+                pool.Remove(hit);
+                last = hit.Date;
+                price = hit.AmountCents;
+            }
+            expected = Next(last, s.Frequency);
+        }
+        if (picked.Count == 0)
+            return new LookResult(s.Status == RecurringStatus.PossiblyCanceled ? s with { Status = RecurringStatus.Active } : s, absorbed, 0, false);
+
+        var ordered = picked.OrderBy(t => t.Date).ThenBy(t => t.Id).ToList();
+        var newest = ordered[^1];
+        var recent = ordered.TakeLast(3).Select(t => t.AmountCents).ToList();
+        var varies = recent.Count >= 3 && recent.Any(a => Math.Abs(a - newest.AmountCents) > Math.Max(50, newest.AmountCents / 50));
+        var amount = varies ? Median(ordered.TakeLast(6).Select(t => t.AmountCents).ToList()) : newest.AmountCents;
+        var old = s.AmountCents;
+        var changed = !varies && Math.Abs(amount - old) >= Math.Max(50, old * 2 / 100);
+        var next = Next(newest.Date, s.Frequency);
+        var status = today.DayNumber > next.DayNumber + grace ? RecurringStatus.PossiblyCanceled
+            : changed ? RecurringStatus.PriceChanged
+            : RecurringStatus.Active;
+        return new LookResult(s with
+        {
+            Status = status,
+            AmountCents = amount,
+            PreviousAmountCents = changed ? old : null,
+            PriceChangedOn = changed ? ordered.First(t => Math.Abs(t.AmountCents - old) >= Math.Max(50, old * 2 / 100)).Date : null,
+            MonthlyCents = MonthlyCents(amount, s.Frequency),
+            LastDate = newest.Date,
+            NextExpected = next,
+            Occurrences = s.Occurrences + ordered.Count,
+            AccountId = newest.AccountId,
+            CategoryId = s.CategoryId ?? newest.CategoryId,
+            TransactionIds = s.TransactionIds.Concat(ordered.Select(t => t.Id)).ToList(),
+        }, absorbed, ordered.Count, varies);
+    }
+
     private static bool SameMerchant(string a, string b)
     {
         if (a == b) return true;

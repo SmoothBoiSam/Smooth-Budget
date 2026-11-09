@@ -356,6 +356,9 @@ function Alert({
           <span className="font-semibold">{i.name}</span>: no charge since {formatDay(i.lastDate)}. It was expected {formatDay(i.nextExpected)}.
         </p>
         <div className={actions}>
+          <button type="button" onClick={() => onUpdate({ key: i.key, keepLooking: true }, keepLookingMessage(i))} className={smallBtnOn}>
+            Still going
+          </button>
           <button type="button" onClick={() => onUpdate({ key: i.key, canceled: true }, `Marked ${i.name} as canceled. Your budget stops expecting it.`)} className={`${smallBtn} text-danger`}>
             Canceled
           </button>
@@ -381,6 +384,11 @@ function Alert({
   )
 }
 
+/** What "Still going" does (DECISIONS.md 200), said when you tap it. */
+function keepLookingMessage(i: RecurringItem) {
+  return `Got it: ${i.name} is still going. The app looks for its charges after ${formatDay(i.lastDate)}, even at a new price, and your budget keeps expecting it.`
+}
+
 /** A date with its year, since a bill's charges go back 18 months. */
 function dayYear(iso: string) {
   const [y, m, d] = iso.split('-').map(Number)
@@ -397,7 +405,12 @@ function ChargeHistory({ item: i }: { item: RecurringItem }) {
       ? { text: `Canceled. Last charged ${dayYear(i.lastDate)}.`, cls: 'text-ink-soft' }
       : i.status === 'possiblyCanceled'
         ? { text: `Looks stopped: last charged ${dayYear(i.lastDate)}, and the next was expected ${formatDay(i.nextExpected)}.`, cls: 'font-medium text-gold-ink' }
-        : { text: `Still going: next expected ${formatDay(i.nextExpected)}.`, cls: 'text-ink-soft' }
+        : i.lookingSince && !i.found
+          ? { text: `Looking for its next charge, even at a new price: none yet after ${dayYear(i.lastDate)}. Your budget still expects it.`, cls: 'text-ink-soft' }
+          : {
+              text: `Still going: next expected ${formatDay(i.nextExpected)}.${i.found ? ` Found ${i.found} newer charge${i.found === 1 ? '' : 's'} when you said it was still going.` : ''}`,
+              cls: 'text-ink-soft',
+            }
   return (
     <section aria-label="Charges" className="mt-3">
       <p className={`text-xs ${status.cls}`}>{status.text}</p>
@@ -764,6 +777,31 @@ function ItemSheet({
                     </span>
                     <Chevron />
                   </button>
+                </li>
+              )}
+              {(i.status === 'possiblyCanceled' || i.lookingSince) && (
+                <li>
+                  {i.lookingSince ? (
+                    <button type="button" onClick={() => onUpdate({ key: i.key, keepLooking: false }, `Stopped looking for ${i.name}'s newer charges.`)} className={action}>
+                      <span>
+                        Stop looking for it
+                        <span className="block text-xs font-normal text-ink-soft">
+                          {i.found ? `The ${i.found} newer charge${i.found === 1 ? '' : 's'} it found go back to being separate. ` : ''}It can be flagged as stopped again.
+                        </span>
+                      </span>
+                      <Chevron />
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => onUpdate({ key: i.key, keepLooking: true }, keepLookingMessage(i))} className={`${action} text-primary`}>
+                      <span>
+                        Still going: keep looking
+                        <span className="block text-xs font-normal text-ink-soft">
+                          You didn’t cancel it. The app finds its newer charges, even at a new price, and your budget keeps expecting it.
+                        </span>
+                      </span>
+                      <Chevron />
+                    </button>
+                  )}
                 </li>
               )}
               <li>

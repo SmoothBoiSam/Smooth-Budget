@@ -966,6 +966,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<Guid>("HouseholdId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("KeepLookingOn")
+                        .HasColumnType("date");
+
                     b.Property<string>("Key")
                         .IsRequired()
                         .HasMaxLength(200)

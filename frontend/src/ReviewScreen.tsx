@@ -139,26 +139,7 @@ export default function ReviewScreen({
 
   return (
     <Page>
-      {/* The view switch sits beside the title so the scope chips get a row of their own and always fit (DECISIONS.md 167). It applies to both parts. */}
-      <PageHeader
-        title="Review"
-        action={
-        <div role="tablist" aria-label="View" className="flex shrink-0 rounded-full neu-inset p-1 text-xs font-medium">
-          {(['cards', 'list'] as const).map((m) => (
-            <button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`rounded-full px-3 py-1 ${mode === m ? 'neu-sm text-ink' : 'text-ink-soft'}`}
-            >
-              {m === 'cards' ? 'One by one' : 'List'}
-            </button>
-          ))}
-        </div>
-        }
-      />
+      <PageHeader title="Review" />
       {/* Two parts (DECISIONS.md 152): transactions to confirm, and bills the app found or that changed. */}
       <div role="tablist" aria-label="What to review" className="mt-2 grid grid-cols-2 gap-1.5 rounded-2xl neu-inset p-1 text-sm font-semibold">
         {(['transactions', 'bills'] as const).map((p) => {
@@ -181,6 +162,23 @@ export default function ReviewScreen({
             </button>
           )
         })}
+      </div>
+      {/* The view switch sits under the two parts, on a row of its own, and applies to both (DECISIONS.md 201). */}
+      <div className="mt-3 flex justify-center">
+        <div role="tablist" aria-label="View" className="flex rounded-full neu-inset p-1 text-xs font-medium">
+          {(['cards', 'list'] as const).map((m) => (
+            <button
+              key={m}
+              role="tab"
+              aria-selected={mode === m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`rounded-full px-4 py-1 ${mode === m ? 'neu-sm text-ink' : 'text-ink-soft'}`}
+            >
+              {m === 'cards' ? 'One by one' : 'List'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {part === 'bills' ? (

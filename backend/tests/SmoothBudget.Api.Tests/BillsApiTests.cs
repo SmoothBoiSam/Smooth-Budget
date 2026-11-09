@@ -140,6 +140,32 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Keep_looking_finds_a_bill_at_its_new_price()
+    {
+        // DECISIONS.md 200. A plan whose price went up, with tax making each new charge a few cents different, so it never
+        // shows up as a bill of its own and the old one looks stopped.
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        // The store bills another subscription too, so it's tracked per price.
+        string Row(int m, string amount, int day = 11) => $"{m:00}/{day:00}/2026,{m:00}/{day:00}/2026,APPLE.COM/BILL,Shopping,Sale,-{amount},";
+        await ImportAsync(c, card, ChaseCard, Enumerable.Range(1, 6).Select(m => Row(m, "25.95"))
+            .Concat([Row(7, "28.31"), Row(8, "28.37"), Row(9, "28.33"), Row(10, "28.35")])
+            .Concat(Enumerable.Range(1, 10).Select(m => Row(m, "2.99", 14))));
+        var plan = (await Bills(c))!.Items.Single(i => i.AmountCents == 25_95);
+        Assert.Equal(("possiblyCanceled", (DateOnly?)null), (plan.Status, plan.LookingSince));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(plan.Key, KeepLooking: true), Json)).StatusCode);
+        var found = (await Bills(c))!.Items.Single(i => i.Key == plan.Key);
+        Assert.Equal(("priceUp", 28_35L, 25_95L, 4, 10), (found.Status, found.AmountCents, found.PreviousAmountCents!.Value, found.Found, found.Charges.Count));
+        Assert.NotNull(found.LookingSince);
+
+        // Stop looking: it's back to the old charges, which look stopped.
+        await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(plan.Key, KeepLooking: false), Json);
+        Assert.Equal("possiblyCanceled", (await Bills(c))!.Items.Single(i => i.Key == plan.Key).Status);
+        Assert.Equal(2, (await Bills(c))!.Items.Count); // the 2.99 one was never touched
+    }
+
+    [Fact]
     public async Task Saying_two_bills_are_different_stops_the_question()
     {
         var c = await AppStoreAsync();

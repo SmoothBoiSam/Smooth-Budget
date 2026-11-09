@@ -169,4 +169,64 @@ public class RecurringDetectorTests
             .Concat(Monthly("APPLE.COM/BILL", 11_99, 20, 7, 10)).ToList();
         Assert.Empty(RecurringDetector.SameBillCandidates(RecurringDetector.Detect(later, Today)));
     }
+
+    /// <summary>
+    /// A cloud-storage plan at one store that bills several things: 25.95 through June, then a higher price with a few
+    /// cents of tax that differs each month, so no exact price repeats and it never shows up as a bill of its own.
+    /// </summary>
+    private static List<RecurringTxn> RaisedWithTax(params long[] after) =>
+        Monthly("APPLE.COM/BILL", 2_99, 14, 1, 10)
+            .Concat(Monthly("APPLE.COM/BILL", 11_99, 20, 1, 10))
+            .Concat(Monthly("APPLE.COM/BILL", 25_95, 11, 1, 6))
+            .Concat(after.Select((a, i) => T(2026, 7 + i, 11, a, "APPLE.COM/BILL"))).ToList();
+
+    [Fact]
+    public void Keep_looking_finds_a_bill_at_its_new_price()
+    {
+        var txns = RaisedWithTax(28_31, 28_37, 28_33, 28_35);
+        var found = RecurringDetector.Detect(txns, Today);
+        var stopped = Assert.Single(found, s => s.AmountCents == 25_95);
+        Assert.Equal(RecurringStatus.PossiblyCanceled, stopped.Status); // the new charges aren't a bill of their own
+
+        var look = RecurringDetector.KeepLooking(stopped, txns, found, Today);
+        Assert.Equal(4, look.Found);
+        Assert.Empty(look.Absorbed);
+        var s = look.Series;
+        Assert.Equal((RecurringStatus.PriceChanged, 28_35L, 25_95L, new DateOnly(2026, 7, 11)), (s.Status, s.AmountCents, s.PreviousAmountCents!.Value, s.PriceChangedOn!.Value));
+        Assert.Equal((new DateOnly(2026, 10, 11), new DateOnly(2026, 11, 11), 10), (s.LastDate, s.NextExpected, s.Occurrences));
+        // The 2.99 and 11.99 subscriptions that ran alongside it are left alone.
+        var twoNinetyNine = found.Single(f => f.AmountCents == 2_99).TransactionIds;
+        var elevenNinetyNine = found.Single(f => f.AmountCents == 11_99).TransactionIds;
+        Assert.DoesNotContain(s.TransactionIds, id => twoNinetyNine.Contains(id) || elevenNinetyNine.Contains(id));
+    }
+
+    [Fact]
+    public void Keep_looking_with_nothing_found_yet_stops_calling_it_stopped()
+    {
+        var txns = RaisedWithTax();
+        var found = RecurringDetector.Detect(txns, Today);
+        var look = RecurringDetector.KeepLooking(found.Single(s => s.AmountCents == 25_95), txns, found, Today);
+        Assert.Equal((0, RecurringStatus.Active, 25_95L), (look.Found, look.Series.Status, look.Series.AmountCents));
+    }
+
+    [Fact]
+    public void Keep_looking_flags_it_again_if_the_new_charges_stop_too()
+    {
+        var txns = RaisedWithTax(28_31, 28_37);
+        var found = RecurringDetector.Detect(txns, Today);
+        var look = RecurringDetector.KeepLooking(found.Single(s => s.AmountCents == 25_95), txns, found, Today);
+        Assert.Equal((2, RecurringStatus.PossiblyCanceled, new DateOnly(2026, 8, 11)), (look.Found, look.Series.Status, look.Series.LastDate));
+    }
+
+    [Fact]
+    public void Keep_looking_takes_in_the_bill_its_new_price_became()
+    {
+        var txns = TwoAppSubscriptions();
+        var found = RecurringDetector.Detect(txns, Today);
+        var old = found.Single(s => s.AmountCents == 10_99);
+        var look = RecurringDetector.KeepLooking(old, txns, found, Today);
+        Assert.Equal(found.Single(s => s.AmountCents == 11_99).Key, Assert.Single(look.Absorbed));
+        Assert.Equal((4, 11_99L, 10_99L, 10), (look.Found, look.Series.AmountCents, look.Series.PreviousAmountCents!.Value, look.Series.Occurrences));
+        Assert.DoesNotContain(look.Series.TransactionIds, found.Single(s => s.AmountCents == 2_99).TransactionIds.Contains);
+    }
 }

@@ -18,7 +18,9 @@ public record RecurringItemDto(
     SameBillDto? SameAs = null, string? ReplacedBy = null,
     // Bills you joined (DECISIONS.md 197): how many were joined into this one (Split apart undoes it), and whether the
     // price varies from charge to charge, so it's planned at its usual amount instead of flagged as a price change.
-    int MergedCount = 0, bool Varies = false);
+    int MergedCount = 0, bool Varies = false,
+    // "Still going: keep looking" (DECISIONS.md 200): on since this day; Found = charges it has picked up since its old last one.
+    DateOnly? LookingSince = null, int Found = 0);
 
 /// <summary>
 /// On the newer of two bills that may be one bill whose price changed (DECISIONS.md 181): the older one. That one carries
@@ -39,10 +41,11 @@ public record UpcomingBillDto(string Name, long AmountCents, DateOnly Date);
 /// <param name="MergeInto">This bill is the same as that one (its price changed): its charges join it (DECISIONS.md 181).</param>
 /// <param name="NotSameAs">This bill isn't the same as that one: stop asking.</param>
 /// <param name="Split">Undo joining: every bill joined into this one is its own again, and isn't suggested again.</param>
+/// <param name="KeepLooking">It's still going: find its later charges, even at a new price (DECISIONS.md 200). False stops looking.</param>
 public record RecurringUpdateRequest(
     string Key, string? Name = null, RecurringKind? Kind = null, int? DueDay = null, bool ClearDueDay = false,
     bool? Confirmed = null, bool? Dismissed = null, bool? Canceled = null, bool AcknowledgePrice = false,
-    string? MergeInto = null, string? NotSameAs = null, bool Split = false);
+    string? MergeInto = null, string? NotSameAs = null, bool Split = false, bool? KeepLooking = null);
 
 /// <summary>"Not a bill" (DECISIONS.md 197): its charges go to this spending category and it's no longer expected.</summary>
 public record NotABillRequest(string Key, Guid CategoryId);
@@ -111,6 +114,11 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         if (req.Canceled is { } canceled) row.CanceledOn = canceled ? await TodayAsync(householdId, ct) : null;
         if (req.AcknowledgePrice && series is not null) row.AcknowledgedAmountCents = series.AmountCents;
         if (req.NotSameAs is { } other) row.NotSameAsKey = other;
+        if (req.KeepLooking is { } look)
+        {
+            row.KeepLookingOn = look ? await TodayAsync(householdId, ct) : null;
+            if (look) row.CanceledOn = null; // you said it's still going
+        }
         row.UpdatedUtc = clock.GetUtcNow().UtcDateTime;
         if (req.MergeInto is { } into && into != req.Key)
         {
@@ -293,7 +301,22 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         var txns = await RecentAsync(householdId, ct);
         var rows = await db.RecurringItems.AsNoTracking().Where(r => r.HouseholdId == householdId).ToDictionaryAsync(r => r.Key, ct);
         var byId = txns.ToDictionary(t => t.Id);
-        var (series, joined) = ApplyMerges(RecurringDetector.Detect(txns, await TodayAsync(householdId, ct)), rows, byId);
+        var today = await TodayAsync(householdId, ct);
+        var (series, joined) = ApplyMerges(RecurringDetector.Detect(txns, today), rows, byId);
+
+        // Bills you said are still going (DECISIONS.md 200): find their later charges, even at a new price.
+        var found = new Dictionary<string, int>();
+        foreach (var key in series.Where(s => rows.GetValueOrDefault(s.Key)?.KeepLookingOn is not null).Select(s => s.Key).ToList())
+        {
+            var at = series.FindIndex(s => s.Key == key);
+            if (at < 0) continue; // taken in by another bill you're looking for
+            var look = RecurringDetector.KeepLooking(series[at], txns, series, today);
+            series[at] = look.Series;
+            series.RemoveAll(s => look.Absorbed.Contains(s.Key));
+            found[key] = look.Found;
+            if (look.Varies)
+                joined[key] = (joined.GetValueOrDefault(key).Count, true);
+        }
 
         // Two bills that may be one whose price changed: ask on the newer one, and hold the older one's own question.
         var sameAs = new Dictionary<string, RecurringSeries>();
@@ -336,7 +359,8 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
                     ? new SameBillDto(old.Key, rows.GetValueOrDefault(old.Key)?.Name ?? old.Name, old.AmountCents, old.FirstDate, old.LastDate, old.Occurrences)
                     : null,
                 replacedBy.GetValueOrDefault(s.Key),
-                joined.GetValueOrDefault(s.Key).Count, joined.GetValueOrDefault(s.Key).Varies);
+                joined.GetValueOrDefault(s.Key).Count, joined.GetValueOrDefault(s.Key).Varies,
+                r?.KeepLookingOn, found.GetValueOrDefault(s.Key));
             return new Item(s, dto, r?.Dismissed ?? false);
         }).ToList();
     }

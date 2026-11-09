@@ -734,6 +734,9 @@ export interface RecurringItem {
   /** How many bills you joined into this one (Split apart undoes it), and whether its price varies (DECISIONS.md 197). */
   mergedCount?: number
   varies?: boolean
+  /** "Still going: keep looking" is on since this day, and how many newer charges it found (DECISIONS.md 200). */
+  lookingSince?: string | null
+  found?: number
 }
 
 export interface ArchivedCategory {
@@ -768,6 +771,8 @@ export interface RecurringUpdate {
   notSameAs?: string
   /** Undo joining: the bills joined into this one are their own again. */
   split?: boolean
+  /** It's still going: find its later charges, even at a new price. False stops looking. */
+  keepLooking?: boolean
 }
 
 export const recurringApi = {
