@@ -29,6 +29,8 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
   // What an update-mode Link is for: signing in again, or adding accounts (DECISIONS.md 157).
   const [updateFor, setUpdateFor] = useState<'reconnect' | 'add'>('reconnect')
   const [keepBoth, setKeepBoth] = useState(false)
+  // Set when the app opened from a bank's own sign-in: Plaid needs this address to finish (DECISIONS.md 185).
+  const [returnedFrom, setReturnedFrom] = useState<string | null>(null)
   const [setup, setSetup] = useState<LinkResult | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -62,12 +64,41 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
     }
   }
 
+  // Back from the bank: pick up the same Plaid session, then tidy the address (DECISIONS.md 185).
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (!url.pathname.startsWith('/plaid-oauth')) return
+    const returned = url.origin + url.pathname + url.search
+    window.history.replaceState(null, '', '/#/more')
+    if (!url.searchParams.has('oauth_state_id')) return
+    void (async () => {
+      try {
+        const p = await plaidApi.oauthPending()
+        setUpdateItemId(p.itemId)
+        setUpdateFor(p.addAccounts ? 'add' : 'reconnect')
+        setReturnedFrom(returned)
+        setLinkToken(p.linkToken)
+      } catch {
+        setError('Plaid’s session ran out while you were at your bank. Tap Add accounts (or Connect a bank) again.')
+      }
+    })()
+  }, [])
+
+  function linkClosed() {
+    setLinkToken(null)
+    setUpdateItemId(null)
+    if (returnedFrom) {
+      setReturnedFrom(null)
+      void plaidApi.clearOAuthPending().catch(() => undefined)
+    }
+  }
+
   const { open, ready } = usePlaidLink({
     token: linkToken,
+    receivedRedirectUri: returnedFrom ?? undefined,
     onSuccess: (publicToken) => {
       const itemId = updateItemId
-      setLinkToken(null)
-      setUpdateItemId(null)
+      linkClosed()
       void run('Finishing…', async () => {
         if (itemId && updateFor === 'add') {
           await showAccounts(itemId)
@@ -83,8 +114,7 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
     },
     onExit: () => {
       const itemId = updateItemId
-      setLinkToken(null)
-      setUpdateItemId(null)
+      linkClosed()
       // With nothing changed in Plaid (the account was already ticked), Plaid closes without "success": still check
       // whether it shares an account the app hasn't imported yet (DECISIONS.md 184).
       if (itemId && updateFor === 'add') void run('Checking your accounts…', () => showAccounts(itemId))

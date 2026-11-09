@@ -462,4 +462,37 @@ public class PlaidApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(["Fake Checking", "Fake Rewards Card", "Fake Savings"], accounts.Select(a => a.Name).Order().ToList());
         Assert.Equal("Savings", accounts.Single(a => a.Name == "Fake Savings").Type);
     }
+
+    [Fact]
+    public async Task A_bank_sign_in_that_returns_to_the_app_picks_up_the_same_plaid_session()
+    {
+        // DECISIONS.md 185: with a redirect URI set, Link is told where the bank sends you back, and the session waits
+        // on the server for you (only you), since on a phone you may come back in the browser instead of the app.
+        var options = app.Services.GetRequiredService<PlaidOptions>();
+        options.RedirectUri = app.Plaid.AllowedRedirectUri = "https://app.test/plaid-oauth";
+        try
+        {
+            var (client, household) = await RegisterAsync();
+            var first = await LinkAsync(client, household);
+            Assert.True((await client.PostAsJsonAsync("/api/plaid/link-token", new LinkTokenRequest(first.ItemId, AddAccounts: true), Json)).IsSuccessStatusCode);
+            Assert.Contains("https://app.test/plaid-oauth", app.Plaid.Requests.Last(r => r.Path == "link/token/create").Body);
+
+            var pending = (await client.GetFromJsonAsync<PendingLink>("/api/plaid/oauth-pending", Json))!;
+            Assert.Equal(("link-sandbox-fake", first.ItemId, true), (pending.LinkToken, pending.ItemId, pending.AddAccounts));
+            var (other, _) = await RegisterAsync();
+            Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync("/api/plaid/oauth-pending")).StatusCode);
+
+            Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync("/api/plaid/oauth-pending")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/plaid/oauth-pending")).StatusCode);
+
+            // Not allowed in the Plaid dashboard yet: linking still works, the old way.
+            app.Plaid.AllowedRedirectUri = null;
+            Assert.True((await client.PostAsJsonAsync("/api/plaid/link-token", new LinkTokenRequest(null), Json)).IsSuccessStatusCode);
+            Assert.DoesNotContain("redirect_uri", app.Plaid.Requests.Last(r => r.Path == "link/token/create").Body);
+        }
+        finally
+        {
+            options.RedirectUri = app.Plaid.AllowedRedirectUri = null;
+        }
+    }
 }

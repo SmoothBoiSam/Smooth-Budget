@@ -26,6 +26,8 @@ public sealed class FakePlaid : HttpMessageHandler
     private readonly ConcurrentDictionary<string, string> _publicTokens = new();
     public ConcurrentQueue<(string Path, string Body, string? ClientId, string? Secret)> Requests { get; } = new();
     public ConcurrentDictionary<string, string> SyncErrors { get; } = new(); // access token -> error_code
+    /// <summary>The redirect URI "registered in the dashboard"; any other is refused like Plaid does (INVALID_FIELD).</summary>
+    public string? AllowedRedirectUri { get; set; }
 
     /// <summary>
     /// Registers a bank login and returns the public token Link would hand the app. Like real Plaid,
@@ -109,6 +111,8 @@ public sealed class FakePlaid : HttpMessageHandler
         switch (path)
         {
             case "link/token/create":
+                if (Str("redirect_uri") is { } redirect && redirect != AllowedRedirectUri)
+                    return Error("INVALID_REQUEST", "INVALID_FIELD");
                 return Ok(new JsonObject { ["link_token"] = "link-sandbox-fake", ["expiration"] = "2030-01-01T00:00:00Z" });
             case "item/public_token/exchange":
                 var access = _publicTokens.GetValueOrDefault(Str("public_token") ?? "");

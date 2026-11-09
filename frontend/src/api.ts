@@ -398,6 +398,9 @@ export const plaidApi = {
   removeItem: (id: string) => request<void>('DELETE', `/plaid/items/${id}`),
   reconnected: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/reconnected`),
   syncAll: () => request<SyncResult[]>('POST', '/sync'),
+  /** The Plaid session to pick up again after a bank's own sign-in sends you back (DECISIONS.md 185); 404 when none. */
+  oauthPending: () => request<{ linkToken: string; itemId: string | null; addAccounts: boolean }>('GET', '/plaid/oauth-pending'),
+  clearOAuthPending: () => request<void>('DELETE', '/plaid/oauth-pending'),
 }
 
 export interface PendingSweep {

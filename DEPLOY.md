@@ -60,7 +60,12 @@ The fake demo and test data that came along can't be reached by anyone: its logi
 
 In Render, web service → **Environment**, set `PLAID_WEBHOOK_URL` to `https://YOUR-APP.onrender.com/api/plaid/webhook` and save (it redeploys). On startup the app tells Plaid to send each linked bank's updates there, so new transactions arrive on their own instead of only when you pull to refresh (the 6-hourly background sync still runs too).
 
-Connecting a *new* bank works best from a computer's browser: banks like Chase sign you in through a pop-up window, which phone browsers handle poorly.
+**Phones and banks like Chase.** These banks sign you in on their own site or app, then send you back. For that to work on a phone, tell Plaid where "back" is:
+
+1. Plaid dashboard → **Developers → API → Allowed redirect URIs** → add `https://YOUR-APP.onrender.com/plaid-oauth` and save.
+2. Then, in Render → web service → **Environment**, set `PLAID_REDIRECT_URI` to the same address and save (it redeploys).
+
+Do them in that order. Until both are done, the app links the old way (a pop-up, which works from a computer's browser but can't return to the app on a phone). On an iPhone, the bank may send you back to Safari rather than the installed app: sign in there once and Plaid finishes where it left off.
 
 ## 6. Install it on your phone
 

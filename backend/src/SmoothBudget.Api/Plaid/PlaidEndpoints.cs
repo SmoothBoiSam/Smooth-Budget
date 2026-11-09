@@ -31,7 +31,16 @@ public static class PlaidEndpoints
             webhooks = !string.IsNullOrWhiteSpace(o.WebhookUrl),
         });
 
-        plaidGroup.MapPost("/link-token", async (LinkTokenRequest req, HttpContext ctx, AppDbContext db, PlaidClient plaid, SecretBox secrets, CancellationToken ct) =>
+        // Back from a bank's own sign-in (DECISIONS.md 185): the Link session to pick up again, if one is open.
+        plaidGroup.MapGet("/oauth-pending", (HttpContext ctx, PlaidOAuthPending pending) =>
+            pending.Get(ctx.User.FindFirstValue(ClaimTypes.NameIdentifier)!) is { } link ? Results.Ok(link) : Results.NotFound());
+        plaidGroup.MapDelete("/oauth-pending", (HttpContext ctx, PlaidOAuthPending pending) =>
+        {
+            pending.Clear(ctx.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            return Results.NoContent();
+        });
+
+        plaidGroup.MapPost("/link-token", async (LinkTokenRequest req, HttpContext ctx, AppDbContext db, PlaidClient plaid, SecretBox secrets, PlaidOptions o, PlaidOAuthPending pending, CancellationToken ct) =>
             await Guard(async () =>
             {
                 string? updateToken = null;
@@ -42,7 +51,11 @@ public static class PlaidEndpoints
                     updateToken = secrets.Decrypt(item.AccessTokenEncrypted);
                 }
                 // The user's id (a random GUID), never an email, identifies the user to Plaid.
-                var token = await plaid.CreateLinkTokenAsync(ctx.User.FindFirstValue(ClaimTypes.NameIdentifier)!, updateToken, ct, accountSelection: req.AddAccounts && updateToken is not null);
+                var userId = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+                var addAccounts = req.AddAccounts && updateToken is not null;
+                var token = await plaid.CreateLinkTokenAsync(userId, updateToken, ct, accountSelection: addAccounts);
+                if (!string.IsNullOrWhiteSpace(o.RedirectUri))
+                    pending.Save(userId, new PendingLink(token, req.ItemId, addAccounts));
                 return Results.Ok(new { linkToken = token });
             }));
 

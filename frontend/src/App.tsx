@@ -14,6 +14,10 @@ import SavingsScreen from './SavingsScreen'
 import { saved, useOnline } from './offline'
 import { OfflineBar } from './ui'
 
+// Back from a bank's own sign-in (Plaid OAuth, DECISIONS.md 185): open More, where Bank connections picks Plaid up again.
+// The path and ?oauth_state_id stay in the address for Plaid to read.
+if (window.location.pathname.startsWith('/plaid-oauth') && !window.location.hash.startsWith('#/more')) window.location.hash = '#/more'
+
 function currentRoute(): Route {
   const hash = window.location.hash.replace(/^#\/?/, '')
   // Bills moved into Review (DECISIONS.md 152); old links land there.

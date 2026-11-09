@@ -13,6 +13,12 @@ public class PlaidOptions
     public string Environment { get; set; } = "sandbox";
     /// <summary>Public HTTPS URL of /api/plaid/webhook. Empty locally, where Plaid can't reach the app.</summary>
     public string? WebhookUrl { get; set; }
+    /// <summary>
+    /// Where a bank's own sign-in (OAuth: Chase and other big banks) sends you back, e.g. https://…/plaid-oauth. It must
+    /// be listed under Allowed redirect URIs in the Plaid dashboard. Empty: Plaid uses a pop-up, which works on a computer
+    /// but can't hand back to the app on a phone (DECISIONS.md 185).
+    /// </summary>
+    public string? RedirectUri { get; set; }
     /// <summary>Base64 32-byte key that encrypts access tokens at rest.</summary>
     public string? TokenKey { get; set; }
 
@@ -91,6 +97,19 @@ public class PlaidClient(HttpClient http, PlaidOptions options)
             body["access_token"] = accessTokenForUpdate; // update mode: re-authenticate an existing item
             // ...and, to add accounts opened since (or skipped at first), choose which of the bank's accounts to share.
             if (accountSelection) body["update"] = new { account_selection_enabled = true };
+        }
+        if (!string.IsNullOrWhiteSpace(options.RedirectUri))
+        {
+            body["redirect_uri"] = options.RedirectUri;
+            try
+            {
+                return (await PostAsync<JsonElement>("link/token/create", body, ct)).GetProperty("link_token").GetString()!;
+            }
+            catch (PlaidException ex) when (ex.ErrorCode == "INVALID_FIELD")
+            {
+                // Not (yet) allowed in the Plaid dashboard: link the old way rather than not at all.
+                body.Remove("redirect_uri");
+            }
         }
         var r = await PostAsync<JsonElement>("link/token/create", body, ct);
         return r.GetProperty("link_token").GetString()!;

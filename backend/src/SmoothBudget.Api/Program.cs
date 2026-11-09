@@ -105,6 +105,7 @@ var plaidOptions = new PlaidOptions
     Secret = config["PLAID_SECRET"],
     Environment = config["PLAID_ENV"] ?? "sandbox",
     WebhookUrl = config["PLAID_WEBHOOK_URL"],
+    RedirectUri = config["PLAID_REDIRECT_URI"],
     TokenKey = config["PLAID_TOKEN_KEY"],
 };
 builder.Services.AddSingleton(plaidOptions);
@@ -116,6 +117,7 @@ builder.Services.AddHttpClient<PlaidClient>((sp, http) =>
     http.Timeout = TimeSpan.FromSeconds(60);
 });
 builder.Services.AddSingleton<PlaidItemLocks>();
+builder.Services.AddSingleton<PlaidOAuthPending>();
 builder.Services.AddSingleton<PlaidSyncQueue>();
 builder.Services.AddScoped<PlaidSyncService>();
 builder.Services.AddScoped<PlaidLinkService>();
