@@ -346,6 +346,18 @@ export interface BudgetSummary {
 
 export const budgetSummaryApi = {
   get: () => request<BudgetSummary>('GET', '/budget/summary'),
+  /** A category's spending in each of the last six budget months and this one so far (DECISIONS.md 222). */
+  history: (categoryId: string) => request<{ months: CategoryMonth[] }>('GET', `/budget/categories/${categoryId}/history`),
+}
+
+export interface CategoryMonth {
+  /** The budget month's label: the 1st of its calendar month. */
+  month: string
+  start: string
+  end: string
+  spentCents: number
+  /** This month, still going. */
+  current: boolean
 }
 
 export interface SyncStatus {

@@ -150,6 +150,23 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task A_category_shows_its_spending_month_by_month()
+    {
+        // DECISIONS.md 222: the last six budget months and this one, from where your transactions start.
+        var (client, _, card) = await NewHouseholdAsync();
+        await ImportAsync(client, card,
+            "10/10/2026,10/11/2026,FRESH MARKET,Groceries,Sale,-400.00,",
+            "11/10/2026,11/11/2026,FRESH MARKET,Groceries,Sale,-980.00,",
+            "11/12/2026,11/13/2026,TAQUERIA UNO,Food & Drink,Sale,-100.00,");
+        await At(client, 2026, 12, 20);
+        var groceries = Cat(await Budget(client), "Groceries");
+        var h = (await client.GetFromJsonAsync<CategoryHistoryDto>($"/api/budget/categories/{groceries.Id}/history", Json))!;
+        Assert.Equal([(new DateOnly(2026, 10, 1), 400_00L, false), (new DateOnly(2026, 11, 1), 980_00L, false), (new DateOnly(2026, 12, 1), 0L, true)],
+            h.Months.Select(m => (m.Month, m.SpentCents, m.Current)));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/budget/categories/{Guid.NewGuid()}/history")).StatusCode);
+    }
+
+    [Fact]
     public async Task A_month_cannot_be_closed_before_it_ends()
     {
         var (client, _, _) = await NewHouseholdAsync();

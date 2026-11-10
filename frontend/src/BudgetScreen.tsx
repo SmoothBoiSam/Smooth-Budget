@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import CategoryHistory from './CategoryHistory'
 import {
   ApiError,
   budgetApi,
@@ -210,6 +211,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {summary && view.kind === 'category' && line && (
         <>
           <CategoryHeader line={line} />
+          <CategoryHistory key={line.id} categoryId={line.id} limitCents={line.limitCents} spending={line.type === 'Variable'} />
           <TransactionList
             items={month.filter((t) => t.categoryId === line.id)}
             empty="Nothing in this category yet this month."

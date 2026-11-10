@@ -36,6 +36,11 @@ public record GeneratorDto(
 
 public record BudgetMonthDtoLite(DateOnly Start, DateOnly End);
 
+/// <param name="Month">The budget month's label (the 1st of its calendar month).</param>
+/// <param name="Current">This month, still going.</param>
+public record CategoryMonthDto(DateOnly Month, DateOnly Start, DateOnly End, long SpentCents, bool Current);
+public record CategoryHistoryDto(IReadOnlyList<CategoryMonthDto> Months);
+
 public static class BudgetEndpoints
 {
     public static void MapBudgetEndpoints(this IEndpointRouteBuilder app)
@@ -196,6 +201,29 @@ public static class BudgetEndpoints
             var result = await categorization.RunAsync(householdId, ct);
             await auto.RefreshAsync(householdId, ct);
             return Results.Ok(new ResetCategoriesResult(cleared, result.Filed, result.Guesses, result.StillUncategorized, banks));
+        });
+
+        // A category's spending month by month (DECISIONS.md 222): the last six budget months and this one so far, counted
+        // the way the budget counts them. Months from before your transactions start are left out rather than shown as $0.
+        g.MapGet("/categories/{id:guid}/history", async (Guid id, HttpContext ctx, AppDbContext db, BudgetMonthService months, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var cats = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId)
+                .Select(c => new BudgetCategory(c.Id, c.Type, c.MonthlyLimitCents)).ToListAsync(ct);
+            if (!cats.Any(c => c.Id == id)) return Results.NotFound();
+            var (_, today, calendar) = await months.ContextAsync(householdId, ct);
+            var current = calendar.MonthContaining(today);
+            var ranges = Enumerable.Range(0, 7).Select(i => current.Label.AddMonths(i - 6)).Select(l => calendar.MonthOf(l.Year, l.Month)).ToList();
+            var firstSeen = await db.Transactions.Where(t => t.HouseholdId == householdId).MinAsync(t => (DateOnly?)t.Date, ct);
+            var txns = await db.Transactions.AsNoTracking()
+                .Where(t => t.HouseholdId == householdId && t.Date >= ranges[0].Start && t.Date <= current.End && t.Account.IncludedInBudget)
+                .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind,
+                    t.Account.Type == AccountType.CreditCard))
+                .ToListAsync(ct);
+            return Results.Ok(new CategoryHistoryDto(ranges.Where(r => firstSeen is { } first && r.End >= first).Select(r =>
+                new CategoryMonthDto(r.Label, r.Start, r.End,
+                    CategoryBreakdownCalculator.Calculate(r, cats, txns.Where(t => t.Date >= r.Start && t.Date <= r.End)).Single(s => s.CategoryId == id).SpentCents,
+                    r == current)).ToList()));
         });
 
         g.MapGet("/categories/discover",async (HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>
