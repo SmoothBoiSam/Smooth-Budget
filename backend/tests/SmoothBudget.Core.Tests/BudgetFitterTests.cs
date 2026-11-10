@@ -94,6 +94,10 @@ public class BudgetFitterTests
         Assert.Equal((100_00L, 10_00L), (Limit(f, Save), Limit(f, EatingOut) + Limit(f, Shopping)));
         Assert.Equal((0L, 290_00L), (f.ShortCents, f.SqueezedCents));
         Assert.EndsWith("Raised to $1,800.00, what's already been paid this month.", f.Proposal.Categories.Single(c => c.CategoryId == Rent).Explanation);
+        // DECISIONS.md 223: the unsqueezed plan keeps the raise but not the squeeze, even when both happen.
+        var before = f.Unsqueezed!.Categories;
+        Assert.Equal((1_800_00L, 200_00L, 100_00L),
+            (before.Single(c => c.CategoryId == Rent).ProposedCents, before.Single(c => c.CategoryId == EatingOut).ProposedCents, before.Single(c => c.CategoryId == Shopping).ProposedCents));
 
         // A limit you set stays even when more was paid.
         var mine = BudgetFitter.Fit(Plan(3_000_00), spent, new HashSet<Guid> { Rent }, savingsFromGoals: false);

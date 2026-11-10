@@ -39,7 +39,9 @@ public record BudgetMonthDtoLite(DateOnly Start, DateOnly End);
 /// <param name="Month">The budget month's label (the 1st of its calendar month).</param>
 /// <param name="Current">This month, still going.</param>
 public record CategoryMonthDto(DateOnly Month, DateOnly Start, DateOnly End, long SpentCents, bool Current);
-public record CategoryHistoryDto(IReadOnlyList<CategoryMonthDto> Months);
+/// <param name="UnsqueezedCents">Where this month's limit would be if the automatic budget hadn't squeezed it to fit the
+/// month's money (DECISIONS.md 223); null when it wasn't squeezed.</param>
+public record CategoryHistoryDto(IReadOnlyList<CategoryMonthDto> Months, long? UnsqueezedCents = null);
 
 public static class BudgetEndpoints
 {
@@ -205,7 +207,7 @@ public static class BudgetEndpoints
 
         // A category's spending month by month (DECISIONS.md 222): the last six budget months and this one so far, counted
         // the way the budget counts them. Months from before your transactions start are left out rather than shown as $0.
-        g.MapGet("/categories/{id:guid}/history", async (Guid id, HttpContext ctx, AppDbContext db, BudgetMonthService months, CancellationToken ct) =>
+        g.MapGet("/categories/{id:guid}/history", async (Guid id, HttpContext ctx, AppDbContext db, BudgetMonthService months, AutoBudgetService auto, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             var cats = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId)
@@ -220,10 +222,19 @@ public static class BudgetEndpoints
                 .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind,
                     t.Account.Type == AccountType.CreditCard))
                 .ToListAsync(ct);
+            // Squeezed by the automatic budget (DECISIONS.md 223): where it would be with enough money, next to where it is.
+            long? unsqueezed = null;
+            if (await db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).SingleAsync(ct))
+            {
+                var (fitted, _, locked) = await auto.PlanAsync(householdId, ct);
+                var before = fitted.Unsqueezed?.Categories.FirstOrDefault(l => l.CategoryId == id)?.ProposedCents;
+                var after = fitted.Proposal.Categories.FirstOrDefault(l => l.CategoryId == id)?.ProposedCents;
+                if (!locked.Contains(id) && before > after) unsqueezed = before;
+            }
             return Results.Ok(new CategoryHistoryDto(ranges.Where(r => firstSeen is { } first && r.End >= first).Select(r =>
                 new CategoryMonthDto(r.Label, r.Start, r.End,
                     CategoryBreakdownCalculator.Calculate(r, cats, txns.Where(t => t.Date >= r.Start && t.Date <= r.End)).Single(s => s.CategoryId == id).SpentCents,
-                    r == current)).ToList()));
+                    r == current)).ToList(), unsqueezed));
         });
 
         g.MapGet("/categories/discover",async (HttpContext ctx, CategoryDiscoveryService discovery, CancellationToken ct) =>

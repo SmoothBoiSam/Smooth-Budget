@@ -8,27 +8,33 @@ const whole = (cents: number) => '$' + Math.round(cents / 100).toLocaleString('e
 
 /**
  * A category's spending over the past months (DECISIONS.md 222): one bar a month, this month's lighter since it's still
- * going, and a dashed line across at this month's budget. Tap a bar for its amount.
+ * going, and a line across at this month's budget. When the automatic budget squeezed it to fit the month's money, a
+ * fainter dashed line shows where it would be otherwise (DECISIONS.md 223). Tap a bar for its amount.
  */
 export default function CategoryHistory({ categoryId, limitCents, spending }: { categoryId: string; limitCents: number; spending: boolean }) {
   const [months, setMonths] = useState<CategoryMonth[] | null>(null)
+  const [unsqueezed, setUnsqueezed] = useState<number | null>(null)
   const [picked, setPicked] = useState<number | null>(null)
 
   useEffect(() => {
     let live = true
     budgetSummaryApi
       .history(categoryId)
-      .then((h) => live && setMonths(h.months))
+      .then((h) => {
+        if (!live) return
+        setMonths(h.months)
+        setUnsqueezed(h.unsqueezedCents && h.unsqueezedCents > limitCents ? h.unsqueezedCents : null)
+      })
       .catch(() => live && setMonths([]))
     return () => {
       live = false
     }
-  }, [categoryId])
+  }, [categoryId, limitCents])
 
   // Nothing to compare until there's an earlier month.
   if (!months || months.length < 2) return null
 
-  const top = Math.max(limitCents, ...months.map((m) => m.spentCents), 1) * 1.12
+  const top = Math.max(limitCents, unsqueezed ?? 0, ...months.map((m) => m.spentCents), 1) * 1.12
   const pct = (cents: number) => `${(Math.max(0, cents) / top) * 100}%`
   const shown = picked ?? months.length - 1
   const m = months[shown]
@@ -47,10 +53,21 @@ export default function CategoryHistory({ categoryId, limitCents, spending }: { 
       </div>
 
       <div aria-hidden className="relative mt-4 h-36">
-        {/* This month's budget, across every month. */}
+        {/* Where it would be without the squeeze: fainter, labelled on the left so the two labels never collide. */}
+        {unsqueezed !== null && (
+          <div className="absolute inset-x-0 z-10 border-t-2 border-dashed border-ink-faint/80" style={{ bottom: pct(unsqueezed) }}>
+            <span className="absolute left-0 -top-5 rounded bg-surface px-1 text-[11px] text-ink-faint">{whole(unsqueezed)} usual</span>
+          </div>
+        )}
+        {/* This month's budget, across every month: solid when it's the squeezed one. */}
         {limitCents > 0 && (
-          <div className="absolute inset-x-0 z-10 border-t-2 border-dashed border-ink-soft/70" style={{ bottom: pct(limitCents) }}>
-            <span className="absolute right-0 -top-5 rounded bg-surface px-1 text-[11px] font-medium text-ink-soft">{whole(limitCents)} budget</span>
+          <div
+            className={`absolute inset-x-0 z-10 border-t-2 ${unsqueezed !== null ? 'border-solid border-ink-soft' : 'border-dashed border-ink-soft/70'}`}
+            style={{ bottom: pct(limitCents) }}
+          >
+            <span className="absolute right-0 -top-5 rounded bg-surface px-1 text-[11px] font-medium text-ink-soft">
+              {whole(limitCents)} {unsqueezed !== null ? 'now' : 'budget'}
+            </span>
           </div>
         )}
         <div className="absolute inset-0 flex items-end gap-2 border-b border-ink/15">
@@ -78,6 +95,12 @@ export default function CategoryHistory({ categoryId, limitCents, spending }: { 
         ))}
       </div>
 
+      {unsqueezed !== null && (
+        <p className="mt-3 text-xs text-ink-soft">
+          Squeezed from {whole(unsqueezed)} to {whole(limitCents)} so the month's money covers everything.
+        </p>
+      )}
+
       {/* The same numbers for screen readers. */}
       <ul className="sr-only">
         {months.map((x) => (
@@ -87,6 +110,7 @@ export default function CategoryHistory({ categoryId, limitCents, spending }: { 
           </li>
         ))}
         {limitCents > 0 && <li>This month's budget: {formatCents(limitCents)}</li>}
+        {unsqueezed !== null && <li>Before squeezing to fit this month's money: {formatCents(unsqueezed)}</li>}
       </ul>
     </section>
   )

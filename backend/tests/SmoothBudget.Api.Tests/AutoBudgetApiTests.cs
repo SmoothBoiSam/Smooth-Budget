@@ -101,6 +101,14 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Contains("squeezed out of spending", s.Auto!.Note);
         var before = s.IncomeExpectedCents;
 
+        // DECISIONS.md 223: a squeezed category's history says where it would be without the squeeze; rent wasn't squeezed.
+        async Task<CategoryHistoryDto> History(Guid id) => (await c.GetFromJsonAsync<CategoryHistoryDto>($"/api/budget/categories/{id}/history", Json))!;
+        var eatingHistory = await History(eating);
+        Assert.NotNull(eatingHistory.UnsqueezedCents);
+        Assert.True(eatingHistory.UnsqueezedCents > Limit(s, eating));
+        Assert.Contains($"(from {eatingHistory.UnsqueezedCents / 100m:C})", plan.Categories.Single(x => x.CategoryId == eating).Explanation);
+        Assert.Null((await History(rent)).UnsqueezedCents);
+
         // Dropping a trip lowers the Feb 22 check: the budget follows on the next look, with no button.
         await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, [], [], ["T1001 02/04"]), Json);
         var after = await Summary(c);

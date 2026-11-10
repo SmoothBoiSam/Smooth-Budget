@@ -4,7 +4,8 @@ namespace SmoothBudget.Core.Budgeting;
 
 /// <param name="ShortCents">What the plan still needs beyond the month's money after every squeeze (0 when it fits).</param>
 /// <param name="SqueezedCents">How much was taken off limits to make it fit.</param>
-public sealed record FittedBudget(BudgetProposal Proposal, long ShortCents, long SqueezedCents);
+/// <param name="Unsqueezed">The proposal before any squeeze: each limit where it would be with enough money (DECISIONS.md 223).</param>
+public sealed record FittedBudget(BudgetProposal Proposal, long ShortCents, long SqueezedCents, BudgetProposal? Unsqueezed = null);
 
 /// <summary>
 /// Fits a month's budget to the money coming in (DECISIONS.md 136). The generator already gives the leftover to your
@@ -46,12 +47,13 @@ public static class BudgetFitter
         if (!lines.SequenceEqual(p.Categories))
         {
             var raised = lines.Sum(l => l.ProposedCents);
-            p = p with { Categories = lines, AllocatedCents = raised, UnallocatedCents = p.IncomeCents + p.PartnerCents - raised, SpendsMoreThanIncome = raised > p.IncomeCents + p.PartnerCents };
+            // A copy: the squeeze below edits \`lines\`, and this stays the unsqueezed proposal (DECISIONS.md 223).
+            p = p with { Categories = lines.ToList(), AllocatedCents = raised, UnallocatedCents = p.IncomeCents + p.PartnerCents - raised, SpendsMoreThanIncome = raised > p.IncomeCents + p.PartnerCents };
         }
 
         var available = p.IncomeCents + p.PartnerCents;
         var over = p.AllocatedCents - available;
-        if (over <= 0) return new FittedBudget(p, 0, 0);
+        if (over <= 0) return new FittedBudget(p, 0, 0, p);
         long Floor80(ProposedLimit l) => Math.Max(Spent(l.CategoryId), RoundUpToDollar(l.MedianCents * EssentialFloorPercent / 100));
         var stages = new (Func<ProposedLimit, bool> Pick, Func<ProposedLimit, long> Floor, string Reason)[]
         {
@@ -95,7 +97,7 @@ public static class BudgetFitter
 
         var allocated = lines.Sum(l => l.ProposedCents);
         var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = available - allocated, SpendsMoreThanIncome = allocated > available };
-        return new FittedBudget(fitted, Math.Max(0, allocated - available), squeezed);
+        return new FittedBudget(fitted, Math.Max(0, allocated - available), squeezed, p);
     }
 
     private static long RoundUpToDollar(long cents) => cents <= 0 ? 0 : (cents + 99) / 100 * 100;

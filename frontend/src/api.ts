@@ -347,7 +347,8 @@ export interface BudgetSummary {
 export const budgetSummaryApi = {
   get: () => request<BudgetSummary>('GET', '/budget/summary'),
   /** A category's spending in each of the last six budget months and this one so far (DECISIONS.md 222). */
-  history: (categoryId: string) => request<{ months: CategoryMonth[] }>('GET', `/budget/categories/${categoryId}/history`),
+  history: (categoryId: string) =>
+    request<{ months: CategoryMonth[]; unsqueezedCents: number | null }>('GET', `/budget/categories/${categoryId}/history`),
 }
 
 export interface CategoryMonth {
