@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, budgetApi, isNewFind, needsLook, recurringApi, type Category, type RecurringItem, type RecurringSummary, type RecurringUpdate, listedType } from './api'
-import { Chevron, ErrorNotice, Loading, sheetCls, smallBtn, smallBtnOn } from './ui'
+import { Chevron, ErrorNotice, Loading, reviewCard, reviewPrimary, reviewSecondary, sheetCls, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay } from './format'
 
 /** A bill's price: "about" when it varies from charge to charge (DECISIONS.md 197). */
@@ -142,7 +142,7 @@ export default function BillsSection({
               All bills
             </button>
           ) : (
-            <p className="mt-3 text-xs text-ink-soft">
+            <p className="mt-3 flex min-h-8 items-center text-xs text-ink-soft">
               <span className="font-semibold text-ink-soft">{waiting.length} to look at</span>
               {skipped.length > 0 && (
                 <button type="button" onClick={() => setSkipped([])} className={`${smallBtn} ml-2 text-ink-soft`}>
@@ -183,7 +183,7 @@ export default function BillsSection({
 
       {s && !current && (
         <>
-          <dl className="mt-4 rounded-3xl neu p-4">
+          <dl className="mt-3 rounded-3xl neu p-5">
             <dt className="text-xs text-ink-soft">Your bills cost</dt>
             <dd className="text-xl font-semibold tabular-nums">{formatCents(s.monthlyCents)} <span className="text-sm font-normal text-ink-soft">a month</span></dd>
             <dd className="text-xs text-ink-soft">{formatCents(s.annualCents)} a year</dd>
@@ -272,21 +272,26 @@ function Alert({
   onOpen,
   onTrackAsBill,
   onNotABill,
+  inCard = false,
 }: {
   item: RecurringItem
   onUpdate: (u: RecurringUpdate, m: string) => void
   onOpen: () => void
   onTrackAsBill: (i: RecurringItem) => void
   onNotABill: () => void
+  /** On a Review card (DECISIONS.md 214): no box of its own inside the card. */
+  inCard?: boolean
 }) {
-  const box = 'rounded-2xl px-4 py-3 text-sm'
-  const actions = 'mt-2.5 flex flex-wrap gap-2'
+  const box = inCard ? 'text-sm' : 'rounded-2xl px-4 py-3 text-sm'
+  const inset = inCard ? '' : 'neu-inset'
+  const raised = inCard ? '' : 'neu'
+  const actions = 'mt-3 flex flex-wrap gap-2'
   // One store, two prices: maybe one bill whose price changed (DECISIONS.md 181). Asked before anything else about it.
   if (i.sameAs) {
     const old = i.sameAs
     const started = i.charges.length > 0 ? i.charges[i.charges.length - 1].date : i.lastDate
     return (
-      <div className={`${box} neu-inset text-gold-ink`}>
+      <div className={`${box} ${inset} text-gold-ink`}>
         <p>
           <span className="font-semibold">Same bill, new price?</span> {i.name} at <span className="font-semibold tabular-nums">{formatCents(i.amountCents)}</span>{' '}
           started {formatDay(started)}, right after the <span className="tabular-nums">{formatCents(old.amountCents)}</span> one
@@ -314,7 +319,7 @@ function Alert({
   }
   if (isNewFind(i))
     return (
-      <div className={`${box} neu text-ink-soft`}>
+      <div className={`${box} ${raised} text-ink-soft`}>
         <p>
           <span className="font-semibold">{i.name}</span> looks recurring: {formatCents(i.amountCents)} {every[i.frequency]}
           {i.accountName && ` on ${i.accountName}`}, filed {i.categoryName ? `under ${i.categoryName}` : 'with no category'}.
@@ -336,7 +341,7 @@ function Alert({
     )
   if (i.status === 'priceUp' || i.status === 'priceDown')
     return (
-      <div className={`${box} neu-inset text-gold-ink`}>
+      <div className={`${box} ${inset} text-gold-ink`}>
         <p>
           <span className="font-semibold">{i.name}</span> went {i.status === 'priceUp' ? 'up' : 'down'} from {formatCents(i.previousAmountCents!)} to{' '}
           <span className="font-semibold">{formatCents(i.amountCents)}</span>
@@ -354,7 +359,7 @@ function Alert({
     )
   if (i.status === 'possiblyCanceled')
     return (
-      <div className={`${box} neu text-ink-soft`}>
+      <div className={`${box} ${raised} text-ink-soft`}>
         <p>
           <span className="font-semibold">{i.name}</span>: no charge since {formatDay(i.lastDate)}. It was expected {formatDay(i.nextExpected)}.
         </p>
@@ -373,7 +378,7 @@ function Alert({
     )
   if (!i.possibleDuplicate) return null
   return (
-    <div className={`${box} neu-inset text-gold-ink`}>
+    <div className={`${box} ${inset} text-gold-ink`}>
       <p>
         <span className="font-semibold">{i.name}</span> may be charged twice: another {formatCents(i.amountCents)} charge from it repeats on the same schedule
         {i.accountName && ` (this one on ${i.accountName})`}.
@@ -415,14 +420,14 @@ function ChargeHistory({ item: i }: { item: RecurringItem }) {
               cls: 'text-ink-soft',
             }
   return (
-    <section aria-label="Charges" className="mt-3">
+    <section aria-label="Charges" className="mt-4">
       <p className={`text-xs ${status.cls}`}>{status.text}</p>
       {charges.length > 0 && (
         <>
           <p className="mt-2 text-xs text-ink-soft">
             {charges.length} {charges.length === 1 ? 'charge' : 'charges'} since {dayYear(charges[charges.length - 1].date)}
           </p>
-          <ul className="mt-1 divide-y divide-ink/[0.07] rounded-xl neu-inset px-3 text-sm">
+          <ul className="mt-2 divide-y divide-ink/[0.07] rounded-2xl neu-inset px-4 text-sm">
             {shown.map((c, n) => {
               const older = charges[n + 1]
               const change = older && older.amountCents !== c.amountCents ? c.amountCents - older.amountCents : 0
@@ -470,36 +475,36 @@ function BillCard({
   // The quick choices on the card; every other option is in the bill sheet ("More options"), the same one everywhere.
   const confirmable = !i.confirmed && i.status !== 'canceled' && !needsLook(i)
   return (
-    <article className="mt-2 rounded-3xl neu p-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="min-w-0 truncate text-lg font-semibold">{i.name}</h2>
-        <span className="shrink-0 font-semibold tabular-nums">
-          {price(i)} <span className="text-xs font-normal text-ink-soft">{every[i.frequency]}</span>
-        </span>
+    <article className={reviewCard}>
+      {/* Laid out like a transaction's Review card (DECISIONS.md 214). "Same as another" is in More options. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold">{i.name}</h2>
+          <p className="mt-0.5 truncate text-xs text-ink-soft">
+            {[i.accountName, i.categoryName ?? 'No category', i.varies ? 'price varies' : null].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+        <p className="shrink-0 text-right text-lg font-semibold tabular-nums">
+          {price(i)} <span className="block text-xs font-normal text-ink-soft">{every[i.frequency]}</span>
+        </p>
       </div>
-      <p className="truncate text-xs text-ink-soft">
-        {[i.accountName, i.categoryName ?? 'No category', i.varies ? 'price varies' : null].filter(Boolean).join(' · ')}
-      </p>
       {needsLook(i) && (
-        <div className="mt-3">
-          <Alert item={i} onUpdate={onUpdate} onOpen={() => onOpen()} onTrackAsBill={onTrackAsBill} onNotABill={() => onOpen('notBill')} />
+        <div className="mt-4">
+          <Alert item={i} inCard onUpdate={onUpdate} onOpen={() => onOpen()} onTrackAsBill={onTrackAsBill} onNotABill={() => onOpen('notBill')} />
         </div>
       )}
       <ChargeHistory item={i} />
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm font-semibold">
-        {confirmable && (
-          <button type="button" onClick={() => onUpdate({ key: i.key, confirmed: true }, `${i.name} looks right.`)} className="col-span-2 rounded-xl bg-primary py-2.5 text-primary-ink shadow-neu-sm">
-            Looks right
-          </button>
-        )}
-        <button type="button" onClick={() => onOpen('same')} className="rounded-xl neu py-2.5">
-          Same as another…
+      {confirmable && (
+        <button type="button" onClick={() => onUpdate({ key: i.key, confirmed: true }, `${i.name} looks right.`)} className={`${reviewPrimary} mt-4`}>
+          ✓ Looks right
         </button>
-        <button type="button" onClick={() => onOpen('edit')} className="rounded-xl neu py-2.5">
+      )}
+      <div className={`${confirmable ? 'mt-3' : 'mt-4'} grid gap-3 ${onSkip ? 'grid-cols-2' : ''}`}>
+        <button type="button" onClick={() => onOpen('edit')} className={reviewSecondary}>
           More options
         </button>
         {onSkip && (
-          <button type="button" onClick={onSkip} className="col-span-2 rounded-xl neu py-2.5 text-danger">
+          <button type="button" onClick={onSkip} className={reviewSecondary}>
             Skip for now
           </button>
         )}

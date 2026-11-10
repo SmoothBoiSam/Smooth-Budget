@@ -11,7 +11,7 @@ import {
   listedType,
 } from './api'
 import BillsSection from './BillsSection'
-import { CountBubble, ErrorNotice, Loading, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
+import { CountBubble, ErrorNotice, Loading, Page, PageHeader, reviewCard, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
 import { formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
@@ -157,7 +157,7 @@ export default function ReviewScreen({
       <>
       {/* Compact so a whole review card fits on a phone screen without scrolling (DECISIONS.md 161). */}
       {scopes.length > 1 && (
-          <div className="mt-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Which transactions">
+          <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Which transactions">
             {scopes.map((s) => {
               const n = s === 'todo' ? todoCount : s === 'earlier' ? summary?.earlier.total : summary?.older.total
               return (
@@ -171,7 +171,7 @@ export default function ReviewScreen({
                     setQueue(null)
                     setNotice(null)
                   }}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${scope === s ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${scope === s ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
                 >
                   {s === 'todo' ? 'This month' : s === 'earlier' ? 'Earlier' : 'Older'}
                   {n != null && n > 0 && <span className="ml-1 opacity-70">{n}</span>}
@@ -182,14 +182,14 @@ export default function ReviewScreen({
       )}
 
       {notice && (
-        <p role="status" className="mt-2 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
+        <p role="status" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
         </p>
       )}
       {error && <ErrorNotice message={error} onRetry={() => window.location.reload()} />}
 
       {scope !== 'todo' && summary && (
-        <div className="mt-2 rounded-2xl neu px-3 py-2 text-xs">
+        <div className="mt-3 rounded-2xl neu-inset px-4 py-3 text-xs">
           <p className="text-ink-soft">
             {scope === 'earlier'
               ? `These months (since ${formatDay(summary.windowStart)}) shape your budget proposal. If you can’t remember one, the app’s best guess is fine: what matters is that each has some category.`
@@ -221,7 +221,7 @@ export default function ReviewScreen({
       {queue === null ? (
         <Loading />
       ) : queue.length === 0 ? (
-        <div className="mt-8 rounded-3xl neu px-5 py-8 text-center">
+        <div className="mt-3 rounded-3xl neu px-5 py-8 text-center">
           <p className="text-lg font-semibold">All caught up</p>
           <p className="mt-1 text-sm text-ink-soft">
             {scope === 'todo' ? 'Everything this month has a category you confirmed.' : scope === 'earlier' ? 'Nothing from these months is waiting.' : 'Nothing older is waiting.'}
@@ -234,7 +234,7 @@ export default function ReviewScreen({
         </div>
       ) : (
         <>
-          <div className="mt-2 flex items-baseline justify-between gap-3">
+          <div className="mt-3 flex min-h-8 items-center justify-between gap-3">
             <p className="text-xs text-ink-soft">
               <span className="font-semibold">{queue.length}</span> to go
               {counts && counts.unsure > 0 && <span className="text-ink-faint"> · {counts.unsure} the app wasn’t sure about</span>}
@@ -327,10 +327,8 @@ function ReviewCard({
     !partnerIn ? null : t.kind === 'PartnerContribution' ? 'contribution' : t.suggestedCategoryId ? 'payback' : null,
   )
   const [categoryId, setCategoryId] = useState<string | null>(pick)
-  const [group, setGroup] = useState<Category['type']>(() => {
-    const c = categories.find((x) => x.id === pick)
-    return c ? listedType(c) : 'Variable'
-  })
+  // The kind you tapped, or else the picked category's kind (categories can arrive after the card does).
+  const [pickedGroup, setGroup] = useState<Category['type'] | null>(null)
   const [rule, setRule] = useState(false)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -364,6 +362,7 @@ function ReviewCard({
   }
 
   const selected = categories.find((c) => c.id === categoryId) ?? null
+  const group = pickedGroup ?? (selected ? listedType(selected) : 'Variable')
   const needsCategory = partnerIn ? mode === 'payback' : true
   // Every category in the chosen group at once, in your budget's order (DECISIONS.md 145).
   const inGroup = useMemo(() => categories.filter((c) => listedType(c) === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
@@ -405,50 +404,48 @@ function ReviewCard({
 
   // The bank's description, unless it only repeats the store name.
   const showDescription = !!t.description && t.description.trim().toUpperCase() !== t.merchant.trim().toUpperCase()
-  // The history box below says the same thing in more detail, so the one-line reason steps aside for it.
+  // How you filed it before says the same thing in more detail, so the one-line reason steps aside for it.
   const reason = context && context.history.length > 0 ? null : t.categoryReason
+  const notes = [
+    showDescription ? t.description : null,
+    reason,
+    t.isPartnerTransfer && t.kind === 'PartnerTransfer' ? 'Not counted anywhere until you say what it was for.' : null,
+    older ? 'Too old to affect your budget.' : null,
+  ].filter((x): x is string => !!x)
 
   return (
-    <article aria-label={`Review ${titleCase(t.merchant)}`} className="animate-rise-in mt-3 rounded-3xl neu p-4">
+    <article aria-label={`Review ${titleCase(t.merchant)}`} className={reviewCard}>
+      {/* What it is, then one quiet line of why (DECISIONS.md 214). The guess shows as the picked category below. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">{titleCase(t.merchant)}</h2>
-          <p className="truncate text-xs text-ink-soft">
+          <p className="mt-0.5 truncate text-xs text-ink-soft">
             {formatDay(t.date)} · {t.accountName}
           </p>
         </div>
-        <div className="shrink-0 text-right">
-          <p className={`text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>{formatSigned(t.amountCents)}</p>
-          <StatusTag t={t} />
-        </div>
+        <p className={`shrink-0 text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>{formatSigned(t.amountCents)}</p>
       </div>
-      {(showDescription || reason) && (
-        <p className="mt-1.5 break-words text-xs text-ink-soft">
-          {showDescription && <span className="text-ink-faint">{t.description}</span>}
-          {showDescription && reason && ' · '}
-          {reason}
-        </p>
-      )}
-      {t.isPartnerTransfer && t.kind === 'PartnerTransfer' && (
-        <p className="mt-1.5 text-xs text-ink-soft">Not counted anywhere until you say what it was for.</p>
-      )}
-      {older && <p className="mt-1.5 text-xs text-ink-soft">Too old to affect your budget.</p>}
-      {context && context.history.length > 0 && (
-        <p className="mt-2 rounded-lg neu-inset px-3 py-1.5 text-xs text-ink-soft">
-          You’ve filed {titleCase(t.merchant)} as{' '}
-          {context.history.map((h, i) => (
-            <span key={h.categoryName}>
-              {i > 0 && (i === context.history.length - 1 ? ' and ' : ', ')}
-              <span className="font-medium text-ink-soft">{h.categoryName}</span> {h.count === 1 ? 'once' : `${h.count} times`}
-            </span>
-          ))}
-          .
+      {(notes.length > 0 || (context && context.history.length > 0)) && (
+        <p className="mt-2 break-words text-xs text-ink-soft">
+          {context && context.history.length > 0 && (
+            <>
+              Filed as{' '}
+              {context.history.map((h, i) => (
+                <span key={h.categoryName}>
+                  {i > 0 && (i === context.history.length - 1 ? ' and ' : ', ')}
+                  <span className="font-semibold">{h.categoryName}</span> {h.count === 1 ? 'once' : `${h.count} times`}
+                </span>
+              ))}
+              {notes.length > 0 ? ' · ' : '.'}
+            </>
+          )}
+          {notes.join(' · ')}
         </p>
       )}
 
       {partnerIn && (
-        <fieldset className="mt-3">
-          <legend className="text-sm font-medium text-ink-soft">What was this from {first}?</legend>
+        <fieldset className="mt-4">
+          <legend className="text-xs font-medium text-ink-soft">What was this from {first}?</legend>
           <div className="mt-2 grid gap-3">
             {(
               [
@@ -473,12 +470,12 @@ function ReviewCard({
 
       {needsCategory && (
         <>
-          <fieldset className="mt-3">
-            <legend className="text-xs font-medium text-ink-soft">
+          {/* The kind, as a switch like the view switch, then a dropdown of its categories (DECISIONS.md 145, 214). */}
+          <fieldset className="mt-4">
+            <legend className={partnerIn || partnerOut ? 'mb-2 text-xs font-medium text-ink-soft' : 'sr-only'}>
               {partnerIn ? 'It paid you back for' : partnerOut ? `Your share of what ${first} paid for` : 'What was it?'}
             </legend>
-            {/* One row of four, so the categories start higher up. */}
-            <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+            <div className="flex rounded-full neu-inset p-1">
               {groups.map((g) => (
                 <button
                   key={g.type}
@@ -486,7 +483,7 @@ function ReviewCard({
                   aria-pressed={group === g.type}
                   aria-label={g.label}
                   onClick={() => chooseGroup(g.type)}
-                  className={`rounded-lg px-1 py-2 text-xs font-semibold ${group === g.type ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
+                  className={`flex-1 rounded-full py-1.5 text-xs font-semibold ${group === g.type ? 'neu-sm text-accent' : 'text-ink-soft'}`}
                 >
                   {g.short}
                 </button>
@@ -494,28 +491,30 @@ function ReviewCard({
             </div>
           </fieldset>
 
-          <fieldset className="mt-3">
-            <legend className="text-xs font-medium text-ink-soft">{groups.find((g) => g.type === group)!.pick}</legend>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {/* One dropdown for the kind's categories, with "New category…" at the end (DECISIONS.md 214). */}
+          <div className="mt-3">
+            <select
+              aria-label={groups.find((g) => g.type === group)!.pick}
+              value={categoryId && inGroup.some((c) => c.id === categoryId) ? categoryId : ''}
+              onChange={(e) => {
+                if (e.target.value === NEW) setAdding(true)
+                else {
+                  setCategoryId(e.target.value)
+                  setAdding(false)
+                }
+              }}
+              className={`block w-full rounded-2xl neu-inset px-4 py-3 text-base ${categoryId && inGroup.some((c) => c.id === categoryId) ? 'font-medium' : 'text-ink-soft'}`}
+            >
+              <option value="" disabled>
+                {groups.find((g) => g.type === group)!.pick}…
+              </option>
               {inGroup.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  aria-pressed={c.id === categoryId}
-                  onClick={() => setCategoryId(c.id)}
-                  className={`rounded-full px-3 py-1 text-sm ${c.id === categoryId ? 'bg-accent font-semibold text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
-                >
+                <option key={c.id} value={c.id}>
                   {c.name}
-                </button>
+                </option>
               ))}
-              <button
-                type="button"
-                onClick={() => setAdding(true)}
-                className="rounded-full bg-ink/[0.06] px-3 py-1 text-sm font-semibold text-accent"
-              >
-                + New category
-              </button>
-            </div>
+              <option value={NEW}>+ New category…</option>
+            </select>
             {adding && (
               <NewCategory
                 type={group}
@@ -529,16 +528,16 @@ function ReviewCard({
                 onError={onError}
               />
             )}
-          </fieldset>
+          </div>
         </>
       )}
 
       {needsCategory && selected && !t.isPartnerTransfer && (
-        <label className="mt-3 flex items-center gap-2.5 rounded-lg neu-inset px-3 py-2">
-          <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="size-4 shrink-0" />
-          <span className="text-xs">
+        <label className="mt-4 flex cursor-pointer items-start gap-3">
+          <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="mt-0.5 size-4 shrink-0" />
+          <span className="text-sm">
             Always {selected.name} for {titleCase(t.merchant)}
-            <span className="text-ink-soft"> (leave off where it varies, like a supercenter)</span>
+            <span className="block text-xs text-ink-faint">Leave off for stores where it varies.</span>
           </span>
         </label>
       )}
@@ -547,7 +546,7 @@ function ReviewCard({
         type="button"
         disabled={busy || (partnerIn && !mode) || (needsCategory && !categoryId)}
         onClick={() => void save()}
-        className="mt-3 w-full rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-40 text-sm"
+        className={`${reviewPrimary} mt-4`}
       >
         {busy
           ? 'Saving…'
@@ -560,10 +559,10 @@ function ReviewCard({
                 : 'Pick a category'}
       </button>
       <div className="mt-3 grid grid-cols-2 gap-3">
-        <button type="button" onClick={() => void dontRemember()} disabled={busy} className="rounded-2xl neu py-2 text-sm font-medium text-ink-soft">
+        <button type="button" onClick={() => void dontRemember()} disabled={busy} className={reviewSecondary}>
           I don’t remember
         </button>
-        <button type="button" onClick={onSkip} className="rounded-2xl neu py-2 text-sm font-medium text-ink-soft">
+        <button type="button" onClick={onSkip} className={reviewSecondary}>
           Skip for now
         </button>
       </div>
@@ -573,11 +572,13 @@ function ReviewCard({
 
 /** The four kinds of transaction (DECISIONS.md 145); each one's categories show when you pick it. */
 const groups: { type: Category['type']; label: string; short: string; pick: string }[] = [
-  { type: 'Variable', label: 'Spending', short: 'Spending', pick: 'Spending category' },
-  { type: 'FixedBill', label: 'Bill', short: 'Bill', pick: 'Which bill' },
-  { type: 'DebtPayment', label: 'Debt payment', short: 'Debt', pick: 'Which debt' },
-  { type: 'SavingsTransfer', label: 'Savings transfer', short: 'Savings', pick: 'Which savings' },
+  { type: 'Variable', label: 'Spending', short: 'Spending', pick: 'Pick a category' },
+  { type: 'FixedBill', label: 'Bill', short: 'Bill', pick: 'Pick a bill' },
+  { type: 'DebtPayment', label: 'Debt payment', short: 'Debt', pick: 'Pick a debt' },
+  { type: 'SavingsTransfer', label: 'Savings transfer', short: 'Savings', pick: 'Pick a savings line' },
 ]
+/** The dropdown's last choice: make a new category instead. */
+const NEW = '__new'
 
 /** "No category" in red, or the app's guess as a question in orange: "Groceries?" */
 function StatusTag({ t }: { t: Transaction }) {
