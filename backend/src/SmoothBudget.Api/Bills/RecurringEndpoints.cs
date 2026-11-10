@@ -42,7 +42,8 @@ public static class RecurringEndpoints
         {
             if (req.BillKey is { Length: > 200 } || req.Name is { Length: > 100 })
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["Use up to 100 characters."] });
-            if (new[] { req.BillKey is not null, req.CategoryId is not null, !string.IsNullOrWhiteSpace(req.Name) }.Count(x => x) != 1)
+            // One of your bills, or a new bill with a name (and a bill category, or its own new one).
+            if ((req.BillKey is not null) == !string.IsNullOrWhiteSpace(req.Name) || (req.BillKey is not null && req.CategoryId is not null))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["billKey"] = ["Pick a bill, or name a new one."] });
             return await svc.FileChargeAsBillAsync(ctx.User.HouseholdId(), req, ct) is { } r ? Results.Ok(r) : Results.NotFound();
         });

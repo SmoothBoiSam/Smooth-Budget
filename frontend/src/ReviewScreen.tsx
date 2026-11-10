@@ -135,7 +135,8 @@ export default function ReviewScreen({
       <PageHeader
         title={part === 'bills' ? 'Review bills' : 'Review transactions'}
         back={{ href: '#/tasks', label: 'Tasks' }}
-        action={(part === 'bills' ? billsCount : (todoCount ?? 0)) > 0 ? <CountBubble n={part === 'bills' ? billsCount : (todoCount ?? 0)} /> : undefined}
+        // Review transactions has no count here (DECISIONS.md 231): Tasks and the This month filter already show it.
+        action={part === 'bills' && billsCount > 0 ? <CountBubble n={billsCount} /> : undefined}
       />
       {/* The view switch sits on a row of its own under the title (DECISIONS.md 201), on the left like the filters below it (212). */}
       <div className="mt-3 flex">
@@ -341,6 +342,8 @@ function ReviewCard({
   const [choices, setChoices] = useState<ChargeBillChoices | null>(null)
   const [billPick, setBillPick] = useState('')
   const [billName, setBillName] = useState('')
+  // A new bill's bill category: one you have, or OWN (a new one named after the bill).
+  const [billCat, setBillCat] = useState(OWN)
   // Debt or savings money goes toward one of your debts or savings, not a category (DECISIONS.md 227).
   const [toward, setToward] = useState<TowardChoices | null>(null)
   const [towardPick, setTowardPick] = useState('')
@@ -389,9 +392,10 @@ function ReviewCard({
       .then((c) => {
         if (!live) return
         setChoices(c)
-        const line = t.categoryId && c.lines.some((l) => l.id === t.categoryId) ? `line:${t.categoryId}` : ''
-        const pick = c.current ? `bill:${c.current}` : line
-        setBillPick(pick || (c.detected || (c.bills.length === 0 && c.lines.length === 0) ? NEW : ''))
+        // Already in a bill category but not one of your bills yet: a new bill, in that category.
+        const line = t.categoryId && c.lines.some((l) => l.id === t.categoryId) ? t.categoryId : null
+        setBillPick(c.current ? `bill:${c.current}` : line || c.detected || c.bills.length === 0 ? NEW : '')
+        setBillCat(line ?? OWN)
         setBillName(c.suggested ?? titleCase(t.merchant))
       })
     return () => {
@@ -418,8 +422,7 @@ function ReviewCard({
   const towardPicker = !!towardKind && (!toward || (!!towardList && towardList.length > 0))
 
   const pickedBill = choices?.bills.find((b) => `bill:${b.key}` === billPick)
-  const pickedLine = choices?.lines.find((l) => `line:${l.id}` === billPick)
-  const billReady = billPick === NEW ? billName.trim().length > 0 : !!(pickedBill || pickedLine)
+  const billReady = billPick === NEW ? billName.trim().length > 0 : !!pickedBill
   // Every category in the chosen group at once, in your budget's order (DECISIONS.md 145).
   const inGroup = useMemo(() => categories.filter((c) => listedType(c) === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
 
@@ -443,11 +446,11 @@ function ReviewCard({
       if (asBill) {
         const r = await recurringApi.fileAsBill({
           transactionId: t.id,
-          ...(pickedBill ? { billKey: pickedBill.key } : pickedLine ? { categoryId: pickedLine.id } : { name: billName.trim() }),
+          ...(pickedBill ? { billKey: pickedBill.key } : { name: billName.trim(), ...(billCat !== OWN ? { categoryId: billCat } : {}) }),
         })
         const moved = r.moved > 0 ? ` ${r.moved} other ${r.moved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
         if (billPick === NEW) await onCategoryCreated()
-        return onDone(`${pickedBill ? pickedBill.name : billPick === NEW ? `New bill: ${r.categoryName}` : r.categoryName}.${moved}`, true)
+        return onDone(`${pickedBill ? pickedBill.name : `New bill: ${billName.trim()}, in ${r.categoryName}`}.${moved}`, true)
       }
       if (towardKind && towardList && towardList.length > 0) {
         if (!pickedToward) return
@@ -561,7 +564,7 @@ function ReviewCard({
             </div>
           </fieldset>
 
-          {/* A bill: one of your bills or bill lines, or a new bill (DECISIONS.md 225). Its other charges follow it. */}
+          {/* A bill: one of your bills, or a new bill with its name and bill category (DECISIONS.md 225, 230). Its other charges follow it. */}
           {asBill && (
             <div className="mt-3">
               {!choices ? (
@@ -577,43 +580,43 @@ function ReviewCard({
                     <option value="" disabled>
                       Pick a bill…
                     </option>
-                    {choices.bills.length > 0 && (
-                      <optgroup label="Your bills">
-                        {choices.bills.map((b) => (
-                          <option key={b.key} value={`bill:${b.key}`}>
-                            {b.name} · {formatCents(b.amountCents)}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {choices.lines.length > 0 && (
-                      <optgroup label="Bill Categories">
-                        {choices.lines.map((l) => (
-                          <option key={l.id} value={`line:${l.id}`}>
-                            {l.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
+                    {choices.bills.map((b) => (
+                      <option key={b.key} value={`bill:${b.key}`}>
+                        {b.name} · {formatCents(b.amountCents)}
+                      </option>
+                    ))}
                     <option value={NEW}>+ New bill…</option>
                   </select>
                   {billPick === NEW ? (
-                    <label className="mt-3 block">
-                      <span className="text-xs font-medium text-ink-soft">New bill’s name</span>
-                      <input
-                        value={billName}
-                        maxLength={100}
-                        onChange={(e) => setBillName(e.target.value)}
-                        className="mt-1 block w-full rounded-2xl neu-inset px-4 py-3 text-base"
-                      />
-                      <span className="mt-1 block text-xs text-ink-faint">It gets its own bill category, and its earlier charges go there too.</span>
-                    </label>
+                    <div className="mt-3 space-y-3">
+                      <label className="block">
+                        <span className="text-xs font-medium text-ink-soft">New bill’s name</span>
+                        <input
+                          value={billName}
+                          maxLength={100}
+                          onChange={(e) => setBillName(e.target.value)}
+                          className="mt-1 block w-full rounded-2xl neu-inset px-4 py-3 text-base"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-medium text-ink-soft">Bill Category</span>
+                        <select
+                          value={billCat}
+                          onChange={(e) => setBillCat(e.target.value)}
+                          className="mt-1 block w-full rounded-2xl neu-inset px-4 py-3 text-base"
+                        >
+                          {choices.lines.map((l) => (
+                            <option key={l.id} value={l.id}>
+                              {l.name}
+                            </option>
+                          ))}
+                          <option value={OWN}>+ Its own new bill category{billName.trim() ? ` (${billName.trim()})` : ''}</option>
+                        </select>
+                        <span className="mt-1 block text-xs text-ink-faint">Its earlier charges go there too.</span>
+                      </label>
+                    </div>
                   ) : (
-                    billPick && (
-                      <p className="mt-2 px-1 text-xs text-ink-faint">
-                        {pickedBill ? 'Its charges stay together on that bill.' : 'It goes there as a bill of its own, with its earlier charges.'}
-                      </p>
-                    )
+                    pickedBill && <p className="mt-2 px-1 text-xs text-ink-faint">Its charges stay together on that bill.</p>
                   )}
                 </>
               )}
@@ -724,8 +727,8 @@ function ReviewCard({
                 : asBill
                 ? billPick === NEW
                   ? `✓ New bill${billName.trim() ? `: ${billName.trim()}` : ''}`
-                  : pickedBill || pickedLine
-                    ? `✓ ${(pickedBill ?? pickedLine)!.name}${pickedBill && pickedBill.key === choices?.current ? ' is right' : ''}`
+                  : pickedBill
+                    ? `✓ ${pickedBill.name}${pickedBill.key === choices?.current ? ' is right' : ''}`
                     : 'Pick a bill'
               : selected
                 ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
@@ -752,6 +755,8 @@ const groups: { type: Category['type']; label: string; short: string; pick: stri
 ]
 /** The dropdown's last choice: make a new category instead. */
 const NEW = '__new'
+/** A new bill's own new bill category, named after it. */
+const OWN = '__own'
 
 /** "No category" in red, or the app's guess as a question in orange: "Groceries?" */
 function StatusTag({ t }: { t: Transaction }) {

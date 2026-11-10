@@ -60,8 +60,8 @@ public record BillLineDto(Guid Id, string Name);
 /// <param name="Detected">A repeating charge the app found this in that isn't a bill yet: a new bill, most likely.</param>
 /// <param name="Suggested">A name for a new bill.</param>
 public record ChargeBillChoicesDto(IReadOnlyList<BillChoiceDto> Bills, IReadOnlyList<BillLineDto> Lines, string? Current, string? Detected, string? Suggested);
-/// <summary>A charge in review is a bill (DECISIONS.md 225): one of <paramref name="BillKey"/> (it's that bill),
-/// <paramref name="CategoryId"/> (a bill of its own in that bill line) or <paramref name="Name"/> (a new bill with its own line).</summary>
+/// <summary>A charge in review is a bill (DECISIONS.md 225, 230): <paramref name="BillKey"/> (it's that bill), or a new bill
+/// named <paramref name="Name"/>, in the bill category <paramref name="CategoryId"/> or, without one, a new bill category of its own.</summary>
 public record FileChargeAsBillRequest(Guid TransactionId, string? BillKey = null, Guid? CategoryId = null, string? Name = null);
 /// <param name="Moved">Other charges that moved to that line with it.</param>
 public record FiledAsBillDto(Guid CategoryId, string CategoryName, int Moved);
@@ -270,18 +270,21 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
             cat = await db.Categories.SingleAsync(c => c.Id == billCat, ct);
             reason = $"You said it's {bill.Dto.Name}.";
         }
-        else if (req.CategoryId is { } lineId)
-        {
-            cat = await db.Categories.SingleOrDefaultAsync(c => c.Id == lineId && c.HouseholdId == householdId && c.Type == CategoryType.FixedBill, ct);
-            if (cat is null) return null;
-            reason = $"You filed this bill under {cat.Name}.";
-        }
         else
         {
             var name = req.Name?.Trim();
             if (string.IsNullOrEmpty(name)) return null;
-            cat = await BillLineAsync(householdId, name, own?.Dto.MonthlyCents ?? Math.Max(0, t.AmountCents), ct);
-            reason = "You made this its own bill.";
+            if (req.CategoryId is { } lineId)
+            {
+                cat = await db.Categories.SingleOrDefaultAsync(c => c.Id == lineId && c.HouseholdId == householdId && c.Type == CategoryType.FixedBill, ct);
+                if (cat is null) return null;
+                reason = $"A new bill, {name}, in {cat.Name}.";
+            }
+            else
+            {
+                cat = await BillLineAsync(householdId, name, own?.Dto.MonthlyCents ?? Math.Max(0, t.AmountCents), ct);
+                reason = "You made this its own bill.";
+            }
             if (own is not null && name != own.Dto.Name)
                 await UpdateAsync(householdId, new RecurringUpdateRequest(own.Dto.Key, Name: name), ct);
         }

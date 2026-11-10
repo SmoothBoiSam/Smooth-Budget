@@ -153,8 +153,24 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         var rows = await check.ServiceProvider.GetRequiredService<AppDbContext>().Transactions.Where(t => t.HouseholdId == household && t.Merchant.StartsWith("STREAMFLIX")).ToListAsync();
         Assert.All(rows, t => Assert.Equal((filed.CategoryId, false), (t.CategoryId!.Value, t.NeedsReview)));
 
-        // Neither a bill nor a name: turned away.
+        // Neither a bill nor a name, or a bill category without a name: turned away (DECISIONS.md 230).
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(newPrice.Id), Json)).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(newPrice.Id, CategoryId: filed.CategoryId), Json)).StatusCode);
+
+        // A new bill named by you, in a bill category you already have: it goes there, under its own name.
+        var water = new[] { new DateOnly(2026, 11, 3), new DateOnly(2026, 12, 3), new DateOnly(2027, 1, 3) }
+            .Select(d => T(household, checking, d, null, 41_00, "CITY WATER UTIL")).ToList();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.AddRange(water);
+            await db.SaveChangesAsync();
+        }
+        var inLine = (await (await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(water[^1].Id, CategoryId: filed.CategoryId, Name: "Water"), Json))
+            .Content.ReadFromJsonAsync<Bills.FiledAsBillDto>(Json))!;
+        Assert.Equal((filed.CategoryId, 2), (inLine.CategoryId, inLine.Moved));
+        Assert.Contains((await c.GetFromJsonAsync<Bills.RecurringSummaryDto>("/api/recurring", Json))!.Items, i => i.Name == "Water" && i.CategoryId == filed.CategoryId);
     }
 
     [Fact]
