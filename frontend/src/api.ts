@@ -969,7 +969,7 @@ export interface PayAmount {
 }
 export interface PlanItem {
   key: string
-  kind: 'keep' | 'debt' | 'cardspend' | 'sweep' | 'savings'
+  kind: 'keep' | 'debt' | 'cardspend' | 'sweep' | 'savings' | 'send'
   label: string
   cents: number
   destination: string
@@ -984,6 +984,8 @@ export interface PlanItem {
   /** "Pay off what you charged" on the check you're on can be skipped; the charges then stay on the card (DECISIONS.md 195). */
   skippable?: boolean
   skipped?: boolean
+  /** For "send": the tasks to the same account merged into it, each checked off on its own (DECISIONS.md 220). */
+  parts?: PlanItem[] | null
 }
 export interface PayCheck {
   payDate: string

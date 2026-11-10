@@ -16,11 +16,17 @@ public record AmountDto(string Name, long Cents);
 /// <param name="Done">Checked off by you, or done according to your accounts (<paramref name="Auto"/>).</param>
 /// <param name="Status">For the check you're on now: what the app sees ("Sent $100 of $150 so far.").</param>
 /// <param name="Skippable">"Pay off what you charged" can be skipped (DECISIONS.md 195); <paramref name="Skipped"/> when you did.</param>
+/// <param name="Parts">For a "send" task: the tasks merged into it, each still checked off (and skipped) on its own
+/// (DECISIONS.md 220). Its amount is what's still to send: the parts' total, less any skipped part.</param>
 public record PlanItemDto(string Key, string Kind, string Label, long Cents, string Destination, string Why, bool Done,
     bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null, long ShortCents = 0,
-    bool Skippable = false, bool Skipped = false);
+    bool Skippable = false, bool Skipped = false, IReadOnlyList<PlanItemDto>? Parts = null);
 public record PlanBillDto(string Name, long Cents, DateOnly Due);
-public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents);
+public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents)
+{
+    /// <summary>Every task as it was before merging: a merged task's parts, and the rest as they are.</summary>
+    public IEnumerable<PlanItemDto> AllParts() => Items.SelectMany(i => i.Parts ?? [i]);
+}
 
 /// <param name="HasSchedule">False until that month's schedule is imported: no amounts yet.</param>
 public record CheckDto(
@@ -308,7 +314,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var arrangements = await db.PartnerArrangements.AsNoTracking().Where(a => a.HouseholdId == householdId).Include(a => a.Friend).ToListAsync(ct);
         var allSenders = arrangements.Select(a => a.Friend.Name).Distinct().ToList();
         var everyoneSends = $"{Shared.SharedService.JoinNames(allSenders) ?? "your friend"} {(allSenders.Count > 1 ? "send" : "sends")}";
-        var done = await db.PaydayChecklistItems.AsNoTracking().Where(x => x.HouseholdId == householdId).Select(x => new { x.PayDate, x.Key }).ToListAsync(ct);
+        var done = await db.PaydayChecklistItems.AsNoTracking().Where(x => x.HouseholdId == householdId).Select(x => new { x.PayDate, x.Key, x.CreatedUtc }).ToListAsync(ct);
         // What you put on each card lately (purchases less refunds, not payments): it already counts in its spending or bill
         // category, so the plan pays it off from the spending money left in checking, or the card would grow (DECISIONS.md 179).
         var cardAccounts = accounts.Where(a => a.Type == AccountType.CreditCard).ToList();
@@ -471,17 +477,40 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 }
             }
 
-            result.Add(new PlanDto(plan.Items.Select(x =>
+            result.Add(new PlanDto(MergeSends(plan.Items.Select(x =>
             {
                 var (auto, status) = Status(x);
-                var manual = done.Any(d => d.PayDate == pay && d.Key == x.Key);
+                // A check's tasks open on its payday (DECISIONS.md 221): one ticked off before then (back when that was
+                // allowed) doesn't count, so it isn't shown as done on payday without you having done it.
+                var manual = current && done.Any(d => d.PayDate == pay && d.Key == x.Key && DateOnly.FromDateTime(d.CreatedUtc) >= pay.AddDays(-1));
                 // Skipping "Pay off what you charged" leaves those charges on the card as debt (DECISIONS.md 195).
                 var skippable = x.Kind == "cardspend" && current;
                 var skipped = skippable && !auto && done.Any(d => d.PayDate == pay && d.Key == SkipPrefix + x.Key);
                 return new PlanItemDto(x.Key, x.Kind, x.Label, x.Cents, x.Destination, x.Why, !skipped && (manual || auto), auto, skipped ? "Skipped: these charges stay on the card." : status,
                     x.Bills?.Select(b => new PlanBillDto(b.Name, b.Cents, b.Due)).ToList(), ShortBy(x), skippable, skipped);
-            }).ToList(), plan.ShortCents));
+            }).ToList()), plan.ShortCents));
         }
         return result;
     }
+
+    /// <summary>
+    /// Tasks that send money to the same account become one "send" task, with the others as its parts (DECISIONS.md 220):
+    /// a card's payment and paying off what you charged to it, or savings and last month's leftover. It sits where its
+    /// first part was. "Keep" tasks leave money where it is, so they're never merged.
+    /// </summary>
+    public static IReadOnlyList<PlanItemDto> MergeSends(IReadOnlyList<PlanItemDto> items) =>
+        items.GroupBy(i => i.Kind == "keep" ? "keep\n" + i.Key : "send\n" + i.Destination).Select(g =>
+        {
+            var parts = g.ToList();
+            if (parts.Count == 1) return parts[0];
+            var allSkipped = parts.All(p => p.Skipped);
+            var open = parts.Where(p => !p.Done && !p.Skipped).ToList();
+            // What the app sees: the last part that still has something to say (paying off what you charged counts the
+            // card's payment too), or else the last word on a finished one.
+            var status = open.Select(p => p.Status).LastOrDefault(s => s is not null) ?? parts.Select(p => p.Status).LastOrDefault(s => s is not null);
+            return new PlanItemDto("send:" + string.Join("+", parts.Select(p => p.Key)), "send", $"{parts.Count} payments",
+                parts.Where(p => !p.Skipped).Sum(p => p.Cents), parts[0].Destination, "",
+                Done: !allSkipped && open.Count == 0, Auto: !allSkipped && parts.All(p => p.Auto || p.Skipped), Status: status,
+                Skipped: allSkipped, Parts: parts);
+        }).ToList();
 }

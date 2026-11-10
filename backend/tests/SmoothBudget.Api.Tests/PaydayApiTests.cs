@@ -71,7 +71,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal([("Regular", 799_44L), ("Boarding Pay", 83_38L), ("NonTax Per Diem", 239_85L)], feb22.Lines.Select(l => (l.Name, l.Cents)));
         Assert.True(feb22.LowConfidence); // no stubs yet: a flat 80% of gross
         Assert.Equal((long)Math.Round(feb22.GrossCents * 0.8m), feb22.NetCents);
-        Assert.DoesNotContain(feb22.Plan!.Items, i => i.Kind == "spending"); // Home's Left to Spend covers it (DECISIONS.md 154)
+        Assert.DoesNotContain(feb22.Plan!.AllParts(), i => i.Kind == "spending"); // Home's Left to Spend covers it (DECISIONS.md 154)
 
         // Overtime on the first trip adds the extra half on the check that covers it; a re-import keeps the choice.
         await c.PutAsJsonAsync("/api/payday/schedule/2027/2", new ScheduleChoicesRequest(false, ["T1001 02/04"], []), Json);
@@ -166,6 +166,40 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.True(put.IsSuccessStatusCode);
         using (var scope = app.Services.CreateScope())
             Assert.True(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PaydayChecklistItems.AnyAsync(x => x.PayDate == next.PayDate && x.Key == "savings"));
+
+        // A later check's tasks open on its payday (DECISIONS.md 221): ticking one off early is refused, unticking isn't.
+        var later = after.Checks.First(x => !x.IsCurrent);
+        var early = await c.PutAsJsonAsync($"/api/payday/plan/{later.PayDate:yyyy-MM-dd}/savings", new ChecklistRequest(true), Json);
+        Assert.Equal(HttpStatusCode.Conflict, early.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/payday/plan/{later.PayDate:yyyy-MM-dd}/savings", new ChecklistRequest(false), Json)).StatusCode);
+        using (var scope = app.Services.CreateScope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PaydayChecklistItems.AnyAsync(x => x.PayDate == later.PayDate));
+    }
+
+    [Fact]
+    public void Tasks_sending_to_the_same_account_merge_with_a_breakdown()
+    {
+        // DECISIONS.md 220: the card's payment and paying off what you charged to it become one task; "keep" never merges.
+        PlanItemDto Item(string key, string kind, long cents, string to, bool done = false, bool auto = false, string? status = null, bool skipped = false) =>
+            new(key, kind, kind, cents, to, "why " + key, done, auto, status, Skippable: kind == "cardspend", Skipped: skipped);
+        var items = new[]
+        {
+            Item("keep:Checking", "keep", 500_00, "Checking"),
+            Item("debt", "debt", 200_00, "Visa ••1234", status: "Sent $50.00 of $200.00 so far."),
+            Item("savings", "savings", 100_00, "Savings", done: true, auto: true),
+            Item("cardspend:x", "cardspend", 70_00, "Visa ••1234", status: "Paid $50.00 of $270.00 to this card so far, counting its payment above."),
+        };
+        var merged = PaydayService.MergeSends(items);
+        Assert.Equal(["keep:Checking", "send:debt+cardspend:x", "savings"], merged.Select(i => i.Key));
+        var card = merged[1];
+        Assert.Equal(("send", 270_00L, "Visa ••1234", false), (card.Kind, card.Cents, card.Destination, card.Done));
+        Assert.Equal("Paid $50.00 of $270.00 to this card so far, counting its payment above.", card.Status);
+        Assert.Equal(["debt", "cardspend:x"], card.Parts!.Select(p => p.Key));
+        Assert.Equal(4, new PlanDto(merged, 0).AllParts().Count());
+
+        // Skipping what you charged takes it off the amount; with the payment done too, the task is done.
+        var after = PaydayService.MergeSends([Item("debt", "debt", 200_00, "Visa ••1234", done: true, auto: true), Item("cardspend:x", "cardspend", 70_00, "Visa ••1234", skipped: true)]);
+        Assert.Equal((200_00L, true, true, false), (after[0].Cents, after[0].Done, after[0].Auto, after[0].Skipped));
     }
 
     [Fact]
@@ -199,7 +233,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
 
         var now = (await Payday(c)).Checks[0];
         Assert.Equal((new DateOnly(2027, 2, 22), true), (now.PayDate, now.IsCurrent));
-        var items = now.Plan!.Items.ToDictionary(i => i.Kind);
+        var items = now.Plan!.AllParts().ToDictionary(i => i.Kind);
         // One "keep" line for the bills paid from checking before Mar 8, done because the balance covers them.
         Assert.Equal(("1 bill due Feb 25", 90_00L, "Test Checking ••1111", true, true), (items["keep"].Label, items["keep"].Cents, items["keep"].Destination, items["keep"].Done, items["keep"].Auto));
         Assert.Equal("Test Checking has $2,000.00, enough for these.", items["keep"].Status);
@@ -222,7 +256,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
             db.DebtAccounts.AddRange(Debt("Test Store Card", 500_00, 1999, 30_00), Debt("Test Visa", 2_000_00, 2499, 40_00));
             await db.SaveChangesAsync();
         }
-        var debtLines = (await Payday(c)).Checks[0].Plan!.Items.Where(i => i.Kind == "debt").ToList();
+        var debtLines = (await Payday(c)).Checks[0].Plan!.AllParts().Where(i => i.Kind == "debt").ToList();
         Assert.Equal([("Test Visa", 185_00L, "Minimum + extra"), ("Test Store Card", 15_00L, "Minimum payment")], debtLines.Select(i => (i.Destination, i.Cents, i.Label)));
 
         // Purchases on a credit card count in their categories, so the plan pays them off too or the card would grow
@@ -249,22 +283,22 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
             await db.SaveChangesAsync();
         }
         var withCard = await Payday(c);
-        var spend = withCard.Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend");
+        var spend = withCard.Checks[0].Plan!.AllParts().Single(i => i.Kind == "cardspend");
         Assert.Equal(("Pay off what you charged", 70_00L, "Test Card ••3333", false), (spend.Label, spend.Cents, spend.Destination, spend.Done));
         Assert.Equal(shortBefore, withCard.Checks[0].Plan!.ShortCents); // it comes from spending money already in checking, not this check
-        var soFar = withCard.Checks[1].Plan!.Items.Single(i => i.Kind == "cardspend");
+        var soFar = withCard.Checks[1].Plan!.AllParts().Single(i => i.Kind == "cardspend");
         Assert.Equal(("Charged so far", 25_00L), (soFar.Label, soFar.Cents));
 
         // DECISIONS.md 195: paying off what you charged can be skipped on the check you're on (and only that line).
         Assert.Equal((true, false), (spend.Skippable, soFar.Skippable));
         var skipUrl = $"/api/payday/plan/{withCard.Checks[0].PayDate:yyyy-MM-dd}/{Uri.EscapeDataString(spend.Key)}";
         Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync(skipUrl, new { done = false, skipped = true }, Json)).StatusCode);
-        var skipped = (await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend");
+        var skipped = (await Payday(c)).Checks[0].Plan!.AllParts().Single(i => i.Kind == "cardspend");
         Assert.Equal((true, false), (skipped.Skipped, skipped.Done));
         Assert.Equal(HttpStatusCode.BadRequest,
             (await c.PutAsJsonAsync($"/api/payday/plan/{withCard.Checks[0].PayDate:yyyy-MM-dd}/savings", new { done = false, skipped = true }, Json)).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync(skipUrl, new { done = false, skipped = false }, Json)).StatusCode);
-        Assert.False((await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend").Skipped);
+        Assert.False((await Payday(c)).Checks[0].Plan!.AllParts().Single(i => i.Kind == "cardspend").Skipped);
 
         // The card's own account shows the payment: that line is done.
         using (var scope = app.Services.CreateScope())
@@ -277,10 +311,10 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
             });
             await db.SaveChangesAsync();
         }
-        Assert.True((await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "cardspend").Done);
+        Assert.True((await Payday(c)).Checks[0].Plan!.AllParts().Single(i => i.Kind == "cardspend").Done);
 
         // The next checks keep their plans for reference, without statuses.
-        Assert.All((await Payday(c)).Checks.Skip(1).Where(x => x.Plan is not null).SelectMany(x => x.Plan!.Items), i => Assert.Null(i.Status));
+        Assert.All((await Payday(c)).Checks.Skip(1).Where(x => x.Plan is not null).SelectMany(x => x.Plan!.AllParts()), i => Assert.Null(i.Status));
     }
 
     [Fact]

@@ -157,7 +157,7 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         var held = (await SummaryAsync(client)).Cash!.CardsToPayCents;
         var plan = await client.GetFromJsonAsync<SmoothBudget.Api.Payday.PaydayDto>("/api/payday", Json);
         var current = plan!.Checks.Single(x => x.IsCurrent);
-        var spend = current.Plan!.Items.Single(i => i.Kind == "cardspend" && i.Key == $"cardspend:{cardId}");
+        var spend = current.Plan!.AllParts().Single(i => i.Kind == "cardspend" && i.Key == $"cardspend:{cardId}");
         Assert.Equal(50_00, spend.Cents);
         (await client.PutAsJsonAsync($"/api/payday/plan/{current.PayDate:yyyy-MM-dd}/{Uri.EscapeDataString(spend.Key)}", new { done = false, skipped = true }, Json)).EnsureSuccessStatusCode();
         var afterSkip = await SummaryAsync(client);
