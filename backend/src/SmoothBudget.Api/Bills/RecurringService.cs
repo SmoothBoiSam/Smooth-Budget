@@ -51,6 +51,20 @@ public record RecurringUpdateRequest(
 public record NotABillRequest(string Key, Guid CategoryId);
 
 public record TrackAsBillRequest(string Key);
+
+/// <summary>A bill a charge in review can join (DECISIONS.md 225).</summary>
+public record BillChoiceDto(string Key, string Name, string? CategoryName, long AmountCents);
+/// <summary>A bill line in your budget a charge can go in as a bill of its own.</summary>
+public record BillLineDto(Guid Id, string Name);
+/// <param name="Current">The bill this charge already belongs to, when it's filed as a bill.</param>
+/// <param name="Detected">A repeating charge the app found this in that isn't a bill yet: a new bill, most likely.</param>
+/// <param name="Suggested">A name for a new bill.</param>
+public record ChargeBillChoicesDto(IReadOnlyList<BillChoiceDto> Bills, IReadOnlyList<BillLineDto> Lines, string? Current, string? Detected, string? Suggested);
+/// <summary>A charge in review is a bill (DECISIONS.md 225): one of <paramref name="BillKey"/> (it's that bill),
+/// <paramref name="CategoryId"/> (a bill of its own in that bill line) or <paramref name="Name"/> (a new bill with its own line).</summary>
+public record FileChargeAsBillRequest(Guid TransactionId, string? BillKey = null, Guid? CategoryId = null, string? Name = null);
+/// <param name="Moved">Other charges that moved to that line with it.</param>
+public record FiledAsBillDto(Guid CategoryId, string CategoryName, int Moved);
 public record MoveBillRequest(string Key, Guid CategoryId);
 
 /// <summary>
@@ -181,8 +195,15 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         var items = await ItemsAsync(householdId, ct);
         var item = items.FirstOrDefault(i => i.Dto.Key == key);
         if (item is null) return null;
-        var name = item.Dto.Name.Length > 100 ? item.Dto.Name[..100] : item.Dto.Name;
+        var cat = await BillLineAsync(householdId, item.Dto.Name, item.Dto.MonthlyCents, ct);
+        await FileUnderAsync(householdId, item, cat.Id, "You made this its own bill.", ct);
+        return (cat.Id, cat.Name);
+    }
 
+    /// <summary>The bill category with this name (shown again if hidden), or a new one at the end of your budget.</summary>
+    private async Task<Category> BillLineAsync(Guid householdId, string name, long monthlyCents, CancellationToken ct)
+    {
+        name = name.Length > 100 ? name[..100] : name;
         var categories = await db.Categories.Where(c => c.HouseholdId == householdId).ToListAsync(ct);
         var cat = categories.FirstOrDefault(c => c.Type == CategoryType.FixedBill && string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
         if (cat is null)
@@ -193,14 +214,98 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
             cat = new Category
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, Name = unique, Type = CategoryType.FixedBill,
-                MonthlyLimitCents = item.Dto.MonthlyCents, SortOrder = categories.Count == 0 ? 0 : categories.Max(c => c.SortOrder) + 1,
+                MonthlyLimitCents = monthlyCents, SortOrder = categories.Count == 0 ? 0 : categories.Max(c => c.SortOrder) + 1,
             };
             db.Categories.Add(cat);
         }
         cat.IsHidden = false;
         await db.SaveChangesAsync(ct);
-        await FileUnderAsync(householdId, item, cat.Id, "You made this its own bill.", ct);
-        return (cat.Id, cat.Name);
+        return cat;
+    }
+
+    /// <summary>
+    /// What a charge in review can be filed as, when you say it's a bill (DECISIONS.md 225): your bills (the ones filed
+    /// in a bill line), your bill lines that aren't just one bill of the same name, and the bill it already belongs to.
+    /// </summary>
+    public async Task<ChargeBillChoicesDto?> BillChoicesAsync(Guid householdId, Guid transactionId, CancellationToken ct)
+    {
+        var merchant = await db.Transactions.AsNoTracking().Where(x => x.Id == transactionId && x.HouseholdId == householdId)
+            .Select(x => x.Merchant).SingleOrDefaultAsync(ct);
+        if (merchant is null) return null;
+        var items = (await ItemsAsync(householdId, ct)).Where(i => !i.Dismissed).ToList();
+        var own = items.FirstOrDefault(i => i.Series.TransactionIds.Contains(transactionId));
+        var bills = items.Where(i => i.Dto.InBillCategory && (i == own || (i.Dto.Status != "canceled" && i.Dto.ReplacedBy is null)))
+            .OrderBy(i => i.Dto.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(i => new BillChoiceDto(i.Dto.Key, i.Dto.Name, i.Dto.CategoryName, i.Dto.AmountCents)).ToList();
+        var lines = await db.Categories.AsNoTracking()
+            .Where(c => c.HouseholdId == householdId && c.Type == CategoryType.FixedBill && !c.IsHidden && c.Name != CardInterest.CategoryName)
+            .OrderBy(c => c.SortOrder).ThenBy(c => c.Name).Select(c => new BillLineDto(c.Id, c.Name)).ToListAsync(ct);
+        lines = lines.Where(l => !bills.Any(b => b.CategoryName == l.Name && string.Equals(b.Name, l.Name, StringComparison.OrdinalIgnoreCase))).ToList();
+        return new ChargeBillChoicesDto(bills, lines,
+            own is { Dto.InBillCategory: true } ? own.Dto.Key : null,
+            own is { Dto.InBillCategory: false } ? own.Dto.Key : null,
+            own?.Dto.Name);
+    }
+
+    /// <summary>
+    /// Files a charge from review as a bill (DECISIONS.md 225). Joining a bill you have: it goes in that bill's line, and
+    /// if the app saw it repeating on its own (a new price, a new card) that series joins the bill. A bill of its own in
+    /// one of your bill lines, or a new bill with its own line: it goes there, and so do its earlier charges. Either way
+    /// the bill's charges stay together (DECISIONS.md 158), with a merchant rule for future ones where that's safe.
+    /// </summary>
+    public async Task<FiledAsBillDto?> FileChargeAsBillAsync(Guid householdId, FileChargeAsBillRequest req, CancellationToken ct)
+    {
+        var t = await db.Transactions.SingleOrDefaultAsync(x => x.Id == req.TransactionId && x.HouseholdId == householdId, ct);
+        if (t is null || t.IsTransfer) return null;
+        var items = (await ItemsAsync(householdId, ct)).Where(i => !i.Dismissed).ToList();
+        var own = items.FirstOrDefault(i => i.Series.TransactionIds.Contains(t.Id));
+
+        Category? cat;
+        string reason;
+        Item? bill = null;
+        if (req.BillKey is { } key)
+        {
+            bill = items.FirstOrDefault(i => i.Dto.Key == key && i.Dto.InBillCategory);
+            if (bill?.Dto.CategoryId is not { } billCat) return null;
+            cat = await db.Categories.SingleAsync(c => c.Id == billCat, ct);
+            reason = $"You said it's {bill.Dto.Name}.";
+        }
+        else if (req.CategoryId is { } lineId)
+        {
+            cat = await db.Categories.SingleOrDefaultAsync(c => c.Id == lineId && c.HouseholdId == householdId && c.Type == CategoryType.FixedBill, ct);
+            if (cat is null) return null;
+            reason = $"You filed this bill under {cat.Name}.";
+        }
+        else
+        {
+            var name = req.Name?.Trim();
+            if (string.IsNullOrEmpty(name)) return null;
+            cat = await BillLineAsync(householdId, name, own?.Dto.MonthlyCents ?? Math.Max(0, t.AmountCents), ct);
+            reason = "You made this its own bill.";
+            if (own is not null && name != own.Dto.Name)
+                await UpdateAsync(householdId, new RecurringUpdateRequest(own.Dto.Key, Name: name), ct);
+        }
+        cat.IsHidden = false;
+        var before = await db.Transactions.CountAsync(x => x.HouseholdId == householdId && x.CategoryId == cat.Id && x.Id != t.Id, ct);
+
+        (t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) =
+            (cat.Id, null, CategorySource.User, false, false, reason);
+        if (t.Kind == TransactionKind.PartnerTransfer)
+            t.Kind = t.AmountCents < 0 ? TransactionKind.Refund : TransactionKind.Purchase;
+        await db.SaveChangesAsync(ct);
+
+        if (bill is not null)
+        {
+            // The app saw this charge repeat as a bill of its own: that's this bill (a new price, a new card), so they join.
+            if (own is not null && own.Dto.Key != bill.Dto.Key)
+                await UpdateAsync(householdId, new RecurringUpdateRequest(own.Dto.Key, MergeInto: bill.Dto.Key, Confirmed: true), ct);
+        }
+        else if (own is not null)
+            await FileUnderAsync(householdId, own, cat.Id, reason, ct);
+        await KeepBillsTogetherAsync(householdId, ct, t.Id);
+
+        var after = await db.Transactions.CountAsync(x => x.HouseholdId == householdId && x.CategoryId == cat.Id && x.Id != t.Id, ct);
+        return new FiledAsBillDto(cat.Id, cat.Name, Math.Max(0, after - before));
     }
 
     /// <summary>

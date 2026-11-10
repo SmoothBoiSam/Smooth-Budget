@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import CategoryHistory from './CategoryHistory'
 import {
   ApiError,
@@ -23,7 +23,8 @@ import { Caret, ErrorNotice, headerActionCls, Loading, Notice, Page, PageHeader,
 import BudgetPlanner from './BudgetPlanner'
 import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
-import CategoriesPage from './CategoriesPage'
+import { ArchivedCategories, ResetCategories, UnusedCategories } from './CategoryTools'
+import BillSheet from './BillSheet'
 import { centsToInput, formatCents, formatDay, formatSigned, formatTime, parseDollars, titleCase } from './format'
 import TransactionSheet from './TransactionSheet'
 
@@ -33,16 +34,14 @@ import TransactionSheet from './TransactionSheet'
 //   #/transactions      every transaction and search, opened from Home (DECISIONS.md 171; #/budget/all still works)
 //   #/budget/c/<id>     one category's transactions
 //   #/budget/plan       budget settings and the budget generator
-//   #/budget/categories add or delete categories
-//   #/budget/categories/<id>  one category, opened from Categories (its back button returns there)
-type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'categories' } | { kind: 'category'; id: string; from?: 'categories' }
+//   (#/budget/categories is gone (DECISIONS.md 228): its links open the budget, or the category)
+type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'category'; id: string }
 
 function viewFromHash(): View {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
   if (parts[0] === 'transactions' || parts[1] === 'all') return { kind: 'all' }
   if (parts[1] === 'plan') return { kind: 'plan' }
-  if (parts[1] === 'categories' && parts[2]) return { kind: 'category', id: parts[2], from: 'categories' }
-  if (parts[1] === 'categories') return { kind: 'categories' }
+  if (parts[1] === 'categories' && parts[2]) return { kind: 'category', id: parts[2] }
   if (parts[1] === 'c' && parts[2]) return { kind: 'category', id: parts[2] }
   return { kind: 'overview' }
 }
@@ -60,17 +59,21 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   const [month, setMonth] = useState<Transaction[]>([])
   const [bills, setBills] = useState<RecurringItem[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [unusedCount, setUnusedCount] = useState(0)
+  // A bill tapped under its bill line: its own pop-up, right here (DECISIONS.md 228).
+  const [bill, setBill] = useState<RecurringItem | null>(null)
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<BudgetCategoryLine | null | undefined>(undefined) // null = adding a new one
   const [error, setError] = useState<string | null>(null)
   const searchFailed = useCallback((e: unknown) => setError(e instanceof Error ? e.message : 'Search failed.'), [])
   const [notice, setNotice] = useState<string | null>(null)
+  // A message to show on the page a change sends you to (an archived category's page is gone, so back to the budget).
+  const carried = useRef<string | null>(null)
 
   useEffect(() => {
     const onHash = () => {
       setView(viewFromHash())
-      setNotice(null)
+      setNotice(carried.current)
+      carried.current = null
       window.scrollTo(0, 0)
     }
     window.addEventListener('hashchange', onHash)
@@ -79,18 +82,16 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
   const load = useCallback(async () => {
     try {
-      const [s, m, c, rec, unused] = await Promise.all([
+      const [s, m, c, rec] = await Promise.all([
         budgetSummaryApi.get(),
         budgetApi.monthTransactions(),
         budgetApi.categories(),
         recurringApi.summary().catch(() => null), // the bill list is extra: the budget still shows without it
-        budgetEditApi.unusedCategories().catch(() => []), // so is the archive suggestion (DECISIONS.md 180)
       ])
       setSummary(s)
       setMonth(m.items)
       setBills(rec?.items ?? [])
       setCategories(c)
-      setUnusedCount(unused.length)
       setError(null)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onSignedOut()
@@ -105,6 +106,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   function saved(message: string) {
     setSelected(null)
     setEditing(undefined)
+    setBill(null)
     setNotice(message)
     onChanged()
     void load()
@@ -146,9 +148,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
               ? 'Transactions'
               : view.kind === 'plan'
                 ? 'Budget settings'
-                : view.kind === 'categories'
-                  ? 'Categories'
-                  : (line?.name ?? 'Category')
+                : (line?.name ?? 'Category')
         }
         sub={view.kind === 'overview' && summary ? `${summary.budgetMonth.label} · ${formatDay(summary.budgetMonth.start)} – ${formatDay(summary.budgetMonth.end)}` : undefined}
         back={
@@ -156,9 +156,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
             ? undefined
             : view.kind === 'all'
               ? { href: '#/', label: 'Home' }
-              : view.kind === 'category' && view.from === 'categories'
-                ? { href: '#/budget/categories', label: 'Categories' }
-                : { href: '#/budget', label: 'Budget' }
+              : { href: '#/budget', label: 'Budget' }
         }
         action={
           view.kind === 'category' && line ? (
@@ -178,7 +176,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {!summary && !error && <Loading />}
 
       {summary && view.kind === 'overview' && (
-        <Overview summary={summary} bills={bills} unusedCount={unusedCount} />
+        <Overview summary={summary} bills={bills} onAdd={() => setEditing(null)} onOpenBill={setBill} onDone={saved} />
       )}
 
       {/* Budget settings (DECISIONS.md 168): one card for this month, then the planner. With the automatic budget off,
@@ -205,6 +203,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {view.kind === 'plan' && (
         <div className="mt-6">
           <SweepSetting />
+          <ResetCategories onDone={saved} />
         </div>
       )}
 
@@ -223,9 +222,6 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         <p className="mt-6 text-sm text-ink-soft">This category no longer exists.</p>
       )}
 
-      {summary && view.kind === 'categories' && (
-        <CategoriesPage categories={categories} onAdd={() => setEditing(null)} onDeleted={saved} />
-      )}
 
       {summary && view.kind === 'all' && (
         <SearchableList month={month} categories={categories} onSelect={setSelected} onError={searchFailed} />
@@ -236,13 +232,32 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
 
 
+      {bill && (
+        <BillSheet
+          item={bill}
+          items={bills}
+          categories={categories}
+          onClose={() => setBill(null)}
+          onDone={saved}
+          onError={(e) => {
+            setBill(null)
+            setError(e instanceof Error ? e.message : 'Something went wrong.')
+          }}
+        />
+      )}
+
       {editing !== undefined && (
         <CategoryEditSheet
           line={editing}
+          categories={categories}
           usualLimitCents={editing ? categories.find((c) => c.id === editing.id)?.monthlyLimitCents : undefined}
           onClose={() => setEditing(undefined)}
           onSaved={(message) => {
-            if (editing && message.includes(' is archived.')) window.location.hash = view.kind === 'category' && view.from ? '#/budget/categories' : '#/budget'
+            // Archived, deleted or merged away: its page is gone, so back to the budget.
+            if (editing && /^(Archived|Deleted|Merged) /.test(message) && view.kind === 'category') {
+              carried.current = message
+              window.location.hash = '#/budget'
+            }
             saved(message)
           }}
           onMove={editing ? (d) => move(editing, d) : undefined}
@@ -253,7 +268,19 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   )
 }
 
-function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; bills: RecurringItem[]; unusedCount: number }) {
+function Overview({
+  summary: s,
+  bills,
+  onAdd,
+  onOpenBill,
+  onDone,
+}: {
+  summary: BudgetSummary
+  bills: RecurringItem[]
+  onAdd: () => void
+  onOpenBill: (b: RecurringItem) => void
+  onDone: (message: string) => void
+}) {
   // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
   const trimmed = !!s.auto?.on && s.auto.shortCents > 0
   const short = Math.max(s.overplannedCents, trimmed ? s.auto!.shortCents : 0)
@@ -268,25 +295,20 @@ function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; 
       </p>
       {/* Managing the budget sits right under its numbers, one tap away (DECISIONS.md 169, 187). */}
       <div className="mt-4 grid grid-cols-2 gap-3">
-        <a href="#/budget/categories" className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
-          Categories
-        </a>
+        <button type="button" onClick={onAdd} className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
+          + Add a Spending Category
+        </button>
         <a href="#/budget/plan" className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
           Budget settings
         </a>
       </div>
 
-      {(short > 0 || unusedCount > 0) && (
+      {short > 0 && (
         <div className="mt-5 space-y-3">
           {/* One note for a plan beyond the month's money, whether or not the automatic budget already trimmed it (DECISIONS.md 194). */}
           {short > 0 && (
             <Notice tone="danger" href="#/budget/plan">
               The plan is {formatCents(short)} more than this month’s money{trimmed ? ', even with spending trimmed' : ''}.
-            </Notice>
-          )}
-          {unusedCount > 0 && (
-            <Notice tone="todo" href="#/budget/categories">
-              {unusedCount === 1 ? '1 category' : `${unusedCount} categories`} unused for 3 months. Archive or keep {unusedCount === 1 ? 'it' : 'them'}.
             </Notice>
           )}
         </div>
@@ -297,9 +319,13 @@ function Overview({ summary: s, bills, unusedCount }: { summary: BudgetSummary; 
       {/* What needs a category or a confirmation is on the Review tab's badge, not here (DECISIONS.md 171). */}
       {s.auto && !s.auto.on && <AutoBudgetOff />}
 
+      <UnusedCategories version={s} onDone={onDone} />
+
       {s.groups.map((g) => (
-        <Group key={g.type} group={g} bills={g.type === 'FixedBill' ? bills : []} month={s.budgetMonth} today={s.today} />
+        <Group key={g.type} group={g} bills={g.type === 'FixedBill' ? bills : []} month={s.budgetMonth} today={s.today} onOpenBill={onOpenBill} />
       ))}
+
+      <ArchivedCategories version={s} onDone={onDone} />
     </>
   )
 }
@@ -309,12 +335,16 @@ function Group({
   bills,
   month,
   today,
+  onOpenBill,
 }: {
   group: BudgetGroup
   bills: RecurringItem[]
   month: { start: string; end: string }
   today: string
+  onOpenBill: (b: RecurringItem) => void
 }) {
+  // Debt and savings are run from the Plan tab, with every option there (DECISIONS.md 228): a row goes there.
+  const planHref = g.type === 'DebtPayment' ? '#/debt' : g.type === 'SavingsTransfer' ? '#/savings' : null
   const spending = g.countsTowardLeftToSpend
   // Each detected bill under the bill line it's filed in (DECISIONS.md 101). Ones filed under spending are asked
   // about in Review → Bills (DECISIONS.md 152).
@@ -344,13 +374,13 @@ function Group({
           const items = live.filter((b) => b.categoryId === c.id)
           return (
             <li key={c.id}>
-              <a href={`#/budget/c/${c.id}`} className="block px-4 py-3">
+              <a href={planHref ?? `#/budget/c/${c.id}`} className="block px-4 py-3">
                 <CategoryRow line={c} spending={spending} />
                 {c.type === 'FixedBill' && g.type === 'DebtPayment' && (
                   <span className="mt-1 block text-xs text-ink-faint">Planned from your card balances at their APRs</span>
                 )}
               </a>
-              {items.length > 0 && <BillItems lineId={c.id} items={items} month={month} today={today} />}
+              {items.length > 0 && <BillItems lineId={c.id} items={items} month={month} today={today} onOpen={onOpenBill} />}
             </li>
           )
         })}
@@ -362,7 +392,19 @@ function Group({
 }
 
 /** The bills under one bill line; a long list folds behind a caret. */
-function BillItems({ lineId, items, month, today }: { lineId: string; items: RecurringItem[]; month: { start: string; end: string }; today: string }) {
+function BillItems({
+  lineId,
+  items,
+  month,
+  today,
+  onOpen,
+}: {
+  lineId: string
+  items: RecurringItem[]
+  month: { start: string; end: string }
+  today: string
+  onOpen: (b: RecurringItem) => void
+}) {
   const [open, setOpen] = useRemembered(`budget.items.${lineId}`, items.length <= 3)
   return (
     <div className="mb-2 ml-4 mr-4 border-l-2 border-ink/10 pl-3">
@@ -375,7 +417,7 @@ function BillItems({ lineId, items, month, today }: { lineId: string; items: Rec
       {open && (
         <ul className="divide-y divide-ink/[0.07]">
           {items.map((b) => (
-            <BillItemRow key={b.key} b={b} month={month} today={today} />
+            <BillItemRow key={b.key} b={b} month={month} today={today} onOpen={() => onOpen(b)} />
           ))}
         </ul>
       )}
@@ -384,7 +426,7 @@ function BillItems({ lineId, items, month, today }: { lineId: string; items: Rec
 }
 
 /** One bill or subscription: paid this budget month, due (or late), or next due after it. */
-function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: string; end: string }; today: string }) {
+function BillItemRow({ b, month, today, onOpen }: { b: RecurringItem; month: { start: string; end: string }; today: string; onOpen: () => void }) {
   const paidThisMonth = b.lastDate >= month.start && b.lastDate <= month.end
   const [text, cls] =
     b.status === 'possiblyCanceled'
@@ -398,7 +440,7 @@ function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: st
             : [`Next ${formatDay(b.nextExpected)}`, 'text-ink-faint']
   return (
     <li>
-      <a href={`#/tasks/bills/${encodeURIComponent(b.key)}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
+      <button type="button" onClick={onOpen} className="flex w-full items-baseline justify-between gap-3 py-2 text-left text-sm">
         <span className="min-w-0">
           <span className="block truncate">{b.name}</span>
           <span className={`block text-xs ${cls}`}>
@@ -411,7 +453,7 @@ function BillItemRow({ b, month, today }: { b: RecurringItem; month: { start: st
             <span className="block text-right text-[11px] text-gold-ink">{b.status === 'priceUp' ? 'price went up' : 'price went down'}</span>
           )}
         </span>
-      </a>
+      </button>
     </li>
   )
 }
@@ -683,7 +725,7 @@ function SearchableList({
 
 const noFilters: SearchFilters = { q: '', categoryId: '', min: '', max: '', from: '', to: '' }
 const groupOrder: Category['type'][] = ['Variable', 'FixedBill', 'DebtPayment', 'SavingsTransfer']
-const groupNames: Record<Category['type'], string> = { Variable: 'Spending', FixedBill: 'Bills', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
+const groupNames: Record<Category['type'], string> = { Variable: 'Spending Categories', FixedBill: 'Bill Categories', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
 
 /** yyyy-mm-dd in the phone's own time zone. */
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

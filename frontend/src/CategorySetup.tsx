@@ -110,7 +110,7 @@ export default function CategorySetup({ firstTime, onDone, onCancel }: { firstTi
       {d.unused.length > 0 && (
         <section className="mt-6" aria-labelledby="setup-hide">
           <h3 id="setup-hide" className="text-sm font-semibold text-ink-soft">Categories you don’t use</h3>
-          <p className="mt-1 text-xs text-ink-soft">Checked ones are archived. Archived categories keep their history and can come back from Budget → Categories → Archived.</p>
+          <p className="mt-1 text-xs text-ink-soft">Checked ones are archived. Archived categories keep their history and can come back from Archived at the bottom of the Budget tab.</p>
           <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
             {d.unused.map((u) => (
               <li key={u.id}>

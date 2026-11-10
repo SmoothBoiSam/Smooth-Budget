@@ -5,8 +5,8 @@ import { centsToInput, formatCents, formatDay, parseDollars } from './format'
 import { smallBtn } from './ui'
 
 const groups: { type: Category['type']; label: string }[] = [
-  { type: 'Variable', label: 'Spending' },
-  { type: 'FixedBill', label: 'Bills' },
+  { type: 'Variable', label: 'Spending Categories' },
+  { type: 'FixedBill', label: 'Bill Categories' },
   { type: 'DebtPayment', label: 'Debt payments' },
   { type: 'SavingsTransfer', label: 'Savings' },
 ]

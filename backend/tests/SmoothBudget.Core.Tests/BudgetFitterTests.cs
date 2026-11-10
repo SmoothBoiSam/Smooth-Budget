@@ -45,13 +45,45 @@ public class BudgetFitterTests
     }
 
     [Fact]
-    public void Everyday_spending_goes_last_and_not_below_its_floor_then_the_rest_is_a_shortfall()
+    public void Everyday_spending_goes_last_and_below_its_floor_only_when_the_money_still_runs_short()
     {
-        // $800 short: nice to have 300 + savings 100 + everyday down to 80% (groceries 320, gas 120: 110 more) = 510; 290 short.
+        // $800 short: nice to have 300 + savings 100 + everyday down to 80% (groceries 320, gas 120: 110 more) = 510.
+        // DECISIONS.md 226: the last 290 comes off everyday spending too (in proportion, 211 and 79), so the limits never
+        // add up to more than the month's money.
         var f = BudgetFitter.Fit(Plan(1_960_00), NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
-        Assert.Equal((320_00L, 120_00L, 0L, 0L), (Limit(f, Groceries), Limit(f, Gas), Limit(f, EatingOut), Limit(f, Shopping)));
-        Assert.Equal((290_00L, 510_00L), (f.ShortCents, f.SqueezedCents));
-        Assert.True(f.Proposal.SpendsMoreThanIncome);
+        Assert.Equal((109_00L, 41_00L, 0L, 0L), (Limit(f, Groceries), Limit(f, Gas), Limit(f, EatingOut), Limit(f, Shopping)));
+        Assert.Equal((0L, 800_00L), (f.ShortCents, f.SqueezedCents));
+        Assert.False(f.Proposal.SpendsMoreThanIncome);
+        Assert.EndsWith("Squeezed by $291.00 (from $400.00) to fit this month's money.", f.Proposal.Categories.Single(c => c.CategoryId == Groceries).Explanation);
+
+        // Only bills and card minimums costing more than the month brings in is a shortfall.
+        var bare = BudgetFitter.Fit(Plan(1_700_00), NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
+        Assert.Equal((0L, 0L, 110_00L), (Limit(bare, Groceries), Limit(bare, Gas), bare.ShortCents));
+    }
+
+    [Fact]
+    public void In_a_tight_month_the_cards_get_their_minimums_after_savings_and_before_everyday_spending()
+    {
+        // DECISIONS.md 226: the card line holds the $160 minimums and Card interest ($40) sits on top. The minimums include
+        // the interest, so in a pinch the $40 goes: after nice-to-have spending and savings, before groceries and gas.
+        var interest = Guid.NewGuid();
+        var plan = Plan(2_350_00);
+        plan = plan with
+        {
+            CardMinimumsCents = 160_00, AllocatedCents = 2_800_00,
+            Categories = [.. plan.Categories, L(interest, "Card interest", CategoryType.FixedBill, 40_00)],
+        };
+        // $450 short: 300 + 100 + 40 interest, then 10 off everyday spending (8 from groceries, 2 from gas).
+        var f = BudgetFitter.Fit(plan, NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
+        Assert.Equal((0L, 160_00L, 392_00L, 148_00L), (Limit(f, interest), Limit(f, Card), Limit(f, Groceries), Limit(f, Gas)));
+        Assert.Contains("this month the cards get their minimums, $160.00", f.Proposal.Categories.Single(c => c.CategoryId == interest).Explanation);
+
+        // $25 of interest already charged this month stays, and it counts toward the minimums: the card line gives the
+        // rest. Without the minimums known, the card lines stay as they are.
+        var charged = BudgetFitter.Fit(plan, new Dictionary<Guid, long> { [interest] = 25_00 }, new HashSet<Guid>(), savingsFromGoals: false);
+        Assert.Equal((25_00L, 135_00L), (Limit(charged, interest), Limit(charged, Card)));
+        var unknown = BudgetFitter.Fit(plan with { CardMinimumsCents = null }, NothingSpent, new HashSet<Guid>(), savingsFromGoals: false);
+        Assert.Equal(40_00, Limit(unknown, interest));
     }
 
     [Fact]
@@ -76,10 +108,10 @@ public class BudgetFitterTests
         var spent = new Dictionary<Guid, long> { [EatingOut] = 180_00 };
         var f = BudgetFitter.Fit(Plan(2_510_00), spent, new HashSet<Guid> { Shopping }, savingsFromGoals: false);
         // Eating out can only give 20 (180 spent); shopping is yours; savings 100; everyday spending gives 110 down to its
-        // 80% floors (groceries 320, gas 120), and the last $20 is reported as short.
+        // 80% floors (groceries 320, gas 120), and the last $20 below them (DECISIONS.md 226).
         Assert.Equal((0L, 180_00L, 100_00L), (Limit(f, Save), Limit(f, EatingOut), Limit(f, Shopping)));
-        Assert.Equal((230_00L, 20_00L), (f.SqueezedCents, f.ShortCents));
-        Assert.Equal((320_00L, 120_00L), (Limit(f, Groceries), Limit(f, Gas)));
+        Assert.Equal((250_00L, 0L), (f.SqueezedCents, f.ShortCents));
+        Assert.Equal((305_00L, 115_00L), (Limit(f, Groceries), Limit(f, Gas)));
     }
 
     [Fact]

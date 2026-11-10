@@ -91,7 +91,7 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
 
         var (extra, source) = extraOverride is { } e ? (e, "you")
             : h.ExtraDebtPaymentCents is { } saved ? (saved, "you")
-            : (Math.Max(0, await PlannedCardPaymentsAsync(householdId, ct) - minimums), "budget");
+            : (Math.Max(0, await PlannedCardPaymentsAsync(householdId, ct) - minimums - await ShortAsync(h, ct)), "budget");
         extra = Math.Max(0, extra);
 
         PayoffResult? plan = inputs.Count > 0 ? DebtPayoff.Simulate(inputs, extra, strategy) : null;
@@ -238,6 +238,13 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
         long Limit(Category c) => overrides.TryGetValue(c.Id, out var o) ? o : c.MonthlyLimitCents;
         return Limit(cat) + (interest is null ? 0 : Limit(interest));
     }
+
+    /// <summary>
+    /// What the automatic budget says this month still lacks (DECISIONS.md 226): money that isn't there can't be an
+    /// extra card payment, so it comes off the extra first.
+    /// </summary>
+    private async Task<long> ShortAsync(Household h, CancellationToken ct) =>
+        h.AutoBudget ? Math.Max(0, (await months.EnsureCurrentAsync(h.Id, ct)).AutoShortCents) : 0;
 
     private static DebtInput Input(DebtAccount d) => new(d.Id, Label(d), d.BalanceCents, d.AprBps ?? 0, d.MinimumPaymentCents ?? 0);
 

@@ -549,6 +549,8 @@ export const budgetEditApi = {
   archiveCategory: (id: string) => request<{ name: string; releasedToReview: number }>('POST', `/budget/categories/${id}/archive`),
   restoreCategory: (id: string) => request<{ name: string }>('POST', `/budget/categories/${id}/restore`),
   /** "Keep it" on the archive suggestion: not suggested again for a while. */
+  mergeCategories: (fromIds: string[], intoId: string) =>
+    request<{ id: string; name: string; movedTransactions: number }>('POST', '/budget/categories/merge', { fromIds, intoId }),
   keepCategory: (id: string) => request<void>('POST', `/budget/categories/${id}/keep`),
   setIncome: (incomeCents: number, partnerCents?: number, automatic = false) =>
     request<void>('PUT', '/budget/months/current/income', { incomeCents, partnerCents: partnerCents ?? null, automatic }),
@@ -803,8 +805,31 @@ export interface RecurringUpdate {
   keepLooking?: boolean
 }
 
+/** Where debt and savings money in review can go (DECISIONS.md 227): your debts, your savings accounts and hand-tracked goals. */
+export interface TowardChoices {
+  debts: { id: string; name: string }[]
+  savings: { id: string; name: string }[]
+}
+
+/** Where a charge in review can go when it's a bill (DECISIONS.md 225). */
+export interface ChargeBillChoices {
+  bills: { key: string; name: string; categoryName: string | null; amountCents: number }[]
+  lines: { id: string; name: string }[]
+  /** The bill it already belongs to. */
+  current: string | null
+  /** A repeating charge it's part of that isn't a bill yet. */
+  detected: string | null
+  suggested: string | null
+}
+
 export const recurringApi = {
   summary: () => request<RecurringSummary>('GET', '/recurring'),
+  towardChoices: () => request<TowardChoices>('GET', '/transactions/toward'),
+  fileToward: (transactionId: string, kind: 'debt' | 'savings', id: string) =>
+    request<{ towardName: string; categoryName: string }>('POST', `/transactions/${transactionId}/toward`, { kind, id }),
+  billChoices: (transactionId: string) => request<ChargeBillChoices>('GET', `/recurring/for/${transactionId}`),
+  fileAsBill: (body: { transactionId: string; billKey?: string; categoryId?: string; name?: string }) =>
+    request<{ categoryId: string; categoryName: string; moved: number }>('POST', '/recurring/file-charge', body),
   update: (u: RecurringUpdate) => request<void>('PUT', '/recurring', u),
   trackAsBill: (key: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/track-as-bill', { key }),
   /** File a bill's charges (past and future) under another category. */

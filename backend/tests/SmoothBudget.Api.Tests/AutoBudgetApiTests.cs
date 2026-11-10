@@ -114,8 +114,9 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         var after = await Summary(c);
         Assert.True(after.IncomeExpectedCents < before);
         Assert.True(Limit(after, groceries) <= Limit(s, groceries));
-        Assert.True(Limit(after, groceries) >= 320_00); // everyday spending keeps 80%
-        Assert.Equal(Math.Max(0, 2_300_00 + 320_00 - after.IncomeExpectedCents), after.Auto!.ShortCents); // eating out at $0, groceries at its floor
+        // DECISIONS.md 226: spending gives way until the plan fits; only rent alone costing more would leave it short.
+        Assert.True(2_300_00 + Limit(after, groceries) + Limit(after, eating) <= Math.Max(after.IncomeExpectedCents, 2_300_00));
+        Assert.Equal(Math.Max(0, 2_300_00 - after.IncomeExpectedCents), after.Auto!.ShortCents);
     }
 
     [Fact]

@@ -4,7 +4,10 @@ import {
   ApiError,
   budgetApi,
   budgetEditApi,
+  recurringApi,
   type Category,
+  type ChargeBillChoices,
+  type TowardChoices,
   type ReviewScope,
   type ReviewSummary,
   type Transaction,
@@ -13,7 +16,7 @@ import {
 } from './api'
 import BillsSection from './BillsSection'
 import { CountBubble, ErrorNotice, Loading, Page, PageHeader, reviewCard, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
-import { formatDay, formatSigned, titleCase } from './format'
+import { formatCents, formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
 
@@ -334,6 +337,13 @@ function ReviewCard({
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [context, setContext] = useState<TransactionContext | null>(null)
+  // A bill (DECISIONS.md 225): one of your bills ("bill:<key>"), one of your bill lines ("line:<id>"), or a new bill.
+  const [choices, setChoices] = useState<ChargeBillChoices | null>(null)
+  const [billPick, setBillPick] = useState('')
+  const [billName, setBillName] = useState('')
+  // Debt or savings money goes toward one of your debts or savings, not a category (DECISIONS.md 227).
+  const [toward, setToward] = useState<TowardChoices | null>(null)
+  const [towardPick, setTowardPick] = useState('')
 
   // A memory aid: how you filed this merchant before (DECISIONS.md 102).
   useEffect(() => {
@@ -365,6 +375,51 @@ function ReviewCard({
   const selected = categories.find((c) => c.id === categoryId) ?? null
   const group = pickedGroup ?? (selected ? listedType(selected) : 'Variable')
   const needsCategory = partnerIn ? mode === 'payback' : true
+  // Money between friends keeps the plain category picker: it's paying back or a share of something, not a bill.
+  const asBill = needsCategory && group === 'FixedBill' && !t.isPartnerTransfer
+
+  // Your bills, once you say it's a bill: the one it already belongs to picked, or a new bill when it's a repeating
+  // charge that isn't one yet.
+  useEffect(() => {
+    if (!asBill || choices) return
+    let live = true
+    recurringApi
+      .billChoices(t.id)
+      .catch(() => ({ bills: [], lines: [], current: null, detected: null, suggested: null }) as ChargeBillChoices)
+      .then((c) => {
+        if (!live) return
+        setChoices(c)
+        const line = t.categoryId && c.lines.some((l) => l.id === t.categoryId) ? `line:${t.categoryId}` : ''
+        const pick = c.current ? `bill:${c.current}` : line
+        setBillPick(pick || (c.detected || (c.bills.length === 0 && c.lines.length === 0) ? NEW : ''))
+        setBillName(c.suggested ?? titleCase(t.merchant))
+      })
+    return () => {
+      live = false
+    }
+  }, [asBill, choices, t.id, t.categoryId, t.merchant])
+  const towardKind = needsCategory && !t.isPartnerTransfer ? (group === 'DebtPayment' ? 'debt' : group === 'SavingsTransfer' ? 'savings' : null) : null
+  const towardList = towardKind === 'debt' ? toward?.debts : towardKind === 'savings' ? toward?.savings : undefined
+  useEffect(() => {
+    if (!towardKind || toward) return
+    let live = true
+    recurringApi
+      .towardChoices()
+      .catch(() => ({ debts: [], savings: [] }) as TowardChoices)
+      .then((c) => live && setToward(c))
+    return () => {
+      live = false
+    }
+  }, [towardKind, toward])
+  // With only one debt or one savings account, it's that one.
+  const pickedToward = towardList?.find((x) => x.id === towardPick) ?? (towardList?.length === 1 ? towardList[0] : undefined)
+
+  // The account picker shows once the choices are in and there's at least one (else the category picker stays).
+  const towardPicker = !!towardKind && (!toward || (!!towardList && towardList.length > 0))
+
+  const pickedBill = choices?.bills.find((b) => `bill:${b.key}` === billPick)
+  const pickedLine = choices?.lines.find((l) => `line:${l.id}` === billPick)
+  const billReady = billPick === NEW ? billName.trim().length > 0 : !!(pickedBill || pickedLine)
   // Every category in the chosen group at once, in your budget's order (DECISIONS.md 145).
   const inGroup = useMemo(() => categories.filter((c) => listedType(c) === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
 
@@ -385,10 +440,24 @@ function ReviewCard({
         await budgetApi.updateTransaction(t.id, null, false, null, { partnerPurpose: 'contribution' })
         return onDone(`Counted as money from ${first}.`)
       }
+      if (asBill) {
+        const r = await recurringApi.fileAsBill({
+          transactionId: t.id,
+          ...(pickedBill ? { billKey: pickedBill.key } : pickedLine ? { categoryId: pickedLine.id } : { name: billName.trim() }),
+        })
+        const moved = r.moved > 0 ? ` ${r.moved} other ${r.moved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
+        if (billPick === NEW) await onCategoryCreated()
+        return onDone(`${pickedBill ? pickedBill.name : billPick === NEW ? `New bill: ${r.categoryName}` : r.categoryName}.${moved}`, true)
+      }
+      if (towardKind && towardList && towardList.length > 0) {
+        if (!pickedToward) return
+        const r = await recurringApi.fileToward(t.id, towardKind, pickedToward.id)
+        return onDone(`Toward ${r.towardName}.`)
+      }
       if (!categoryId) return
       const r = await budgetApi.updateTransaction(t.id, categoryId, false, rule && !t.isPartnerTransfer ? t.merchant : null)
       const moved = r.billChargesMoved > 0 ? ` ${r.billChargesMoved} earlier ${r.billChargesMoved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
-      const others = r.ruleAppliedTo > 0 ? ` ${r.ruleAppliedTo} more from ${titleCase(t.merchant)} ${r.ruleAppliedTo === 1 ? 'is' : 'are'} filed there now, waiting for your ✓.` : ''
+      const others = r.ruleAppliedTo > 0 ? ` ${r.ruleAppliedTo} more from ${titleCase(t.merchant)} ${r.ruleAppliedTo === 1 ? 'is' : 'are'} filed there too.` : ''
       onDone(
         partnerIn
           ? `Counted as paying you back for ${selected?.name}: it comes off that category.`
@@ -492,7 +561,97 @@ function ReviewCard({
             </div>
           </fieldset>
 
+          {/* A bill: one of your bills or bill lines, or a new bill (DECISIONS.md 225). Its other charges follow it. */}
+          {asBill && (
+            <div className="mt-3">
+              {!choices ? (
+                <p className="px-1 text-sm text-ink-soft">Finding your bills…</p>
+              ) : (
+                <>
+                  <select
+                    aria-label="Which bill"
+                    value={billPick}
+                    onChange={(e) => setBillPick(e.target.value)}
+                    className={`block w-full rounded-2xl neu-inset px-4 py-3 text-base ${billPick ? 'font-medium' : 'text-ink-soft'}`}
+                  >
+                    <option value="" disabled>
+                      Pick a bill…
+                    </option>
+                    {choices.bills.length > 0 && (
+                      <optgroup label="Your bills">
+                        {choices.bills.map((b) => (
+                          <option key={b.key} value={`bill:${b.key}`}>
+                            {b.name} · {formatCents(b.amountCents)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {choices.lines.length > 0 && (
+                      <optgroup label="Bill Categories">
+                        {choices.lines.map((l) => (
+                          <option key={l.id} value={`line:${l.id}`}>
+                            {l.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value={NEW}>+ New bill…</option>
+                  </select>
+                  {billPick === NEW ? (
+                    <label className="mt-3 block">
+                      <span className="text-xs font-medium text-ink-soft">New bill’s name</span>
+                      <input
+                        value={billName}
+                        maxLength={100}
+                        onChange={(e) => setBillName(e.target.value)}
+                        className="mt-1 block w-full rounded-2xl neu-inset px-4 py-3 text-base"
+                      />
+                      <span className="mt-1 block text-xs text-ink-faint">It gets its own bill category, and its earlier charges go there too.</span>
+                    </label>
+                  ) : (
+                    billPick && (
+                      <p className="mt-2 px-1 text-xs text-ink-faint">
+                        {pickedBill ? 'Its charges stay together on that bill.' : 'It goes there as a bill of its own, with its earlier charges.'}
+                      </p>
+                    )
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Debt or savings: which one it went toward (DECISIONS.md 227). With none set up yet, the category picker stays. */}
+          {towardPicker && (
+            <div className="mt-3">
+              {!toward ? (
+                <p className="px-1 text-sm text-ink-soft">Finding your {towardKind === 'debt' ? 'debts' : 'savings'}…</p>
+              ) : (
+                <>
+                  <select
+                    aria-label={towardKind === 'debt' ? 'Which debt' : 'Which savings goal'}
+                    value={pickedToward?.id ?? ''}
+                    onChange={(e) => setTowardPick(e.target.value)}
+                    className={`block w-full rounded-2xl neu-inset px-4 py-3 text-base ${pickedToward ? 'font-medium' : 'text-ink-soft'}`}
+                  >
+                    <option value="" disabled>
+                      {towardKind === 'debt' ? 'Which debt did it pay?' : 'Which savings goal is it for?'}
+                    </option>
+                    {towardList!.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 px-1 text-xs text-ink-faint">
+                    {towardKind === 'debt' ? 'Counts as paying down that debt, not as spending.' : 'Counts toward that goal, not as spending.'}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
           {/* One dropdown for the kind's categories, with "New category…" at the end (DECISIONS.md 214). */}
+          {!asBill && !towardPicker && (
           <div className="mt-3">
             <select
               aria-label={groups.find((g) => g.type === group)!.pick}
@@ -514,7 +673,7 @@ function ReviewCard({
                   {c.name}
                 </option>
               ))}
-              <option value={NEW}>+ New category…</option>
+              <option value={NEW}>{group === 'Variable' ? '+ New spending category…' : '+ New category…'}</option>
             </select>
             {adding && (
               <NewCategory
@@ -530,10 +689,11 @@ function ReviewCard({
               />
             )}
           </div>
+          )}
         </>
       )}
 
-      {needsCategory && selected && !t.isPartnerTransfer && (
+      {needsCategory && selected && !t.isPartnerTransfer && !asBill && !towardKind && (
         <label className="mt-4 flex cursor-pointer items-start gap-3">
           <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="mt-0.5 size-4 shrink-0" />
           <span className="text-sm">
@@ -545,7 +705,7 @@ function ReviewCard({
 
       <button
         type="button"
-        disabled={busy || (partnerIn && !mode) || (needsCategory && !categoryId)}
+        disabled={busy || (partnerIn && !mode) || (asBill ? !billReady : towardPicker ? !pickedToward : needsCategory && !categoryId)}
         onClick={() => void save()}
         className={`${reviewPrimary} mt-4`}
       >
@@ -555,6 +715,18 @@ function ReviewCard({
             ? 'Say what it was for'
             : !needsCategory
               ? '✓ Confirm'
+              : towardPicker
+                ? pickedToward
+                  ? `✓ Toward ${pickedToward.name}`
+                  : towardKind === 'debt'
+                    ? 'Pick a debt'
+                    : 'Pick a goal'
+                : asBill
+                ? billPick === NEW
+                  ? `✓ New bill${billName.trim() ? `: ${billName.trim()}` : ''}`
+                  : pickedBill || pickedLine
+                    ? `✓ ${(pickedBill ?? pickedLine)!.name}${pickedBill && pickedBill.key === choices?.current ? ' is right' : ''}`
+                    : 'Pick a bill'
               : selected
                 ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
                 : 'Pick a category'}
@@ -573,7 +745,7 @@ function ReviewCard({
 
 /** The four kinds of transaction (DECISIONS.md 145); each one's categories show when you pick it. */
 const groups: { type: Category['type']; label: string; short: string; pick: string }[] = [
-  { type: 'Variable', label: 'Spending', short: 'Spending', pick: 'Pick a category' },
+  { type: 'Variable', label: 'Spending', short: 'Spending', pick: 'Pick a spending category' },
   { type: 'FixedBill', label: 'Bill', short: 'Bill', pick: 'Pick a bill' },
   { type: 'DebtPayment', label: 'Debt payment', short: 'Debt', pick: 'Pick a debt' },
   { type: 'SavingsTransfer', label: 'Savings transfer', short: 'Savings', pick: 'Pick a savings line' },

@@ -1,4 +1,5 @@
 using System.Globalization;
+using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Core.Budgeting;
 
@@ -14,14 +15,17 @@ public sealed record FittedBudget(BudgetProposal Proposal, long ShortCents, long
 /// <list type="number">
 /// <item>nice-to-have spending (DECISIONS.md 182), as far as what's already spent;</item>
 /// <item>savings transfers that aren't part of your goals plan (a habit, not a bill);</item>
-/// <item>important spending, then must-have spending, each never below <see cref="EssentialFloorPercent"/>% of its
-/// usual amount.</item>
+/// <item>card payments beyond the minimums, Card interest first (DECISIONS.md 226): the minimums already include the
+/// interest, so in a pinch they're all the cards need;</item>
+/// <item>important spending, then must-have spending, each down to <see cref="EssentialFloorPercent"/>% of its usual amount;</item>
+/// <item>then, only if the month's money still doesn't cover the plan, important and then must-have spending below that,
+/// as far as what's already spent (DECISIONS.md 226), so the limits never add up to more than there is to spend.</item>
 /// </list>
 /// Within a step, categories give in proportion to the room each has.
 /// Bill, card and savings lines are first raised to whatever was already paid on them this month.
-/// Nothing goes below what's already been spent this month, limits you set yourself are never touched, and bills,
-/// card minimums and debt payments aren't squeezed. Whatever is still missing is reported as a shortfall rather than
-/// hidden in impossible limits.
+/// Nothing goes below what's already been spent this month, limits you set yourself are never touched, and bills and
+/// card minimums aren't squeezed. Whatever is still missing (bills and minimums alone cost more than the month brings in)
+/// is reported as a shortfall.
 /// </summary>
 public static class BudgetFitter
 {
@@ -55,23 +59,55 @@ public static class BudgetFitter
         var over = p.AllocatedCents - available;
         if (over <= 0) return new FittedBudget(p, 0, 0, p);
         long Floor80(ProposedLimit l) => Math.Max(Spent(l.CategoryId), RoundUpToDollar(l.MedianCents * EssentialFloorPercent / 100));
-        var stages = new (Func<ProposedLimit, bool> Pick, Func<ProposedLimit, long> Floor, string Reason)[]
-        {
-            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.Low, l => Spent(l.CategoryId), "Nice-to-have spending is squeezed first"),
-            (l => l.Type == CategoryType.SavingsTransfer && !savingsFromGoals, l => Spent(l.CategoryId), "Savings transfers are squeezed next"),
-            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.Medium, Floor80, $"Important spending is next, to no less than {EssentialFloorPercent}% of usual"),
-            (l => l.Type == CategoryType.Variable && l.Priority == CategoryPriority.High, Floor80, $"Must-have spending is squeezed last, to no less than {EssentialFloorPercent}% of usual"),
-        };
+        long SpentOnly(ProposedLimit l) => Spent(l.CategoryId);
+        static bool Spending(ProposedLimit l, CategoryPriority p) => l.Type == CategoryType.Variable && l.Priority == p;
+        static bool Card(ProposedLimit l) => l.Type == CategoryType.DebtPayment || CardInterest.IsInterestCategory(l.Name, l.Type);
 
         long squeezed = 0;
-        foreach (var (pick, floorOf, _) in stages)
+        Squeeze(l => Spending(l, CategoryPriority.Low), SpentOnly);
+        Squeeze(l => l.Type == CategoryType.SavingsTransfer && !savingsFromGoals, SpentOnly);
+        CardsToMinimums();
+        Squeeze(l => Spending(l, CategoryPriority.Medium), Floor80);
+        Squeeze(l => Spending(l, CategoryPriority.High), Floor80);
+        Squeeze(l => Spending(l, CategoryPriority.Medium), SpentOnly);
+        Squeeze(l => Spending(l, CategoryPriority.High), SpentOnly);
+
+        var allocated = lines.Sum(l => l.ProposedCents);
+        var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = available - allocated, SpendsMoreThanIncome = allocated > available };
+        return new FittedBudget(fitted, Math.Max(0, allocated - available), squeezed, p);
+
+        // The card lines (payments and Card interest) together come down to the minimums, never below them or what's
+        // already been paid, Card interest first: the minimums include the interest.
+        void CardsToMinimums()
         {
-            if (over <= 0) break;
+            if (over <= 0 || p.CardMinimumsCents is not { } minimums) return;
+            var all = lines.Where(Card).ToList();
+            var room = all.Sum(l => l.ProposedCents) - Math.Max(minimums, all.Sum(l => Spent(l.CategoryId)));
+            var take = Math.Min(over, room);
+            foreach (var line in all.Where(l => !locked.Contains(l.CategoryId)).OrderBy(l => l.Type == CategoryType.DebtPayment ? 1 : 0))
+            {
+                if (take <= 0) break;
+                var cut = Math.Min(take, line.ProposedCents - Math.Min(line.ProposedCents, Spent(line.CategoryId)));
+                if (cut <= 0) continue;
+                lines[lines.IndexOf(line)] = line with
+                {
+                    ProposedCents = line.ProposedCents - cut,
+                    Explanation = $"{line.Explanation} Squeezed by {Money(cut)} (from {Money(line.ProposedCents)}): this month the cards get their minimums, {Money(minimums)}, which include the interest.",
+                };
+                take -= cut;
+                over -= cut;
+                squeezed += cut;
+            }
+        }
+
+        void Squeeze(Func<ProposedLimit, bool> pick, Func<ProposedLimit, long> floorOf)
+        {
+            if (over <= 0) return;
             var candidates = lines.Where(l => !locked.Contains(l.CategoryId) && pick(l))
                 .Select(l => (Line: l, Room: Math.Max(0, l.ProposedCents - Math.Min(l.ProposedCents, floorOf(l)))))
                 .Where(x => x.Room > 0).ToList();
             var room = candidates.Sum(x => x.Room);
-            if (room == 0) continue;
+            if (room == 0) return;
             var target = Math.Min(over, room);
             long cut = 0;
             foreach (var (line, r) in candidates.OrderByDescending(x => x.Room))
@@ -84,20 +120,18 @@ public static class BudgetFitter
                 var taken = line.ProposedCents - newLimit;
                 if (taken <= 0) continue;
                 cut += taken;
+                // Squeezed twice (to 80%, then below): one note, from where it started.
+                var start = p.Categories.First(l => l.CategoryId == line.CategoryId);
                 lines[lines.IndexOf(line)] = line with
                 {
                     ProposedCents = newLimit,
-                    Explanation = $"{line.Explanation} Squeezed by {Money(taken)} (from {Money(line.ProposedCents)}) to fit this month's money.",
+                    Explanation = $"{start.Explanation} Squeezed by {Money(start.ProposedCents - newLimit)} (from {Money(start.ProposedCents)}) to fit this month's money.",
                 };
                 if (cut >= target) break;
             }
             over -= cut;
             squeezed += cut;
         }
-
-        var allocated = lines.Sum(l => l.ProposedCents);
-        var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = available - allocated, SpendsMoreThanIncome = allocated > available };
-        return new FittedBudget(fitted, Math.Max(0, allocated - available), squeezed, p);
     }
 
     private static long RoundUpToDollar(long cents) => cents <= 0 ? 0 : (cents + 99) / 100 * 100;

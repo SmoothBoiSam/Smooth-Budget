@@ -35,7 +35,10 @@ public sealed record BudgetProposal(
     int UncategorizedCount,
     // The partner's contributions, kept apart from the owner's income (median month).
     long PartnerCents = 0,
-    IReadOnlyList<long>? MonthlyPartnerCents = null);
+    IReadOnlyList<long>? MonthlyPartnerCents = null,
+    // Every card's minimum payment this month (interest included), when the minimums are known: in a tight month the card
+    // lines can drop to this and no lower (DECISIONS.md 226).
+    long? CardMinimumsCents = null);
 
 /// <summary>
 /// Proposes a budget from the last few complete budget months (SPEC section 6.1):
@@ -171,9 +174,11 @@ public static class BudgetGenerator
         var cardCategory = proposals.FirstOrDefault(p => p.Type == CategoryType.DebtPayment && !locked.ContainsKey(p.CategoryId));
         var savingsCategory = savings is not null ? proposals.FirstOrDefault(p => p.Type == CategoryType.SavingsTransfer && !locked.ContainsKey(p.CategoryId)) : null;
         var debtStep = owed.Count > 0 && cardCategory is not null;
+        long? cardMinimums = null;
         if ((n > 0 || overrides?.IncomeCents is not null) && (debtStep || savingsCategory is not null))
         {
             var allMinimums = debtStep ? owed.Sum(d => Math.Min(d.MinimumCents, d.BalanceCents)) : 0;
+            if (debtStep) cardMinimums = allMinimums;
             // DECISIONS.md 172: a card's minimum payment includes the month's interest, and that interest already has its own
             // bill line (Card interest). Counting it in both would plan it twice, so the card-payment line is the minimums
             // less the interest; the payday plan adds it back when it sends the payment to the card.
@@ -240,7 +245,7 @@ public static class BudgetGenerator
             n, income,
             overrides?.IncomeExplanation ?? (n == 0 ? "No complete months of history yet." : $"Your median monthly income over {Months(n)}: paychecks and other deposits."),
             incomeByMonth, proposals, allocated, income + partner - allocated, allocated > income + partner, uncategorized,
-            partner, partnerByMonth);
+            partner, partnerByMonth, cardMinimums);
     }
 
     /// <summary>The middle value; for an even count, the average of the two middle values rounded half up.</summary>

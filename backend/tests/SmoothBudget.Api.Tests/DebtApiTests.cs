@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -57,6 +58,34 @@ public class DebtApiTests(TestApp app) : IClassFixture<TestApp>
         var faster = await Summary(c, "?extra=10000");
         Assert.True(faster.Plan!.Months < 47);
         Assert.Equal(250_00, faster.Plan.MonthlyPaymentCents);
+    }
+
+    [Fact]
+    public async Task A_month_that_comes_up_short_has_no_extra_for_the_cards()
+    {
+        // DECISIONS.md 226: the budget plans $300 for card payments against $50 of minimums, but the automatic budget says
+        // the month is $180 short: money that isn't there can't be extra, so the extra is $250 - $180 = $70.
+        var (c, household) = await NewUserAsync();
+        await c.PostAsJsonAsync("/api/debt", new DebtRequest("Test loan", 1_000_00, 1200, 50_00, null, null, null), Json);
+        (await c.GetAsync("/api/budget/summary")).EnsureSuccessStatusCode(); // the current budget month exists from here
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            db.Categories.Add(new Data.Category { Id = Guid.NewGuid(), HouseholdId = household, Name = "Test card payment", Type = Core.Budgeting.CategoryType.DebtPayment, MonthlyLimitCents = 300_00 });
+            (await db.Households.FindAsync(household))!.AutoBudget = true;
+            (await db.BudgetMonths.Where(m => m.HouseholdId == household).OrderByDescending(m => m.StartDate).FirstAsync()).AutoShortCents = 180_00;
+            await db.SaveChangesAsync();
+        }
+        var s = await Summary(c);
+        Assert.Equal(("budget", 70_00L), (s.Plan!.ExtraSource, s.Plan.ExtraCents));
+
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            (await db.BudgetMonths.Where(m => m.HouseholdId == household).OrderByDescending(m => m.StartDate).FirstAsync()).AutoShortCents = 401_00;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(0, (await Summary(c)).Plan!.ExtraCents);
     }
 
     [Fact]

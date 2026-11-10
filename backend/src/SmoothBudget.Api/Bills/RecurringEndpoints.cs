@@ -35,6 +35,18 @@ public static class RecurringEndpoints
                 ? Results.Ok(new { Name = name })
                 : Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = ["Pick one of your spending categories."] }));
 
+        // Review a charge as a bill (DECISIONS.md 225): the bills it could join, then file it.
+        g.MapGet("/for/{transactionId:guid}", async (Guid transactionId, HttpContext ctx, RecurringService svc, CancellationToken ct) =>
+            await svc.BillChoicesAsync(ctx.User.HouseholdId(), transactionId, ct) is { } r ? Results.Ok(r) : Results.NotFound());
+        g.MapPost("/file-charge", async (FileChargeAsBillRequest req, HttpContext ctx, RecurringService svc, CancellationToken ct) =>
+        {
+            if (req.BillKey is { Length: > 200 } || req.Name is { Length: > 100 })
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["Use up to 100 characters."] });
+            if (new[] { req.BillKey is not null, req.CategoryId is not null, !string.IsNullOrWhiteSpace(req.Name) }.Count(x => x) != 1)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["billKey"] = ["Pick a bill, or name a new one."] });
+            return await svc.FileChargeAsBillAsync(ctx.User.HouseholdId(), req, ct) is { } r ? Results.Ok(r) : Results.NotFound();
+        });
+
         // File a bill under a different category (DECISIONS.md 146).
         g.MapPost("/category", async (MoveBillRequest req, HttpContext ctx, RecurringService svc, CancellationToken ct) =>
             await svc.MoveToCategoryAsync(ctx.User.HouseholdId(), req.Key ?? "", req.CategoryId, ct) is { } r

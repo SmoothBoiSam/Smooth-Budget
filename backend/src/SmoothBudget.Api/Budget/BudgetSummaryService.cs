@@ -104,8 +104,8 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
 {
     private static readonly (CategoryType Type, string Label)[] GroupOrder =
     [
-        (CategoryType.Variable, "Spending"),
-        (CategoryType.FixedBill, "Bills"),
+        (CategoryType.Variable, "Spending Categories"),
+        (CategoryType.FixedBill, "Bill Categories"),
         (CategoryType.DebtPayment, "Debt payments"),
         (CategoryType.SavingsTransfer, "Savings"),
     ];

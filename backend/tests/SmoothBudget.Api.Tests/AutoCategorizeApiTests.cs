@@ -170,10 +170,14 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
     {
         var c = await NewUserAsync();
         var card = await AccountAsync(c, "CreditCard", "4321");
-        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,WAL-MART #1234,Shopping,Sale,-60.00,");
+        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,WAL-MART #1234,Shopping,Sale,-60.00,", "11/12/2026,11/13/2026,WAL-MART #1234,Shopping,Sale,-30.00,");
         var groceries = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Groceries").Id;
-        var first = (await Review(c)).Single();
-        await c.PatchAsJsonAsync($"/api/transactions/{first.Id}", new UpdateTransactionRequest(groceries, false, "WAL-MART"), Json);
+        var waiting = await Review(c);
+        Assert.Equal(2, waiting.Count);
+        var res = await c.PatchAsJsonAsync($"/api/transactions/{waiting[0].Id}", new UpdateTransactionRequest(groceries, false, "WAL-MART"), Json);
+        // DECISIONS.md 224: "always" settles the one already here too, so nothing from that store is left in review.
+        Assert.Equal(1, (await res.Content.ReadFromJsonAsync<UpdateTransactionResult>(Json))!.RuleAppliedTo);
+        Assert.Empty(await Review(c));
 
         await ImportAsync(c, card, ChaseCard, "11/15/2026,11/16/2026,WAL-MART #1234,Shopping,Sale,-45.00,");
 

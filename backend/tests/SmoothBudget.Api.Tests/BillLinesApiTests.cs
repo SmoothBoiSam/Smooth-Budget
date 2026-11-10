@@ -122,6 +122,78 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Review_files_a_charge_as_a_new_bill_or_one_you_already_have()
+    {
+        // DECISIONS.md 225: a repeating charge the app found is offered as a new bill, named after it; saying so gives it
+        // its own line with its earlier charges. A second charge at a new price then joins that bill instead.
+        var (c, household, checking, _) = await NewHouseholdAsync();
+        var charges = new[] { new DateOnly(2026, 10, 20), new DateOnly(2026, 11, 20), new DateOnly(2026, 12, 20), new DateOnly(2027, 1, 20) }
+            .Select(d => T(household, checking, d, null, 15_49, "STREAMFLIX")).ToList();
+        var newPrice = T(household, checking, new DateOnly(2027, 2, 9), null, 17_99, "STREAMFLIX PREMIUM");
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.AddRange([.. charges, newPrice]);
+            await db.SaveChangesAsync();
+        }
+
+        var choices = (await c.GetFromJsonAsync<Bills.ChargeBillChoicesDto>($"/api/recurring/for/{charges[^1].Id}", Json))!;
+        Assert.NotNull(choices.Detected);
+        Assert.Null(choices.Current);
+        var res = await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(charges[^1].Id, Name: "Streaming"), Json);
+        var filed = (await res.Content.ReadFromJsonAsync<Bills.FiledAsBillDto>(Json))!;
+        Assert.Equal(("Streaming", 4), (filed.CategoryName, filed.Moved)); // its 3 earlier charges, and the new price by its merchant rule
+
+        var again = (await c.GetFromJsonAsync<Bills.ChargeBillChoicesDto>($"/api/recurring/for/{newPrice.Id}", Json))!;
+        var bill = again.Bills.Single(b => b.Name == "Streaming");
+        var joined = (await (await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(newPrice.Id, BillKey: bill.Key), Json))
+            .Content.ReadFromJsonAsync<Bills.FiledAsBillDto>(Json))!;
+        Assert.Equal(filed.CategoryId, joined.CategoryId);
+        using var check = app.Services.CreateScope();
+        var rows = await check.ServiceProvider.GetRequiredService<AppDbContext>().Transactions.Where(t => t.HouseholdId == household && t.Merchant.StartsWith("STREAMFLIX")).ToListAsync();
+        Assert.All(rows, t => Assert.Equal((filed.CategoryId, false), (t.CategoryId!.Value, t.NeedsReview)));
+
+        // Neither a bill nor a name: turned away.
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(newPrice.Id), Json)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Debt_and_savings_money_goes_toward_an_account()
+    {
+        // DECISIONS.md 227: you pick the debt or savings, and it's filed under the line named after it, or your first.
+        var (c, household, checking, _) = await NewHouseholdAsync();
+        Guid savingsAcct = Guid.NewGuid(), debtLine = Guid.NewGuid(), fundLine = Guid.NewGuid();
+        var payment = T(household, checking, new DateOnly(2027, 2, 9), null, 200_00, "ONLINE PAYMENT");
+        var moved = T(household, checking, new DateOnly(2027, 2, 9), null, 100_00, "TRANSFER OUT");
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Accounts.Add(new Account { Id = savingsAcct, HouseholdId = household, Name = "Test Savings", Mask = "9999", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow });
+            db.SavingsGoals.Add(new SavingsGoal { Id = Guid.NewGuid(), HouseholdId = household, Name = "Test fund", TargetCents = 1_000_00, AccountId = savingsAcct, CreatedUtc = DateTime.UtcNow });
+            db.Categories.AddRange(
+                new Category { Id = debtLine, HouseholdId = household, Name = "Card payments", Type = CategoryType.DebtPayment, SortOrder = 5 },
+                new Category { Id = Guid.NewGuid(), HouseholdId = household, Name = "Savings", Type = CategoryType.SavingsTransfer, SortOrder = 6 },
+                new Category { Id = fundLine, HouseholdId = household, Name = "Test fund", Type = CategoryType.SavingsTransfer, SortOrder = 7 });
+            db.Transactions.AddRange(payment, moved);
+            await db.SaveChangesAsync();
+        }
+        await c.GetAsync("/api/debt"); // the card becomes a debt
+        var choices = (await c.GetFromJsonAsync<TowardChoicesDto>("/api/transactions/toward", Json))!;
+        var visa = choices.Debts.Single(d => d.Name == "Test Visa");
+        var fund = choices.Savings.Single(); // your goals, not the account they're in (DECISIONS.md 228)
+        Assert.Equal("Test fund", fund.Name);
+
+        var r = (await (await c.PostAsJsonAsync($"/api/transactions/{payment.Id}/toward", new TowardRequest("debt", visa.Id), Json)).Content.ReadFromJsonAsync<TowardResultDto>(Json))!;
+        Assert.Equal(("Test Visa", "Card payments"), (r.TowardName, r.CategoryName));
+        r = (await (await c.PostAsJsonAsync($"/api/transactions/{moved.Id}/toward", new TowardRequest("savings", fund.Id), Json)).Content.ReadFromJsonAsync<TowardResultDto>(Json))!;
+        Assert.Equal(("Test fund", "Test fund"), (r.TowardName, r.CategoryName)); // the goal names its line
+        using var check = app.Services.CreateScope();
+        var rows = await check.ServiceProvider.GetRequiredService<AppDbContext>().Transactions.Where(t => t.Id == payment.Id || t.Id == moved.Id).ToListAsync();
+        Assert.Equal((debtLine, "Toward Test Visa: you said so."), (rows.Single(t => t.Id == payment.Id).CategoryId!.Value, rows.Single(t => t.Id == payment.Id).CategoryReason));
+        Assert.Equal(fundLine, rows.Single(t => t.Id == moved.Id).CategoryId);
+    }
+
+    [Fact]
     public async Task A_bill_you_filed_one_charge_of_gathers_the_rest_on_the_next_refresh()
     {
         var (c, household, checking, _) = await NewHouseholdAsync();
