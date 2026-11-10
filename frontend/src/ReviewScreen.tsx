@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ask } from './confirm'
 import {
   ApiError,
   budgetApi,
@@ -200,7 +201,7 @@ export default function ReviewScreen({
               type="button"
               onClick={async () => {
                 const n = counts!.total
-                if (!window.confirm(`Use the app’s best guess for all ${n}? Any without a guess go under “Other”. You can still change any of them later.`)) return
+                if (!(await ask(`Use the app’s best guess for all ${n}? Any without a guess go under “Other”. You can still change any of them later.`, { yes: 'Use best guesses' }))) return
                 try {
                   const r = await budgetApi.bestGuessAll(reviewScope)
                   setNotice(`Settled ${r.settled} with the app’s best guess.`)

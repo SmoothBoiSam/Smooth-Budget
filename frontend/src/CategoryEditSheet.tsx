@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { ask } from './confirm'
 import { budgetEditApi, priorityLabels, type BudgetCategoryLine, type Category, type Priority } from './api'
 import { centsToInput, parseDollars } from './format'
 import { smallBtn } from './ui'
@@ -246,8 +247,8 @@ export default function CategoryEditSheet({
             <button
               type="button"
               disabled={busy}
-              onClick={() => {
-                if (window.confirm(`Archive ${line.name}? It leaves the budget; its history stays, and you can restore it from Budget → Categories.`)) void archive()
+              onClick={async () => {
+                if (await ask(`Archive ${line.name}? It leaves the budget; its history stays, and you can restore it from Budget → Categories.`, { yes: 'Archive', danger: true })) void archive()
               }}
               className="font-medium text-danger"
             >

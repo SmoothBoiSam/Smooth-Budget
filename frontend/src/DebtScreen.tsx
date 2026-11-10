@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { ask } from './confirm'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
 import { useRemembered } from './offline'
 import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
@@ -666,7 +667,7 @@ function DebtSheet({
           <button
             type="button"
             onClick={async () => {
-              if (!window.confirm(`Remove ${debt.name}? Its details are deleted.`)) return
+              if (!(await ask(`Remove ${debt.name}? Its details are deleted.`, { yes: 'Remove', danger: true }))) return
               try {
                 await debtApi.remove(debt.id)
                 await onSaved(`Removed ${debt.name}.`)

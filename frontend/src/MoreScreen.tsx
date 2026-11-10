@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { ask } from './confirm'
 import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me, type Rule } from './api'
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
@@ -36,7 +37,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
   }
 
   async function undo(b: ImportBatch) {
-    if (!window.confirm(`Remove the ${b.importedCount} transactions added by ${b.fileName}?`)) return
+    if (!(await ask(`Remove the ${b.importedCount} transactions added by ${b.fileName}?`, { yes: 'Remove', danger: true }))) return
     await budgetApi.undoBatch(b.id).catch((e) => setError(e.message))
     changed()
   }

@@ -1,6 +1,7 @@
 // The app's building blocks (DECISIONS.md 187). Every screen is made of these, so cards, rows, notices and buttons look
 // and behave the same everywhere. Neumorphic: everything is the page's own color, raised (neu) or pressed in (neu-inset).
-import type { ReactNode } from 'react'
+import { useEffect, useSyncExternalStore, type ReactNode } from 'react'
+import { confirmStore } from './confirm'
 import { bubbleStyle, bubbleText } from './theme'
 
 /** Every screen's frame: one width, one gutter, room above the bottom nav. */
@@ -192,6 +193,40 @@ export function Button({
     >
       {children}
     </button>
+  )
+}
+
+/** The "Are you sure?" sheet that ask() in confirm.ts opens (DECISIONS.md 215). Drawn once, above everything. */
+export function ConfirmHost() {
+  const req = useSyncExternalStore(confirmStore.subscribe, confirmStore.get)
+  useEffect(() => {
+    if (!req) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && req.answer(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [req])
+  if (!req) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40" onClick={() => req.answer(false)}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-msg" onClick={(e) => e.stopPropagation()} className={sheetCls}>
+        <p id="confirm-msg" className="text-base">
+          {req.message}
+        </p>
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button type="button" onClick={() => req.answer(false)} className="rounded-2xl neu py-3 text-sm font-semibold">
+            Cancel
+          </button>
+          <button
+            type="button"
+            autoFocus
+            onClick={() => req.answer(true)}
+            className={`rounded-2xl py-3 text-sm font-semibold shadow-neu-sm ${req.danger ? 'bg-danger text-primary-ink' : 'bg-primary text-primary-ink'}`}
+          >
+            {req.yes}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

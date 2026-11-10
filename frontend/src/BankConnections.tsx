@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ask } from './confirm'
 import { usePlaidLink } from 'react-plaid-link'
 import { plaidApi, type AccountMapping, type LinkResult, type PlaidConfig, type PlaidItem, type SyncResult } from './api'
 import { formatTime } from './format'
@@ -190,7 +191,7 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
   }
 
   async function remove(item: PlaidItem) {
-    if (!window.confirm(`Disconnect ${item.institutionName ?? 'this bank'}? Its accounts and history stay; they just stop syncing.`)) return
+    if (!(await ask(`Disconnect ${item.institutionName ?? 'this bank'}? Its accounts and history stay; they just stop syncing.`, { yes: 'Disconnect', danger: true }))) return
     await run('Disconnecting…', () => plaidApi.removeItem(item.id))
     await load()
     onChanged()
