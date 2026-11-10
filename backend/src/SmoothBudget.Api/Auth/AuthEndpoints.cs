@@ -8,7 +8,8 @@ namespace SmoothBudget.Api.Auth;
 /// <param name="Name">Your name as your friend will see it (with an invite).</param>
 public record RegisterRequest(string Email, string Password, string? Invite = null, string? Name = null);
 public record LoginRequest(string Email, string Password);
-public record MeResponse(string Email, Guid HouseholdId);
+/// <param name="Demo">A demo copy (DECISIONS.md 213): made-up data, gone in a day.</param>
+public record MeResponse(string Email, Guid HouseholdId, bool Demo = false);
 
 public static class AuthEndpoints
 {
@@ -76,8 +77,9 @@ public static class AuthEndpoints
             return Results.NoContent();
         }).RequireAuthorization();
 
-        auth.MapGet("/me", (HttpContext ctx) =>
-            Results.Ok(new MeResponse(ctx.User.Identity!.Name!, ctx.User.HouseholdId())))
+        auth.MapGet("/me", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+            Results.Ok(new MeResponse(ctx.User.Identity!.Name!, ctx.User.HouseholdId(),
+                await Seeding.DemoMode.IsDemoAsync(db, ctx.User.HouseholdId(), ct))))
             .RequireAuthorization();
     }
 

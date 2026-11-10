@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, joinToken, sharedApi, type InvitePeek, type Me } from './api'
-import { smallBtn } from './ui'
+import { Button, smallBtn } from './ui'
 
 const field = 'mt-1 block w-full rounded-xl neu-inset px-4 py-3 text-base outline-none focus:ring-2 focus:ring-accent'
 
@@ -47,6 +47,21 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
       onSignedIn(me)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // "Try the demo" (DECISIONS.md 213): a fresh copy of made-up data, only for this browser.
+  async function tryDemo() {
+    setBusy(true)
+    setError(null)
+    try {
+      const me = await api.demo()
+      window.history.replaceState(null, '', '#/')
+      onSignedIn(me)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Couldn’t start the demo.')
     } finally {
       setBusy(false)
     }
@@ -123,6 +138,17 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
         >
           {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}
         </button>
+      )}
+
+      {!invite && (
+        <section aria-label="Demo" className="mt-10">
+          <Button kind="secondary" disabled={busy} onClick={() => void tryDemo()}>
+            Try the demo
+          </Button>
+          <p className="mt-2 px-1 text-xs text-ink-soft">
+            Look around with made-up numbers. Tick things off and change anything; it’s your own copy, and the next person starts fresh.
+          </p>
+        </section>
       )}
     </main>
   )

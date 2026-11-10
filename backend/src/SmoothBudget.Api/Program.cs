@@ -175,6 +175,7 @@ app.UseBudgetChangeTracking(); // any change you make refreshes the automatic bu
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
+app.MapDemoEndpoints();
 app.MapImportEndpoints();
 app.MapTransactionEndpoints();
 app.MapBudgetEndpoints();

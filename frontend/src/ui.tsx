@@ -244,6 +244,18 @@ export function OfflineBar() {
   )
 }
 
+/** Across the top in demo mode (DECISIONS.md 213): it's made-up data, and a way out. */
+export function DemoBar({ onLeave }: { onLeave: () => void }) {
+  return (
+    <div role="status" className="sticky top-0 z-20 flex items-center justify-center gap-3 bg-accent px-4 py-1.5 pt-[max(0.375rem,env(safe-area-inset-top))] text-xs font-medium text-white">
+      <span>Demo: made-up numbers, just for you</span>
+      <button type="button" onClick={onLeave} className="rounded-full bg-white/20 px-2.5 py-0.5 font-semibold">
+        Leave demo
+      </button>
+    </div>
+  )
+}
+
 /** The caret on a collapsible section: points down when closed, up when open. */
 export function Caret({ open }: { open: boolean }) {
   return (

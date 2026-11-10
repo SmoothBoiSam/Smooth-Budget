@@ -133,8 +133,8 @@ export default function ReviewScreen({
         back={{ href: '#/tasks', label: 'Tasks' }}
         action={(part === 'bills' ? billsCount : (todoCount ?? 0)) > 0 ? <CountBubble n={part === 'bills' ? billsCount : (todoCount ?? 0)} /> : undefined}
       />
-      {/* The view switch sits on a row of its own under the title (DECISIONS.md 201). */}
-      <div className="mt-3 flex justify-center">
+      {/* The view switch sits on a row of its own under the title (DECISIONS.md 201), on the left like the filters below it (212). */}
+      <div className="mt-3 flex">
         <div role="tablist" aria-label="View" className="flex rounded-full neu-inset p-1 text-xs font-medium">
           {(['cards', 'list'] as const).map((m) => (
             <button

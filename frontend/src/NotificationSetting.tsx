@@ -44,8 +44,10 @@ export default function NotificationSetting() {
         else if (!reg) next = { kind: 'unavailable', why: 'This browser can’t show notifications from Smooth Budget.' }
         else next = { kind: 'ready', on: Notification.permission === 'granted' && !!(await reg.pushManager.getSubscription()), publicKey: status.publicKey }
         if (live) setState(next)
-      } catch {
-        if (live) setState({ kind: 'unavailable', why: 'Couldn’t check notifications right now.' })
+      } catch (e) {
+        // The demo has notifications off and says so (DECISIONS.md 213).
+        const why = e instanceof Error && e.message.includes('demo') ? e.message : 'Couldn’t check notifications right now.'
+        if (live) setState({ kind: 'unavailable', why })
       }
     })()
     return () => {

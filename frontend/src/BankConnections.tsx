@@ -201,7 +201,9 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
     setMessage('Plaid is generating new test activity. Sync in a few seconds to see pending purchases post.')
   }
 
-  if (!config) return null
+  // Before it loads, or when it can't (the demo has bank syncing off, DECISIONS.md 213): say why instead of a blank page.
+  if (!config)
+    return error ? <p className="neu mt-6 rounded-3xl px-5 py-4 text-sm text-ink-soft">{error}</p> : null
 
   return (
     <section aria-label="Bank connections" className="mt-6">

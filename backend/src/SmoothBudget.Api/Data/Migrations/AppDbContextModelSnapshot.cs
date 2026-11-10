@@ -618,6 +618,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<int>("DebtStrategy")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("DemoUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("DisplayName")
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)");

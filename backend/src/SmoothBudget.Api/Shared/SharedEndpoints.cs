@@ -1,3 +1,4 @@
+using SmoothBudget.Api.Seeding;
 using SmoothBudget.Api.Auth;
 
 namespace SmoothBudget.Api.Shared;
@@ -31,11 +32,12 @@ public static class SharedEndpoints
         g.MapDelete("/friends/{id:guid}", async (Guid id, HttpContext ctx, SharedService shared, CancellationToken ct) =>
             await shared.RemoveFriendAsync(ctx.User.HouseholdId(), id, ct) ? Results.NoContent() : Results.NotFound());
 
+        // A demo copy can't invite or link to real people (DECISIONS.md 213).
         g.MapPost("/friends/{id:guid}/invite", async (Guid id, HttpContext ctx, SharedService shared, CancellationToken ct) =>
         {
             var (invite, result) = await shared.CreateInviteAsync(ctx.User.HouseholdId(), id, ct);
             return invite is null ? Respond(result, Conflict) : Results.Ok(invite);
-        });
+        }).NotInDemo();
 
         g.MapDelete("/friends/{id:guid}/invite", async (Guid id, HttpContext ctx, SharedService shared, CancellationToken ct) =>
         {
@@ -49,7 +51,7 @@ public static class SharedEndpoints
         // Signed in already (an account made before the invite): join with the link.
         g.MapPost("/join", async (JoinRequest req, HttpContext ctx, SharedService shared, CancellationToken ct) =>
             await shared.JoinAsync(ctx.User.HouseholdId(), req.Token ?? "", ct) is { } problem ? Conflict(problem) : Results.NoContent())
-            .RequireRateLimiting(AuthEndpoints.RateLimitPolicy);
+            .RequireRateLimiting(AuthEndpoints.RateLimitPolicy).NotInDemo();
     }
 
     private static IResult Invalid(string problem) => Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = [problem] });

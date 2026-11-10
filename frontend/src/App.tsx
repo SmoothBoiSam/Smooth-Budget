@@ -16,7 +16,7 @@ import PaySetupScreen from './PaySetupScreen'
 import SavingsScreen from './SavingsScreen'
 import { inViewTransition, reducedMotion } from './motion'
 import { saved, useOnline } from './offline'
-import { OfflineBar } from './ui'
+import { DemoBar, OfflineBar } from './ui'
 
 // Back from a bank's own sign-in (Plaid OAuth, DECISIONS.md 185): open More, where Bank connections picks Plaid up again.
 // The path and ?oauth_state_id stay in the address for Plaid to read.
@@ -146,6 +146,7 @@ export default function App() {
   return (
     <>
       {!online && <OfflineBar />}
+      {me.demo && <DemoBar onLeave={() => void api.logout().finally(() => { window.history.replaceState(null, '', '#/'); signedOut() })} />}
       <div ref={screen}>
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
       {(route === 'budget' || route === 'transactions') && <BudgetScreen key={route} onChanged={refreshInbox} onSignedOut={signedOut} />}

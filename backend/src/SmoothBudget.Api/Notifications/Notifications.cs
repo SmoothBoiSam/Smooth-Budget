@@ -1,3 +1,4 @@
+using SmoothBudget.Api.Seeding;
 using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -289,7 +290,7 @@ public static class NotificationEndpoints
 
     public static void MapNotificationEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/push").RequireAuthorization();
+        var g = app.MapGroup("/api/push").RequireAuthorization().NotInDemo(); // no notifications from a demo copy (DECISIONS.md 213)
         g.MapGet("", (PushOptions o) => new PushStatusDto(o.IsConfigured, o.IsConfigured ? o.PublicKey : null, o.Problem));
 
         g.MapPost("/subscribe", async (PushSubscribeRequest req, HttpContext ctx, AppDbContext db, PushOptions o, TimeProvider clock, CancellationToken ct) =>

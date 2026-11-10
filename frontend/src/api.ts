@@ -53,6 +53,8 @@ export interface HomeSummary {
 export interface Me {
   email: string
   householdId: string
+  /** A demo copy started from the sign-in screen (DECISIONS.md 213): made-up data, gone in a day. */
+  demo: boolean
 }
 
 export class ApiError extends Error {
@@ -112,6 +114,8 @@ export const api = {
   register: (email: string, password: string, invite?: string, name?: string) => request<Me>('POST', '/auth/register', { email, password, invite, name }),
   options: () => request<{ signUpOpen: boolean }>('GET', '/auth/options'),
   logout: () => request<void>('POST', '/auth/logout'),
+  /** A fresh copy of the demo, just for this browser (DECISIONS.md 213). */
+  demo: () => request<Me>('POST', '/auth/demo'),
   homeSummary: () => request<HomeSummary>('GET', '/home/summary'),
 }
 

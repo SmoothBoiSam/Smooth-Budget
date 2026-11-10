@@ -1,3 +1,4 @@
+using SmoothBudget.Api.Seeding;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -20,7 +21,7 @@ public static class PlaidEndpoints
 
     public static void MapPlaidEndpoints(this WebApplication app)
     {
-        var plaidGroup = app.MapGroup("/api/plaid").RequireAuthorization();
+        var plaidGroup = app.MapGroup("/api/plaid").RequireAuthorization().NotInDemo(); // no real banks in a demo copy (DECISIONS.md 213)
         var sandboxShortcut = app.Environment.IsDevelopment();
 
         plaidGroup.MapGet("/config", (PlaidOptions o) => new
