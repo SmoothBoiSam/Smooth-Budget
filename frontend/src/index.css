@@ -148,6 +148,44 @@ body {
   .animate-tabby-swing { animation: none; }
 }
 
+/* The sign-in cat (DECISIONS.md 216): fades in, then hops from side to side, always a little tilted. It rocks
+   around its feet, rising mid-step like a happy little bounce. With reduced motion it only fades in, still tilted. */
+@keyframes cat-in {
+  from { opacity: 0; transform: scale(0.85); }
+}
+@keyframes cat-bounce {
+  0%, 100% { transform: translateX(-5px) rotate(-14deg); }
+  25% { transform: translateX(0) translateY(-7px) rotate(-8deg); }
+  50% { transform: translateX(5px) rotate(-2deg); }
+  75% { transform: translateX(0) translateY(-7px) rotate(-8deg); }
+}
+.animate-cat-in { animation: cat-in 700ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-cat-bounce {
+  transform-origin: 50% 90%;
+  animation: cat-bounce 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-cat-bounce { animation: none; transform: rotate(-8deg); }
+}
+
+/* The sign-in tabby (DECISIONS.md 218): hidden above the screen, it slowly lowers until its ears and eyes show,
+   looks for a second, flinches, and shoots back up. Every 14s; the first peek comes about 4s in. */
+@keyframes tabby-peek {
+  0%, 65% { transform: translateY(-105%) rotate(12deg); animation-timing-function: cubic-bezier(0.25, 0.6, 0.3, 1); }
+  83% { transform: translateY(-50%) rotate(12deg); }
+  90% { transform: translateY(-50%) rotate(12deg); animation-timing-function: ease-out; }
+  90.7% { transform: translateY(-45%) rotate(16deg); animation-timing-function: cubic-bezier(0.6, 0, 0.9, 0.5); }
+  92.5%, 100% { transform: translateY(-115%) rotate(8deg); }
+}
+.animate-tabby-peek {
+  transform: translateY(-115%);
+  transform-origin: 50% 0;
+  animation: tabby-peek 14s -5s infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-tabby-peek { display: none; }
+}
+
 /* ---------------------------------------------------------------------------------------------------------------------
    Gradients and motion (DECISIONS.md 190). Gradients: a soft light-to-shade sheen over every colored fill, so each keeps
    its own color in both themes. Motion: short and soft, opacity and transform wherever possible, never blocking a tap.

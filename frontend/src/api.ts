@@ -112,7 +112,6 @@ export const api = {
   login: (email: string, password: string) => request<Me>('POST', '/auth/login', { email, password }),
   /** With a partner's invite (DECISIONS.md 205), sign-up works even while it's closed, and links the two accounts. */
   register: (email: string, password: string, invite?: string, name?: string) => request<Me>('POST', '/auth/register', { email, password, invite, name }),
-  options: () => request<{ signUpOpen: boolean }>('GET', '/auth/options'),
   logout: () => request<void>('POST', '/auth/logout'),
   /** A fresh copy of the demo, just for this browser (DECISIONS.md 213). */
   demo: () => request<Me>('POST', '/auth/demo'),

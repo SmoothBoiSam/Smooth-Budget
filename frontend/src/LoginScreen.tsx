@@ -14,19 +14,20 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [signUpOpen, setSignUpOpen] = useState(false)
 
-  // Sign-up is closed on the hosted app once your account exists; the link only shows when it's open (or with an invite).
+  // Invite only for now (DECISIONS.md 217): you can only make an account from a friend's invite link.
   useEffect(() => {
-    api
-      .options()
-      .then((o) => setSignUpOpen(o.signUpOpen))
-      .catch(() => setSignUpOpen(false))
     if (invite)
       sharedApi
         .peek(invite)
-        .then(setPeek)
-        .catch(() => setPeek({ valid: false, fromName: null, problem: 'That invite link could not be checked. Try again in a moment.' }))
+        .then((p) => {
+          setPeek(p)
+          if (!p.valid) setMode('login') // a broken link can't make an account, so it's just sign-in
+        })
+        .catch(() => {
+          setPeek({ valid: false, fromName: null, problem: 'That invite link could not be checked. Try again in a moment.' })
+          setMode('login')
+        })
   }, [invite])
 
   const invited = !!invite && peek?.valid === true
@@ -69,6 +70,14 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+      {/* Every so often the tabby peeks down from the top right, then zooms back up, startled (DECISIONS.md 218). */}
+      <div aria-hidden className="pointer-events-none fixed top-0 right-5 z-10">
+        <img src="/brand/cat-tabby.png" alt="" className="animate-tabby-peek w-24" />
+      </div>
+      {/* The cat fades in, tilted, and hops side to side (DECISIONS.md 216). */}
+      <div className="animate-cat-in mb-4 w-24">
+        <img src="/brand/logo-large.png" alt="" aria-hidden className="animate-cat-bounce w-24" />
+      </div>
       <h1 className="text-3xl font-bold tracking-tight">Smooth Budget</h1>
       <p className="mt-1 text-ink-soft">Know what's safe to spend, right now.</p>
 
@@ -127,7 +136,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
         </button>
       </form>
 
-      {(signUpOpen || invited || mode === 'register') && (
+      {(invited || mode === 'register') && (
         <button
           type="button"
           onClick={() => {
