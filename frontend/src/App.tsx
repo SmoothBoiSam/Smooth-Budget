@@ -131,6 +131,9 @@ export default function App() {
   const signedIn = useCallback((m: Me) => {
     saved.setMe(m)
     setMe(m)
+    // The sign-in screen set the address (Home, or Friends from an invite) without a hashchange, so read it again;
+    // otherwise you'd land back on the tab you signed out from (DECISIONS.md 219).
+    setRoute(currentRoute())
   }, [])
 
   if (me === undefined) {

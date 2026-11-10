@@ -44,7 +44,8 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
         me = await api.login(email, password)
         if (invited) await sharedApi.join(invite!)
       }
-      if (invite) window.history.replaceState(null, '', '#/friends')
+      // Signing in opens Home (DECISIONS.md 219); from a friend's invite, Friends, to see you're linked.
+      window.history.replaceState(null, '', invite ? '#/friends' : '#/')
       onSignedIn(me)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
