@@ -90,6 +90,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.PlaidTransactionId).HasMaxLength(100);
             e.HasIndex(x => x.PlaidTransactionId).IsUnique().HasFilter("\"PlaidTransactionId\" IS NOT NULL");
             e.HasOne(x => x.Friend).WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<DebtAccount>().WithMany().HasForeignKey(x => x.DebtAccountId).OnDelete(DeleteBehavior.SetNull);
             // No cascade: undoing an import deletes its rows explicitly (and keeps SQL Server's single-cascade-path rule happy).
             e.HasOne<ImportBatch>().WithMany().HasForeignKey(x => x.ImportBatchId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);

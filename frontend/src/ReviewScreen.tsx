@@ -347,6 +347,8 @@ function ReviewCard({
   // Debt or savings money goes toward one of your debts or savings, not a category (DECISIONS.md 227).
   const [toward, setToward] = useState<TowardChoices | null>(null)
   const [towardPick, setTowardPick] = useState('')
+  // Debt money is a payment toward a card or loan, or interest charged on one (DECISIONS.md 232).
+  const [debtWhat, setDebtWhat] = useState<'payment' | 'interest' | null>(null)
 
   // A memory aid: how you filed this merchant before (DECISIONS.md 102).
   useEffect(() => {
@@ -415,8 +417,13 @@ function ReviewCard({
       live = false
     }
   }, [towardKind, toward])
-  // With only one debt or one savings account, it's that one.
-  const pickedToward = towardList?.find((x) => x.id === towardPick) ?? (towardList?.length === 1 ? towardList[0] : undefined)
+  // A charge on the card itself, or one worded like interest, is interest; money out of checking is a payment.
+  const onDebt = toward?.debts.find((d) => d.accountId === t.accountId)
+  const interestLike = t.amountCents > 0 && (!!onDebt || /interest|finance charge/i.test(`${t.merchant} ${t.description}`))
+  const interest = towardKind === 'debt' && (debtWhat ?? (interestLike ? 'interest' : 'payment')) === 'interest'
+  // With only one debt or one savings account, it's that one; interest starts on the card it was charged on.
+  const pickedToward =
+    towardList?.find((x) => x.id === towardPick) ?? (interest && onDebt ? onDebt : towardList?.length === 1 ? towardList[0] : undefined)
 
   // The account picker shows once the choices are in and there's at least one (else the category picker stays).
   const towardPicker = !!towardKind && (!toward || (!!towardList && towardList.length > 0))
@@ -454,8 +461,8 @@ function ReviewCard({
       }
       if (towardKind && towardList && towardList.length > 0) {
         if (!pickedToward) return
-        const r = await recurringApi.fileToward(t.id, towardKind, pickedToward.id)
-        return onDone(`Toward ${r.towardName}.`)
+        const r = await recurringApi.fileToward(t.id, interest ? 'interest' : towardKind, pickedToward.id)
+        return onDone(interest ? `Interest on ${r.towardName}, in ${r.categoryName}.` : `Toward ${r.towardName}.`)
       }
       if (!categoryId) return
       const r = await budgetApi.updateTransaction(t.id, categoryId, false, rule && !t.isPartnerTransfer ? t.merchant : null)
@@ -630,14 +637,30 @@ function ReviewCard({
                 <p className="px-1 text-sm text-ink-soft">Finding your {towardKind === 'debt' ? 'debts' : 'savings'}…</p>
               ) : (
                 <>
+                  {towardKind === 'debt' && (
+                    <div role="radiogroup" aria-label="What it was" className="mb-3 flex rounded-full neu-inset p-1">
+                      {(['payment', 'interest'] as const).map((w) => (
+                        <button
+                          key={w}
+                          type="button"
+                          role="radio"
+                          aria-checked={(interest ? 'interest' : 'payment') === w}
+                          onClick={() => setDebtWhat(w)}
+                          className={`flex-1 rounded-full py-1.5 text-xs font-semibold ${(interest ? 'interest' : 'payment') === w ? 'neu-sm text-accent' : 'text-ink-soft'}`}
+                        >
+                          {w === 'payment' ? 'A payment' : 'Interest charged'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <select
-                    aria-label={towardKind === 'debt' ? 'Which debt' : 'Which savings goal'}
+                    aria-label={towardKind === 'debt' ? (interest ? 'Which card or loan charged it' : 'Which debt') : 'Which savings goal'}
                     value={pickedToward?.id ?? ''}
                     onChange={(e) => setTowardPick(e.target.value)}
                     className={`block w-full rounded-2xl neu-inset px-4 py-3 text-base ${pickedToward ? 'font-medium' : 'text-ink-soft'}`}
                   >
                     <option value="" disabled>
-                      {towardKind === 'debt' ? 'Which debt did it pay?' : 'Which savings goal is it for?'}
+                      {towardKind === 'debt' ? (interest ? 'Which card or loan charged it?' : 'Which debt did it pay?') : 'Which savings goal is it for?'}
                     </option>
                     {towardList!.map((x) => (
                       <option key={x.id} value={x.id}>
@@ -646,7 +669,11 @@ function ReviewCard({
                     ))}
                   </select>
                   <p className="mt-2 px-1 text-xs text-ink-faint">
-                    {towardKind === 'debt' ? 'Counts as paying down that debt, not as spending.' : 'Counts toward that goal, not as spending.'}
+                    {towardKind === 'debt'
+                      ? interest
+                        ? 'Goes to Card interest under Debt: planned in your budget, not spending. The Debt tab tracks it for that card.'
+                        : 'Counts as paying down that debt, not as spending.'
+                      : 'Counts toward that goal, not as spending.'}
                   </p>
                 </>
               )}
@@ -720,7 +747,9 @@ function ReviewCard({
               ? '✓ Confirm'
               : towardPicker
                 ? pickedToward
-                  ? `✓ Toward ${pickedToward.name}`
+                  ? interest
+                    ? `✓ Interest on ${pickedToward.name}`
+                    : `✓ Toward ${pickedToward.name}`
                   : towardKind === 'debt'
                     ? 'Pick a debt'
                     : 'Pick a goal'

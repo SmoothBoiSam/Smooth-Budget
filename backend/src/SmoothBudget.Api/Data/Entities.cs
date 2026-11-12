@@ -227,6 +227,8 @@ public class Transaction
     /// <summary>Which friend the money is to or from, when <see cref="IsPartnerTransfer"/> (DECISIONS.md 211).</summary>
     public Guid? FriendId { get; set; }
     public Friend? Friend { get; set; }
+    /// <summary>The debt this money was paid toward, or the card or loan an interest charge was for (DECISIONS.md 232).</summary>
+    public Guid? DebtAccountId { get; set; }
     /// <summary>For a transfer waiting for a label: the category the app thinks it was for (shown pre-selected, counted nowhere).</summary>
     public Guid? SuggestedCategoryId { get; set; }
     /// <summary>Her contribution sent early: it counts for the budget month starting on this date, not the one it landed in (DECISIONS.md 166).</summary>
@@ -279,6 +281,8 @@ public class BudgetMonth
     public bool IncomeSetByUser { get; set; }
     /// <summary>What the plan still needs beyond the month's money after the automatic budget squeezed everything it can.</summary>
     public long AutoShortCents { get; set; }
+    /// <summary>Left out of the automatic budget because the bank accounts can't cover it this month (DECISIONS.md 233).</summary>
+    public long AutoHeldBackCents { get; set; }
     /// <summary>The automatic budget's last change, in plain words, and when.</summary>
     public string? AutoNote { get; set; }
     public DateTime? AutoNoteUtc { get; set; }

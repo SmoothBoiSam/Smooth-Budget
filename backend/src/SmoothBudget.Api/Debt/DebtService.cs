@@ -15,7 +15,9 @@ public record DebtDto(
     long? CreditLimitCents, int? UtilizationPercent, long StartingBalanceCents, DateOnly StartedOn, bool FromBank, bool IsHidden,
     bool NeedsDetails, DateOnly? PaidOffBy, long InterestCents,
     // The balance comes from the bank (a linked card), so it isn't editable here.
-    bool BalanceFromBank = false);
+    bool BalanceFromBank = false,
+    // Interest charged on it this year, and the latest charge (DECISIONS.md 232).
+    long InterestChargedThisYearCents = 0, long? LastInterestCents = null, DateOnly? LastInterestDate = null);
 
 public record ChartPoint(DateOnly Month, long BalanceCents);
 
@@ -100,6 +102,18 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
         var start = new DateOnly(today.Year, today.Month, 1);
         DateOnly? MonthOf(int? m) => m is { } n ? start.AddMonths(n) : null;
 
+        // Interest charged, from the Card interest line's charges tied to each debt (DECISIONS.md 232).
+        var interestLine = await db.Categories.AsNoTracking()
+            .Where(c => c.HouseholdId == householdId && c.Type == CategoryType.FixedBill && c.Name == Core.Transactions.CardInterest.CategoryName)
+            .Select(c => (Guid?)c.Id).FirstOrDefaultAsync(ct);
+        var yearStart = new DateOnly(today.Year, 1, 1);
+        var charged = interestLine is not { } lineId ? [] : await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.CategoryId == lineId && t.DebtAccountId != null && t.Date >= today.AddYears(-1))
+            .Select(t => new { Debt = t.DebtAccountId!.Value, t.Date, t.AmountCents }).ToListAsync(ct);
+        var interestByDebt = charged.GroupBy(x => x.Debt).ToDictionary(g => g.Key, g => (
+            Year: g.Where(x => x.Date >= yearStart).Sum(x => x.AmountCents),
+            Last: g.OrderByDescending(x => x.Date).First()));
+
         var dtos = visible.Concat(debts.Where(d => d.IsHidden))
             .OrderBy(d => d.IsHidden).ThenByDescending(d => d.AprBps ?? -1).ThenByDescending(d => d.BalanceCents)
             .Select(d =>
@@ -112,7 +126,8 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
                     d.StartingBalanceCents, d.StartedOn, d.FromBank, d.IsHidden,
                     !d.IsHidden && d.BalanceCents > 0 && (d.AprBps is null || d.MinimumPaymentCents is null),
                     outcome is null ? null : plan!.NeverPaysOff && outcome.PaidOffInMonth is null ? null : MonthOf(outcome.PaidOffInMonth),
-                    outcome?.InterestCents ?? 0, d.Account?.PlaidAccountId is not null);
+                    outcome?.InterestCents ?? 0, d.Account?.PlaidAccountId is not null,
+                    interestByDebt.TryGetValue(d.Id, out var i) ? Math.Max(0, i.Year) : 0, i.Last?.AmountCents, i.Last?.Date);
             }).ToList();
 
         DebtPlanDto? planDto = plan is null ? null : new DebtPlanDto(

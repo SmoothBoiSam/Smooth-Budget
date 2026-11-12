@@ -35,7 +35,10 @@ public static class BudgetFitter
     /// <param name="spentThisMonth">Spent (or paid) so far this month, by category: a floor for every limit.</param>
     /// <param name="locked">Categories whose limit you set yourself.</param>
     /// <param name="savingsFromGoals">True when the savings line comes from your goals plan (already 0 when there's no leftover).</param>
-    public static FittedBudget Fit(BudgetProposal p, IReadOnlyDictionary<Guid, long> spentThisMonth, IReadOnlySet<Guid> locked, bool savingsFromGoals)
+    /// <param name="holdBackCents">Money in that the bank accounts can't cover this month (DECISIONS.md 233): the plan fits
+    /// the month's money less this.</param>
+    public static FittedBudget Fit(BudgetProposal p, IReadOnlyDictionary<Guid, long> spentThisMonth, IReadOnlySet<Guid> locked, bool savingsFromGoals,
+        long holdBackCents = 0)
     {
         long Spent(Guid id) => Math.Max(0, spentThisMonth.GetValueOrDefault(id));
         // DECISIONS.md 173: money already paid this month toward a bill, a card or savings is gone, so its line is at least
@@ -55,7 +58,7 @@ public static class BudgetFitter
             p = p with { Categories = lines.ToList(), AllocatedCents = raised, UnallocatedCents = p.IncomeCents + p.PartnerCents - raised, SpendsMoreThanIncome = raised > p.IncomeCents + p.PartnerCents };
         }
 
-        var available = p.IncomeCents + p.PartnerCents;
+        var available = p.IncomeCents + p.PartnerCents - Math.Max(0, holdBackCents);
         var over = p.AllocatedCents - available;
         if (over <= 0) return new FittedBudget(p, 0, 0, p);
         long Floor80(ProposedLimit l) => Math.Max(Spent(l.CategoryId), RoundUpToDollar(l.MedianCents * EssentialFloorPercent / 100));
@@ -73,7 +76,7 @@ public static class BudgetFitter
         Squeeze(l => Spending(l, CategoryPriority.High), SpentOnly);
 
         var allocated = lines.Sum(l => l.ProposedCents);
-        var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = available - allocated, SpendsMoreThanIncome = allocated > available };
+        var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = p.IncomeCents + p.PartnerCents - allocated, SpendsMoreThanIncome = allocated > available };
         return new FittedBudget(fitted, Math.Max(0, allocated - available), squeezed, p);
 
         // The card lines (payments and Card interest) together come down to the minimums, never below them or what's

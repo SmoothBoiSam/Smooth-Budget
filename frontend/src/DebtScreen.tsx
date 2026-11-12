@@ -365,6 +365,12 @@ function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
           <span className="shrink-0 text-[11px] tabular-nums text-ink-soft">{d.utilizationPercent}% of limit used</span>
         </div>
       )}
+      {/* Interest charges you filed (or the app found) on this card or loan (DECISIONS.md 232). */}
+      {d.lastInterestCents !== null && d.lastInterestDate && (
+        <p className="mt-1.5 text-xs text-ink-soft tabular-nums">
+          Interest: {formatCents(d.lastInterestCents)} on {formatDay(d.lastInterestDate)} · {formatCents(d.interestChargedThisYearCents)} this year
+        </p>
+      )}
     </button>
   )
 }

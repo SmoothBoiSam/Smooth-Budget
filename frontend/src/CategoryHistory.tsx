@@ -9,9 +9,20 @@ const whole = (cents: number) => '$' + Math.round(cents / 100).toLocaleString('e
 /**
  * A category's spending over the past months (DECISIONS.md 222): one bar a month, this month's lighter since it's still
  * going, and a line across at this month's budget. When the automatic budget squeezed it to fit the month's money, a
- * fainter dashed line shows where it would be otherwise (DECISIONS.md 223). Tap a bar for its amount.
+ * fainter dashed line shows where it would be otherwise (DECISIONS.md 223). Tap a bar for its amount; the transactions
+ * below follow the month you tap (DECISIONS.md 234).
  */
-export default function CategoryHistory({ categoryId, limitCents, spending }: { categoryId: string; limitCents: number; spending: boolean }) {
+export default function CategoryHistory({
+  categoryId,
+  limitCents,
+  spending,
+  onPick,
+}: {
+  categoryId: string
+  limitCents: number
+  spending: boolean
+  onPick?: (m: CategoryMonth) => void
+}) {
   const [months, setMonths] = useState<CategoryMonth[] | null>(null)
   const [unsqueezed, setUnsqueezed] = useState<number | null>(null)
   const [picked, setPicked] = useState<number | null>(null)
@@ -23,13 +34,15 @@ export default function CategoryHistory({ categoryId, limitCents, spending }: { 
       .then((h) => {
         if (!live) return
         setMonths(h.months)
+        setPicked(null)
+        if (h.months.length > 0) onPick?.(h.months[h.months.length - 1])
         setUnsqueezed(h.unsqueezedCents && h.unsqueezedCents > limitCents ? h.unsqueezedCents : null)
       })
       .catch(() => live && setMonths([]))
     return () => {
       live = false
     }
-  }, [categoryId, limitCents])
+  }, [categoryId, limitCents, onPick])
 
   // Nothing to compare until there's an earlier month.
   if (!months || months.length < 2) return null
@@ -44,7 +57,7 @@ export default function CategoryHistory({ categoryId, limitCents, spending }: { 
     <section aria-labelledby="history-h" className="mt-4 rounded-3xl neu p-5">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="history-h" className="text-sm font-semibold">
-          Past months
+          Category history
         </h2>
         <p aria-live="polite" className="text-right text-xs text-ink-soft">
           {longMonth(m.month)}
@@ -76,7 +89,10 @@ export default function CategoryHistory({ categoryId, limitCents, spending }: { 
               key={x.month}
               type="button"
               tabIndex={-1}
-              onClick={() => setPicked(i)}
+              onClick={() => {
+                setPicked(i)
+                onPick?.(x)
+              }}
               className="flex h-full flex-1 items-end justify-center"
             >
               <span
@@ -90,14 +106,14 @@ export default function CategoryHistory({ categoryId, limitCents, spending }: { 
       <div aria-hidden className="mt-1.5 flex gap-2">
         {months.map((x, i) => (
           <span key={x.month} className={`flex-1 text-center text-[11px] ${i === shown ? 'font-semibold text-ink' : 'text-ink-soft'}`}>
-            {x.current ? 'Now' : monthName(x.month)}
+            {monthName(x.month)}
           </span>
         ))}
       </div>
 
       {unsqueezed !== null && (
         <p className="mt-3 text-xs text-ink-soft">
-          Squeezed from {whole(unsqueezed)} to {whole(limitCents)} so the month's money covers everything.
+          Squeezed from {whole(unsqueezed)} to {whole(limitCents)} so the plan fits the month's money and what your accounts can cover.
         </p>
       )}
 

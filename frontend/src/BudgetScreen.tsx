@@ -6,6 +6,7 @@ import {
   budgetEditApi,
   budgetSummaryApi,
   type BudgetCategoryLine,
+  type CategoryMonth,
   type BudgetGroup,
   type BudgetSummary,
   type Category,
@@ -210,12 +211,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {summary && view.kind === 'category' && line && (
         <>
           <CategoryHeader line={line} />
-          <CategoryHistory key={line.id} categoryId={line.id} limitCents={line.limitCents} spending={line.type === 'Variable'} />
-          <TransactionList
-            items={month.filter((t) => t.categoryId === line.id)}
-            empty="Nothing in this category yet this month."
-            onSelect={setSelected}
-          />
+          <CategoryMonths key={line.id} line={line} month={month} onSelect={setSelected} onError={searchFailed} />
         </>
       )}
       {summary && view.kind === 'category' && !line && (
@@ -646,9 +642,9 @@ function SearchableList({
           <fieldset>
             <legend className="text-xs font-medium text-ink-soft">Dates</legend>
             <div className="mt-1 flex items-center gap-2">
-              <input type="date" aria-label="From" value={f.from} max={f.to || undefined} onChange={(e) => set({ from: e.target.value })} className={field} />
+              <DateField label="From" placeholder="Start date" value={f.from} max={f.to || undefined} onChange={(v) => set({ from: v })} />
               <span className="text-ink-faint">to</span>
-              <input type="date" aria-label="To" value={f.to} min={f.from || undefined} onChange={(e) => set({ to: e.target.value })} className={field} />
+              <DateField label="To" placeholder="End date" value={f.to} min={f.from || undefined} onChange={(v) => set({ to: v })} />
             </div>
             {datesBackwards && <p className="mt-1 text-xs text-danger">The start date is after the end date.</p>}
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -760,6 +756,100 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
       <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="rounded-full px-1.5 leading-none text-ink-faint">
         ×
       </button>
+    </span>
+  )
+}
+
+/**
+ * A category's history chart and its transactions for the month picked in the chart (DECISIONS.md 234): this month's
+ * from the budget, an earlier month's looked up by its dates.
+ */
+function CategoryMonths({
+  line,
+  month,
+  onSelect,
+  onError,
+}: {
+  line: BudgetCategoryLine
+  month: Transaction[]
+  onSelect: (t: Transaction) => void
+  onError: (e: unknown) => void
+}) {
+  const [picked, setPicked] = useState<CategoryMonth | null>(null)
+  const [earlier, setEarlier] = useState<{ key: string; items: Transaction[] } | null>(null)
+  const past = picked && !picked.current ? picked : null
+  useEffect(() => {
+    if (!past) return
+    let live = true
+    budgetApi
+      .search({ q: '', categoryId: line.id, min: '', max: '', from: past.start, to: past.end })
+      .then((r) => live && setEarlier({ key: past.month, items: r.items }))
+      .catch((e) => live && onError(e))
+    return () => {
+      live = false
+    }
+  }, [past, line.id, month, onError])
+  const label = past ? new Date(past.month + 'T12:00:00').toLocaleDateString('en-US', { month: 'long' }) : null
+  const items = past ? (earlier && earlier.key === past.month ? earlier.items : null) : month.filter((t) => t.categoryId === line.id)
+
+  return (
+    <>
+      <CategoryHistory categoryId={line.id} limitCents={line.limitCents} spending={line.type === 'Variable'} onPick={setPicked} />
+      {label && <h2 className="mt-5 px-1 text-sm font-semibold text-ink-soft">{label}</h2>}
+      {items === null ? (
+        <p className="mt-4 px-1 text-sm text-ink-soft">Loading {label}…</p>
+      ) : (
+        <TransactionList
+          items={items}
+          empty={label ? `Nothing in this category in ${label}.` : 'Nothing in this category yet this month.'}
+          onSelect={onSelect}
+          className={label ? 'mt-2' : 'mt-4'}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * A date box that looks like one even when empty (DECISIONS.md 235): phones draw an empty date input as blank space, so
+ * the box shows the date or "Start date" with a calendar mark, and the real input sits invisibly on top to open the picker.
+ */
+function DateField({
+  label,
+  placeholder,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  placeholder: string
+  value: string
+  min?: string
+  max?: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <span className="relative block min-w-0 flex-1">
+      <span
+        aria-hidden
+        className={`flex min-h-11 items-center justify-between gap-2 rounded-xl neu-inset px-3 py-2 text-base ${value ? 'text-ink' : 'text-ink-faint'}`}
+      >
+        <span className="truncate">{value ? formatDay(value) : placeholder}</span>
+        <svg viewBox="0 0 20 20" className="size-4 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <rect x="3" y="4.5" width="14" height="12" rx="2" />
+          <path d="M3 8.5h14M7 3v3M13 3v3" strokeLinecap="round" />
+        </svg>
+      </span>
+      <input
+        type="date"
+        aria-label={label}
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      />
     </span>
   )
 }
@@ -1016,6 +1106,14 @@ function IncomeCard({
               <dd className={`text-sm font-semibold tabular-nums ${over ? 'text-danger' : ''}`}>{formatCents(Math.abs(s.unallocatedCents))}</dd>
             </div>
           </dl>
+          {/* Fitted to the bank too (DECISIONS.md 233): what the accounts can't cover stays out of the plan. */}
+          {a?.on && a.heldBackCents > 0 && (
+            <p className="mt-3 rounded-lg neu-inset px-3 py-2 text-xs text-ink-soft">
+              <span className="font-semibold tabular-nums">{formatCents(a.heldBackCents)}</span> of the month’s money is left out of the plan: your accounts can’t
+              cover it this month, usually card charges from last month that this month’s pay still has to pay off. So the plan never spends more than
+              you’ll have.
+            </p>
+          )}
           {short > 0 && (
             <p role="alert" className="mt-3 rounded-lg neu-inset px-3 py-2 text-xs text-danger">
               {a?.on

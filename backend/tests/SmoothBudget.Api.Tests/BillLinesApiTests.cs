@@ -210,6 +210,70 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Interest_goes_to_Card_interest_under_debt_tied_to_its_card()
+    {
+        // DECISIONS.md 232: interest you filed under "Fees & interest" moves to Card interest, whatever its wording; in
+        // review, Debt → "Interest charged" files it there too; each is tied to its card, and the Debt tab adds it up.
+        var (c, household, _, card) = await NewHouseholdAsync();
+        var fees = Guid.NewGuid();
+        var filedAsFee = T(household, card, new DateOnly(2027, 1, 20), fees, 30_00, "INTEREST ON CARD BALANCE");
+        var lateFee = T(household, card, new DateOnly(2027, 1, 21), fees, 29_00, "LATE FEE");
+        var inReview = T(household, card, new DateOnly(2027, 2, 9), null, 32_50, "MONTHLY CHARGE");
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Categories.Add(new Category { Id = fees, HouseholdId = household, Name = "Fees & interest", Type = CategoryType.Variable, SortOrder = 3 });
+            db.Transactions.AddRange(filedAsFee, lateFee, inReview);
+            await db.SaveChangesAsync();
+        }
+        await c.GetAsync("/api/debt"); // the card becomes a debt
+        var visa = (await c.GetFromJsonAsync<TowardChoicesDto>("/api/transactions/toward", Json))!.Debts.Single(d => d.Name == "Test Visa");
+        Assert.Equal(card, visa.AccountId);
+
+        var r = (await (await c.PostAsJsonAsync($"/api/transactions/{inReview.Id}/toward", new TowardRequest("interest", visa.Id), Json)).Content.ReadFromJsonAsync<TowardResultDto>(Json))!;
+        Assert.Equal(("Test Visa", CardInterest.CategoryName), (r.TowardName, r.CategoryName));
+        await Summary(c); // the refresh moves the one filed as a fee
+
+        using (var check = app.Services.CreateScope())
+        {
+            var db = check.ServiceProvider.GetRequiredService<AppDbContext>();
+            var line = await db.Categories.SingleAsync(x => x.HouseholdId == household && x.Name == CardInterest.CategoryName);
+            var rows = await db.Transactions.Where(t => t.Id == filedAsFee.Id || t.Id == lateFee.Id || t.Id == inReview.Id).ToDictionaryAsync(t => t.Id);
+            Assert.Equal((line.Id, visa.Id), (rows[filedAsFee.Id].CategoryId!.Value, rows[filedAsFee.Id].DebtAccountId!.Value));
+            Assert.Equal((line.Id, visa.Id, "Interest on Test Visa: you said so."),
+                (rows[inReview.Id].CategoryId!.Value, rows[inReview.Id].DebtAccountId!.Value, rows[inReview.Id].CategoryReason));
+            Assert.Equal(fees, rows[lateFee.Id].CategoryId); // fees stay spending
+        }
+
+        var debt = (await c.GetFromJsonAsync<SmoothBudget.Api.Debt.DebtSummaryDto>("/api/debt", Json))!.Debts.Single(d => d.Name == "Test Visa");
+        Assert.Equal((62_50L, 32_50L, new DateOnly(2027, 2, 9)), (debt.InterestChargedThisYearCents, debt.LastInterestCents!.Value, debt.LastInterestDate!.Value));
+    }
+
+    [Fact]
+    public async Task The_automatic_budget_never_plans_more_than_the_accounts_can_cover()
+    {
+        // DECISIONS.md 233: checking from the bank is $3,000 overdrawn, so most of the month's pay is already spoken for. The plan is
+        // fitted again with that held back: spending comes down, and Left to Spend isn't cut a second time.
+        var (c, household, checking, _) = await NewHouseholdAsync();
+        var before = await Summary(c);
+        Assert.Equal((0L, 0L), (before.CashShortCents, before.Auto!.HeldBackCents));
+        var groceriesBefore = before.Groups.SelectMany(g => g.Categories).Single(x => x.Name == "Groceries").LimitCents;
+
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Accounts.Where(a => a.Id == checking)
+                .ExecuteUpdateAsync(u => u.SetProperty(a => a.PlaidAccountId, "test-checking").SetProperty(a => a.CurrentBalanceCents, -3_000_00));
+            scope.ServiceProvider.GetRequiredService<BudgetRefreshTracker>().MarkChanged(household);
+        }
+        var s = await Summary(c);
+        Assert.True(s.Auto!.HeldBackCents > 0, "something is held back");
+        Assert.Equal(0L, s.CashShortCents);
+        Assert.True(s.Groups.SelectMany(g => g.Categories).Single(x => x.Name == "Groceries").LimitCents < groceriesBefore, "spending came down");
+        Assert.Contains("what your accounts can cover", s.Auto.Note);
+    }
+
+    [Fact]
     public async Task A_bill_you_filed_one_charge_of_gathers_the_rest_on_the_next_refresh()
     {
         var (c, household, checking, _) = await NewHouseholdAsync();

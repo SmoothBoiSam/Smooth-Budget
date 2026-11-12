@@ -32,7 +32,7 @@ public class BudgetRefreshTracker
 /// </summary>
 public class AutoBudgetService(AppDbContext db, BudgetMonthService months, BudgetGeneratorService generator, Payday.PaydayService payday,
     BudgetRefreshTracker tracker, Bills.RecurringService recurring, Debt.CardInterestService interest, Transactions.CategorizationService categorization,
-    TimeProvider clock)
+    Home.CurrentMonthLoader loader, TimeProvider clock)
 {
     private static readonly CultureInfo Us = CultureInfo.GetCultureInfo("en-US");
 
@@ -57,7 +57,7 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
     }
 
     /// <summary>The fitted plan for this month, with what it would change. Nothing is saved.</summary>
-    public async Task<(FittedBudget Fitted, GeneratorDto Dto, IReadOnlySet<Guid> Locked)> PlanAsync(Guid householdId, CancellationToken ct)
+    public async Task<(FittedBudget Fitted, GeneratorDto Dto, IReadOnlySet<Guid> Locked)> PlanAsync(Guid householdId, CancellationToken ct, long holdBackCents = 0)
     {
         var current = await months.EnsureCurrentAsync(householdId, ct);
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && !c.IsHidden).ToListAsync(ct);
@@ -84,7 +84,7 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
         var spent = CategoryBreakdownCalculator.Calculate(range, categories.Select(c => new BudgetCategory(c.Id, c.Type, 0)).ToList(), txns)
             .ToDictionary(l => l.CategoryId, l => l.SpentCents);
 
-        var fitted = BudgetFitter.Fit(proposal, spent, locked.Keys.ToHashSet(), savingsFromGoals);
+        var fitted = BudgetFitter.Fit(proposal, spent, locked.Keys.ToHashSet(), savingsFromGoals, holdBackCents);
         var p = fitted.Proposal;
         return (fitted, dto with
         {
@@ -103,24 +103,39 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
         if (!household.AutoBudget) return;
         if (!await db.Categories.AnyAsync(c => c.HouseholdId == householdId && !c.IsHidden, ct)) return; // set up categories first
 
-        var (fitted, _, locked) = await PlanAsync(householdId, ct);
-        var p = fitted.Proposal;
         var current = await months.EnsureCurrentAsync(householdId, ct);
         var categories = await db.Categories.Where(c => c.HouseholdId == householdId && !c.IsHidden).ToDictionaryAsync(c => c.Id, ct);
-
-        var changes = new List<(string Name, long From, long To)>();
-        foreach (var line in p.Categories.Where(l => !locked.Contains(l.CategoryId)))
-        {
-            if (!categories.TryGetValue(line.CategoryId, out var c) || c.MonthlyLimitCents == line.ProposedCents) continue;
-            changes.Add((c.Name, c.MonthlyLimitCents, line.ProposedCents));
-            c.MonthlyLimitCents = line.ProposedCents;
-        }
+        var before = categories.ToDictionary(x => x.Key, x => x.Value.MonthlyLimitCents);
         var incomeFrom = current.IncomeExpectedCents;
-        if (!current.IncomeSetByUser)
+
+        // Fit the month's money, then check it against the bank (DECISIONS.md 233): if the accounts can't cover the plan
+        // (last month's card charges still to pay, say), fit again to what they can: the plan less the shortfall, so the
+        // money held back is everything not planned plus the shortfall. A few rounds at most: each squeeze lowers what's
+        // planned about as much as it lowers what the accounts need.
+        FittedBudget fitted = null!;
+        BudgetProposal p = null!;
+        IReadOnlySet<Guid> locked = new HashSet<Guid>();
+        long holdBack = 0;
+        for (var round = 0; round < 3; round++)
         {
-            current.IncomeExpectedCents = p.IncomeCents;
-            current.PartnerExpectedCents = p.PartnerCents;
+            (fitted, _, locked) = await PlanAsync(householdId, ct, holdBack);
+            p = fitted.Proposal;
+            foreach (var line in p.Categories.Where(l => !locked.Contains(l.CategoryId)))
+                if (categories.TryGetValue(line.CategoryId, out var c)) c.MonthlyLimitCents = line.ProposedCents;
+            if (!current.IncomeSetByUser)
+            {
+                current.IncomeExpectedCents = p.IncomeCents;
+                current.PartnerExpectedCents = p.PartnerCents;
+            }
+            await db.SaveChangesAsync(ct);
+            var cashShort = (await loader.LoadAsync(householdId, ct)).LeftToSpend().CashShortCents;
+            if (cashShort <= 0 || fitted.ShortCents > 0) break; // fits the bank, or nothing left to squeeze
+            holdBack = Math.Max(0, p.IncomeCents + p.PartnerCents - p.AllocatedCents) + cashShort;
         }
+        current.AutoHeldBackCents = holdBack;
+
+        var changes = categories.Values.Where(c => before.TryGetValue(c.Id, out var from) && from != c.MonthlyLimitCents)
+            .Select(c => (c.Name, From: before[c.Id], To: c.MonthlyLimitCents)).ToList();
         current.AutoShortCents = fitted.ShortCents;
 
         // Only real changes get a note; a dollar or less isn't worth one.
@@ -132,7 +147,9 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
             if (incomeMoved) parts.Add($"Expected income {Money(incomeFrom)} → {Money(p.IncomeCents)}");
             parts.AddRange(worth.Take(5).Select(x => $"{x.Name} {(x.To > x.From ? "+" : "−")}{Money(Math.Abs(x.To - x.From))}"));
             if (worth.Count > 5) parts.Add($"{worth.Count - 5} more");
-            current.AutoNote = string.Join(" · ", parts) + (fitted.SqueezedCents > 0 ? $". {Money(fitted.SqueezedCents)} was squeezed out of spending to fit this month's money." : ".");
+            current.AutoNote = string.Join(" · ", parts) + (fitted.SqueezedCents > 0
+                ? $". {Money(fitted.SqueezedCents)} was squeezed out of spending to fit this month's money{(holdBack > 0 ? " and what your accounts can cover" : "")}."
+                : ".");
             current.AutoNoteUtc = clock.GetUtcNow().UtcDateTime;
         }
         await db.SaveChangesAsync(ct);

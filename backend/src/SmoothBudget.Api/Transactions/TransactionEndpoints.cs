@@ -32,7 +32,7 @@ public record MerchantHistoryDto(string CategoryName, int Count);
 public record TransactionContextDto(IReadOnlyList<MerchantHistoryDto> History);
 
 /// <summary>Where debt and savings money can go, in review (DECISIONS.md 227, 228): your debts, and your savings goals (your savings accounts only when you have no goals).</summary>
-public record TowardChoiceDto(Guid Id, string Name);
+public record TowardChoiceDto(Guid Id, string Name, Guid? AccountId = null);
 public record TowardChoicesDto(IReadOnlyList<TowardChoiceDto> Debts, IReadOnlyList<TowardChoiceDto> Savings);
 /// <param name="Kind">"debt" or "savings".</param>
 public record TowardRequest(string Kind, Guid Id);
@@ -329,7 +329,7 @@ public static partial class TransactionEndpoints
             await savings.EnsureStarterAsync(householdId, ct); // the starter goal, as the Savings tab makes it
             var debts = await db.DebtAccounts.AsNoTracking()
                 .Where(d => d.HouseholdId == householdId && !d.IsHidden && (d.AccountId == null || d.Account!.IncludedInBudget))
-                .OrderByDescending(d => d.BalanceCents).Select(d => new { d.Id, d.Name, Mask = d.Account != null ? d.Account.Mask : null }).ToListAsync(ct);
+                .OrderByDescending(d => d.BalanceCents).Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null }).ToListAsync(ct);
             var accounts = await db.Accounts.AsNoTracking()
                 .Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget)
                 .OrderBy(a => a.Name).Select(a => new { a.Id, a.Name, a.Mask }).ToListAsync(ct);
@@ -338,7 +338,7 @@ public static partial class TransactionEndpoints
             static string Label(string name, string? mask) => mask is null ? name : $"{name} ••{mask}";
             // Savings is your goals: the account it lands in is the same either way (DECISIONS.md 228).
             return new TowardChoicesDto(
-                debts.Select(d => new TowardChoiceDto(d.Id, Label(d.Name, d.Mask))).ToList(),
+                debts.Select(d => new TowardChoiceDto(d.Id, Label(d.Name, d.Mask), d.AccountId)).ToList(),
                 goals.Count > 0
                     ? goals.Select(g => new TowardChoiceDto(g.Id, g.Name)).ToList()
                     : accounts.Select(a => new TowardChoiceDto(a.Id, Label(a.Name, a.Mask))).ToList());
@@ -346,22 +346,25 @@ public static partial class TransactionEndpoints
 
         // It went toward this debt or savings: filed under the debt or savings line for it (the one named after it, else
         // your first, else a new one), with where it went as the reason (DECISIONS.md 227).
-        group.MapPost("/transactions/{id:guid}/toward", async (Guid id, TowardRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        group.MapPost("/transactions/{id:guid}/toward", async (Guid id, TowardRequest req, HttpContext ctx, AppDbContext db, Debt.CardInterestService interestService, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             var t = await db.Transactions.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
             if (t is null) return Results.NotFound();
-            var type = req.Kind switch { "debt" => CategoryType.DebtPayment, "savings" => CategoryType.SavingsTransfer, _ => (CategoryType?)null };
-            if (type is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["kind"] = ["Debt or savings."] });
+            // Interest charged on a card or loan is a debt line too (DECISIONS.md 232): it goes to Card interest, tied to that debt.
+            var interest = req.Kind == "interest";
+            var type = req.Kind switch { "debt" or "interest" => CategoryType.DebtPayment, "savings" => CategoryType.SavingsTransfer, _ => (CategoryType?)null };
+            if (type is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["kind"] = ["Debt, interest or savings."] });
 
             // The name to show, and names a line for it could have (a goal tied to a savings account counts as that account's).
             string? toward = null;
             var names = new List<string>();
+            Guid? debtId = null;
             if (type == CategoryType.DebtPayment)
             {
                 var d = await db.DebtAccounts.AsNoTracking().Where(x => x.Id == req.Id && x.HouseholdId == householdId)
-                    .Select(x => new { x.Name, Mask = x.Account != null ? x.Account.Mask : null }).SingleOrDefaultAsync(ct);
-                if (d is not null) (toward, names) = (d.Mask is null ? d.Name : $"{d.Name} ••{d.Mask}", [d.Name]);
+                    .Select(x => new { x.Id, x.Name, Mask = x.Account != null ? x.Account.Mask : null }).SingleOrDefaultAsync(ct);
+                if (d is not null) (toward, names, debtId) = (d.Mask is null ? d.Name : $"{d.Name} ••{d.Mask}", [d.Name], d.Id);
             }
             else if (await db.Accounts.AsNoTracking().Where(a => a.Id == req.Id && a.HouseholdId == householdId && a.Type == AccountType.Savings)
                          .Select(a => new { a.Name, a.Mask }).SingleOrDefaultAsync(ct) is { } a)
@@ -372,6 +375,17 @@ public static partial class TransactionEndpoints
             else if (await db.SavingsGoals.AsNoTracking().Where(g => g.Id == req.Id && g.HouseholdId == householdId).Select(g => g.Name).SingleOrDefaultAsync(ct) is { } goal)
                 (toward, names) = (goal, [goal]);
             if (toward is null) return Results.NotFound();
+
+            if (interest)
+            {
+                var interestCat = await interestService.LineAsync(householdId, ct);
+                (t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure) = (interestCat.Id, null, CategorySource.User, false, false);
+                t.DebtAccountId = debtId;
+                t.CategoryReason = $"Interest on {toward}: you said so.";
+                if (t.Kind == TransactionKind.PartnerTransfer) t.Kind = TransactionKind.Purchase;
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new TowardResultDto(toward, interestCat.Name));
+            }
 
             var lines = await db.Categories.Where(c => c.HouseholdId == householdId && c.Type == type).OrderBy(c => c.IsHidden).ThenBy(c => c.SortOrder).ThenBy(c => c.Name).ToListAsync(ct);
             var cat = names.Select(n => lines.FirstOrDefault(c => string.Equals(c.Name, n, StringComparison.OrdinalIgnoreCase))).FirstOrDefault(c => c is not null)
@@ -387,6 +401,7 @@ public static partial class TransactionEndpoints
             cat.IsHidden = false;
 
             (t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure) = (cat.Id, null, CategorySource.User, false, false);
+            t.DebtAccountId = debtId;
             t.CategoryReason = $"Toward {toward}: you said so.";
             if (t.Kind == TransactionKind.PartnerTransfer)
                 t.Kind = t.AmountCents < 0 ? TransactionKind.Refund : TransactionKind.Purchase;

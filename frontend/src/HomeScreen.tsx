@@ -478,7 +478,7 @@ function RecentTransactions({ summary, onChanged }: { summary: HomeSummary; onCh
     <section aria-labelledby="recent-h" className="mt-6">
       <div className="mb-2 flex items-baseline justify-between px-1">
         <h2 id="recent-h" className="px-1 text-sm font-semibold text-ink-soft">
-          Recent
+          Recent transactions
         </h2>
         <a href="#/transactions" className="text-sm font-semibold text-accent">
           See all

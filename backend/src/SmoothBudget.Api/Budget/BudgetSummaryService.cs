@@ -97,7 +97,8 @@ public record BudgetSummaryDto(
 /// <param name="ShortCents">What this month still needs beyond its money after every squeeze.</param>
 /// <param name="SetByYou">Categories whose limit you set yourself (from now on, or this month only).</param>
 /// <param name="IncomeSetByYou">You typed this month's income, so it isn't the Payday forecast.</param>
-public record AutoBudgetDto(bool On, string? Note, DateTime? NoteUtc, long ShortCents, IReadOnlyList<Guid> SetByYou, bool IncomeSetByYou = false);
+public record AutoBudgetDto(bool On, string? Note, DateTime? NoteUtc, long ShortCents, IReadOnlyList<Guid> SetByYou, bool IncomeSetByYou = false,
+    long HeldBackCents = 0); // left out because the accounts can't cover it (DECISIONS.md 233)
 
 /// <summary>The Budget screen (SPEC section 4.3): every category with its limit, spent and remaining, grouped by type.</summary>
 public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService months, Data.AppDbContext db)
@@ -161,7 +162,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories, await Shared.SharedService.SendersAsync(db, householdId, ct)), data.PartnerShortfallCents,
             new AutoBudgetDto(db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).Single(), row.AutoNote, row.AutoNoteUtc, row.AutoShortCents,
                 db.Categories.Where(c => c.HouseholdId == householdId && c.LimitSetByUser).Select(c => c.Id).AsEnumerable()
-                    .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser),
+                    .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser, row.AutoHeldBackCents),
             lts.UnfiledSpendingCents, lts.OverplannedCents, lts.CashShortCents);
     }
 

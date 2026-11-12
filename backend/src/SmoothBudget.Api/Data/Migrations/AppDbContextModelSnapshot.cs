@@ -307,6 +307,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<long>("AutoHeldBackCents")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("AutoNote")
                         .HasColumnType("text");
 
@@ -1286,6 +1289,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
+                    b.Property<Guid?>("DebtAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -1347,6 +1353,8 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CategoryId");
+
+                    b.HasIndex("DebtAccountId");
 
                     b.HasIndex("FriendId");
 
@@ -1615,6 +1623,11 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasOne("SmoothBudget.Api.Data.Category", "Category")
                         .WithMany()
                         .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("SmoothBudget.Api.Data.DebtAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DebtAccountId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("SmoothBudget.Api.Data.Friend", "Friend")

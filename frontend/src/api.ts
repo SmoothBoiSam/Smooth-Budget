@@ -341,7 +341,7 @@ export interface BudgetSummary {
   /** How much the cash check lowered Left to Spend. */
   cashShortCents: number
   /** The automatic budget: on or off, its last change, any shortfall, and the limits you set yourself. */
-  auto: { on: boolean; note: string | null; noteUtc: string | null; shortCents: number; setByYou: string[]; incomeSetByYou: boolean } | null
+  auto: { on: boolean; note: string | null; noteUtc: string | null; shortCents: number; setByYou: string[]; incomeSetByYou: boolean; heldBackCents: number } | null
 }
 
 export const budgetSummaryApi = {
@@ -666,6 +666,10 @@ export interface Debt {
   interestCents: number
   /** A bank-linked card: its balance comes from the bank. */
   balanceFromBank: boolean
+  /** Interest charged on it this year, and the latest charge (DECISIONS.md 232). */
+  interestChargedThisYearCents: number
+  lastInterestCents: number | null
+  lastInterestDate: string | null
 }
 
 export interface DebtPlan {
@@ -807,7 +811,8 @@ export interface RecurringUpdate {
 
 /** Where debt and savings money in review can go (DECISIONS.md 227): your debts, your savings accounts and hand-tracked goals. */
 export interface TowardChoices {
-  debts: { id: string; name: string }[]
+  /** accountId: the card's or loan's account, when it's linked (an interest charge on it is for that debt). */
+  debts: { id: string; name: string; accountId?: string | null }[]
   savings: { id: string; name: string }[]
 }
 
@@ -825,7 +830,7 @@ export interface ChargeBillChoices {
 export const recurringApi = {
   summary: () => request<RecurringSummary>('GET', '/recurring'),
   towardChoices: () => request<TowardChoices>('GET', '/transactions/toward'),
-  fileToward: (transactionId: string, kind: 'debt' | 'savings', id: string) =>
+  fileToward: (transactionId: string, kind: 'debt' | 'interest' | 'savings', id: string) =>
     request<{ towardName: string; categoryName: string }>('POST', `/transactions/${transactionId}/toward`, { kind, id }),
   billChoices: (transactionId: string) => request<ChargeBillChoices>('GET', `/recurring/for/${transactionId}`),
   fileAsBill: (body: { transactionId: string; billKey?: string; categoryId?: string; name?: string }) =>
