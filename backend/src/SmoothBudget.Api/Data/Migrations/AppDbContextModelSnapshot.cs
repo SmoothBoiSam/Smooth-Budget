@@ -976,6 +976,12 @@ namespace SmoothBudget.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateOnly?>("BankCheckMonth")
+                        .HasColumnType("date");
+
+                    b.Property<int>("BankChecksThisMonth")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -994,6 +1000,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasColumnType("character varying(200)");
 
                     b.Property<DateTime?>("LastAttemptUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastBankCheckUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("LastSyncedUtc")

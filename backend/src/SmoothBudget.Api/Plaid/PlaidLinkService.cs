@@ -19,12 +19,14 @@ public record LinkResultDto(Guid ItemId, string? InstitutionName, IReadOnlyList<
 /// <param name="Action">"new" (create an account), "existing" (link to <paramref name="AccountId"/>) or "skip".</param>
 public record AccountMappingRequest(string PlaidAccountId, string Action, Guid? AccountId);
 
-public record PlaidItemDto(Guid Id, string? InstitutionName, string Status, string? StatusMessage, DateTime? LastSyncedUtc, IReadOnlyList<string> Accounts);
+public record PlaidItemDto(Guid Id, string? InstitutionName, string Status, string? StatusMessage, DateTime? LastSyncedUtc, IReadOnlyList<string> Accounts,
+    BankCheckDto BankCheck);
 
 public class PlaidSetupException(string message) : Exception(message);
 
 /// <summary>Linking a bank: exchange the Link token, choose accounts, unlink.</summary>
-public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secrets, PlaidSyncService sync, TimeProvider clock, ILogger<PlaidLinkService> log)
+public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secrets, PlaidSyncService sync, TimeProvider clock, PlaidOptions options,
+    ILogger<PlaidLinkService> log)
 {
     public async Task<LinkResultDto> ExchangeAsync(Guid householdId, string publicToken, CancellationToken ct)
     {
@@ -174,7 +176,8 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
         var accounts = await db.Accounts.Where(a => a.PlaidItemId != null && ids.Contains(a.PlaidItemId.Value))
             .Select(a => new { a.PlaidItemId, a.Name, a.Mask }).ToListAsync(ct);
         return items.Select(i => new PlaidItemDto(i.Id, i.InstitutionName, i.Status.ToString(), i.StatusMessage, i.LastSyncedUtc,
-            accounts.Where(a => a.PlaidItemId == i.Id).Select(a => a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}").ToList())).ToList();
+            accounts.Where(a => a.PlaidItemId == i.Id).Select(a => a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}").ToList(),
+            BankChecks.For(i, clock.GetUtcNow().UtcDateTime, options))).ToList();
     }
 
     public static AccountType? AccountTypeFor(string type, string? subtype) => (type.ToLowerInvariant(), subtype?.ToLowerInvariant()) switch

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ask } from './confirm'
 import { usePlaidLink } from 'react-plaid-link'
 import { plaidApi, type AccountMapping, type LinkResult, type PlaidConfig, type PlaidItem, type SyncResult } from './api'
-import { formatTime } from './format'
+import { formatCents, formatTime } from './format'
 import { smallBtn } from './ui'
 
 const chip = 'neu-sm rounded-full px-3.5 py-1.5 text-ink'
@@ -226,6 +226,13 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                     {i.accounts.length > 0 ? i.accounts.join(', ') : 'No accounts imported'}
                     {i.lastSyncedUtc && ` · synced ${formatTime(i.lastSyncedUtc)}`}
                   </p>
+                  {i.status === 'Active' && i.bankCheck.thisMonth > 0 && (
+                    <p className="mt-0.5 text-xs text-ink-faint">
+                      Bank updates this month: {i.bankCheck.thisMonth} of {i.bankCheck.perMonth}
+                      {i.bankCheck.costCents !== null && ` (about ${formatCents(i.bankCheck.costCents)})`}
+                      {i.bankCheck.lastUtc && ` · last ${formatTime(i.bankCheck.lastUtc)}`}
+                    </p>
+                  )}
                   {i.statusMessage && <p className="mt-1 text-xs text-danger">{i.statusMessage}</p>}
                   <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
                     {(i.status === 'LoginRequired' || i.status === 'Error') && (

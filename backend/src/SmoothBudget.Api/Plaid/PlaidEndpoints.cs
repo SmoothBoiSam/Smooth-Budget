@@ -124,6 +124,49 @@ public static class PlaidEndpoints
             return await Guard(async () => Results.Ok(await sync.SyncAsync(id, ct)));
         });
 
+        // Home's "Update bank data" (DECISIONS.md 242): Plaid goes to each bank right away (a paid call per bank connection, not
+        // per account), skipping banks checked too recently or at the month's cap; then every connection syncs. Anything a bank
+        // hands over a little later arrives by webhook.
+        plaidGroup.MapPost("/check-banks", async (HttpContext ctx, AppDbContext db, PlaidClient plaid, SecretBox secrets,
+            PlaidSyncService sync, PlaidOptions o, TimeProvider clock, CancellationToken ct) =>
+        {
+            if (!o.IsConfigured) return Results.Ok(new BankUpdateDto([], null, [], []));
+            var items = await db.PlaidItems
+                .Where(i => i.HouseholdId == ctx.User.HouseholdId() && i.Status != PlaidItemStatus.PendingSetup)
+                .OrderBy(i => i.CreatedUtc).ToListAsync(ct);
+            var now = clock.GetUtcNow().UtcDateTime;
+            var checkedBanks = new List<string>();
+            var problems = new List<string>();
+            DateTime? next = null;
+            foreach (var item in items.Where(i => i.Status == PlaidItemStatus.Active))
+            {
+                var name = item.InstitutionName ?? "Your bank";
+                if (BankChecks.NextAllowedUtc(item, now, o) is { } when)
+                {
+                    next = next is null || when < next ? when : next;
+                    continue;
+                }
+                try
+                {
+                    await plaid.RefreshTransactionsAsync(secrets.Decrypt(item.AccessTokenEncrypted), ct);
+                    BankChecks.Record(item, now);
+                    checkedBanks.Add(name);
+                }
+                catch (PlaidException ex)
+                {
+                    // Not counted: Plaid didn't do the check. Plaid's codes never carry keys or account numbers.
+                    problems.Add(ex.ErrorCode is "INVALID_PRODUCT" or "PRODUCT_NOT_ENABLED" or "PRODUCTS_NOT_SUPPORTED"
+                        ? $"{name}: Plaid won't check it on demand yet (Transactions Refresh isn't turned on for this app, or the bank doesn't offer it)."
+                        : $"{name}: {ex.DisplayMessage ?? ex.ErrorCode}");
+                }
+            }
+            await db.SaveChangesAsync(ct);
+            var results = new List<SyncResultDto>();
+            foreach (var item in items)
+                results.Add(await sync.SyncAsync(item.Id, ct));
+            return Results.Ok(new BankUpdateDto(checkedBanks, next, problems, results));
+        });
+
         // Pull to refresh (SPEC section 4.2): sync every active bank connection now.
         app.MapPost("/api/sync", async (HttpContext ctx, AppDbContext db, PlaidSyncService sync, PlaidOptions o, CancellationToken ct) =>
         {

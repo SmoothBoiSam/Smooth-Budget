@@ -22,6 +22,13 @@ public class PlaidOptions
     /// <summary>Base64 32-byte key that encrypts access tokens at rest.</summary>
     public string? TokenKey { get; set; }
 
+    /// <summary>"Update bank data" (DECISIONS.md 242): at most one per connection every this many hours...</summary>
+    public int BankCheckCooldownHours { get; set; } = 4;
+    /// <summary>...and this many per connection in a calendar month (UTC, like Plaid's billing).</summary>
+    public int BankChecksPerMonth { get; set; } = 30;
+    /// <summary>What Plaid charges for one, in cents, to show the month's cost; unset shows only the count.</summary>
+    public int? BankCheckPriceCents { get; set; }
+
     public bool IsConfigured => !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(Secret) && !string.IsNullOrWhiteSpace(TokenKey);
     public bool IsSandbox => string.Equals(Environment, "sandbox", StringComparison.OrdinalIgnoreCase);
 

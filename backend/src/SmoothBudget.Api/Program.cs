@@ -109,6 +109,10 @@ var plaidOptions = new PlaidOptions
     RedirectUri = config["PLAID_REDIRECT_URI"],
     TokenKey = config["PLAID_TOKEN_KEY"],
 };
+// "Update bank data" limits (DECISIONS.md 242); the defaults keep it to a few dollars a month at most.
+if (int.TryParse(config["PLAID_BANK_CHECK_HOURS"], out var checkHours) && checkHours >= 0) plaidOptions.BankCheckCooldownHours = checkHours;
+if (int.TryParse(config["PLAID_BANK_CHECKS_PER_MONTH"], out var checksPerMonth) && checksPerMonth >= 0) plaidOptions.BankChecksPerMonth = checksPerMonth;
+if (int.TryParse(config["PLAID_BANK_CHECK_PRICE_CENTS"], out var checkPrice) && checkPrice >= 0) plaidOptions.BankCheckPriceCents = checkPrice;
 builder.Services.AddSingleton(plaidOptions);
 builder.Services.AddSingleton(sp => new SecretBox(sp.GetRequiredService<PlaidOptions>().TokenKey
     ?? throw new InvalidOperationException("Set PLAID_TOKEN_KEY (see .env.example).")));

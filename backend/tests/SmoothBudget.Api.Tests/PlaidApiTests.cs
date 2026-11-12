@@ -68,6 +68,65 @@ public class PlaidApiTests(TestApp app) : IClassFixture<TestApp>
     private static async Task<HomeSummaryDto> Home(HttpClient client) =>
         (await client.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!;
 
+    [Fact]
+    public async Task Update_bank_data_asks_Plaid_per_bank_then_syncs_and_is_limited_per_connection()
+    {
+        // DECISIONS.md 242: one paid /transactions/refresh per bank connection (not per account), then a sync of every
+        // connection; a bank checked within 4 hours is skipped (synced, not checked).
+        var (client, household) = await RegisterAsync();
+        var linked = await LinkAsync(client, household);
+        var start = app.Clock.GetUtcNow();
+        app.Plaid.QueueSync(linked.AccessToken, added: [FakePlaid.Txn("t-new", "acc-chk", 12.34m, "2026-11-20", "FRESH COFFEE")]);
+        int Refreshes() => app.Plaid.Requests.Count(r => r.Path == "transactions/refresh" && r.Body.Contains(linked.AccessToken));
+
+        var r = await Update(client);
+        Assert.Equal(("Fake Bank", 1, 1), (string.Join(", ", r.Checked), r.Results.Single().Added, Refreshes()));
+        var item = (await client.GetFromJsonAsync<List<PlaidItemDto>>("/api/plaid/items", Json))!.Single();
+        Assert.Equal((1, 30), (item.BankCheck.ThisMonth, item.BankCheck.PerMonth));
+
+        // Too soon: skipped (no charge), still synced, and it says when the next check can happen.
+        r = await Update(client);
+        Assert.Equal((0, 1, 1), (r.Checked.Count, r.Results.Count, Refreshes()));
+        Assert.Equal(start.UtcDateTime.AddHours(4), r.NextCheckUtc);
+
+        // Four hours on, but Plaid hasn't turned the product on: a plain explanation, and it isn't counted.
+        app.Clock.SetUtcNow(start.AddHours(4));
+        app.Plaid.RefreshError = "INVALID_PRODUCT";
+        try
+        {
+            r = await Update(client);
+            Assert.Empty(r.Checked);
+            Assert.Contains("Transactions Refresh", Assert.Single(r.Problems));
+        }
+        finally
+        {
+            app.Plaid.RefreshError = null;
+        }
+        item = (await client.GetFromJsonAsync<List<PlaidItemDto>>("/api/plaid/items", Json))!.Single();
+        Assert.Equal((1, (DateTime?)null), (item.BankCheck.ThisMonth, item.BankCheck.NextUtc));
+        Assert.Single((await Update(client)).Checked);
+
+        static async Task<BankUpdateDto> Update(HttpClient c)
+        {
+            var res = await c.PostAsync("/api/plaid/check-banks", null);
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+            return (await res.Content.ReadFromJsonAsync<BankUpdateDto>(Json))!;
+        }
+    }
+
+    [Fact]
+    public void Bank_checks_stop_at_the_monthly_cap_until_next_month()
+    {
+        var o = new PlaidOptions { BankChecksPerMonth = 2, BankCheckCooldownHours = 0 };
+        var item = new PlaidItem { PlaidItemId = "x", AccessTokenEncrypted = "x" };
+        var now = new DateTime(2026, 11, 30, 23, 0, 0, DateTimeKind.Utc);
+        BankChecks.Record(item, now);
+        Assert.Null(BankChecks.NextAllowedUtc(item, now, o));
+        BankChecks.Record(item, now);
+        Assert.Equal(new DateTime(2026, 12, 1, 0, 0, 0, DateTimeKind.Utc), BankChecks.NextAllowedUtc(item, now, o));
+        Assert.Equal(0, BankChecks.UsedThisMonth(item, now.AddHours(1)));
+    }
+
     // ---- The milestone 3 "done when" -------------------------------------------------------------
 
     [Fact]

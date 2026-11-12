@@ -129,6 +129,11 @@ public class PlaidItem
     public DateTime? LastSyncedUtc { get; set; }
     public DateTime? LastAttemptUtc { get; set; }
     public DateTime CreatedUtc { get; set; }
+
+    /// <summary>"Update bank data" (DECISIONS.md 242): Plaid charges for each, so they're counted per UTC calendar month.</summary>
+    public DateTime? LastBankCheckUtc { get; set; }
+    public DateOnly? BankCheckMonth { get; set; }
+    public int BankChecksThisMonth { get; set; }
 }
 
 public class Category

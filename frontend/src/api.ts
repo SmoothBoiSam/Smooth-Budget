@@ -419,6 +419,17 @@ export interface PlaidItem {
   statusMessage: string | null
   lastSyncedUtc: string | null
   accounts: string[]
+  /** Bank checks from Home's "Update bank data" (DECISIONS.md 242): nextUtc null means it can be checked now. */
+  bankCheck: { lastUtc: string | null; thisMonth: number; perMonth: number; nextUtc: string | null; costCents: number | null }
+}
+
+/** What "Update bank data" did (DECISIONS.md 242). */
+export interface BankUpdate {
+  checked: string[]
+  /** The soonest a skipped bank can be checked again. */
+  nextCheckUtc: string | null
+  problems: string[]
+  results: SyncResult[]
 }
 
 export const plaidApi = {
@@ -436,6 +447,8 @@ export const plaidApi = {
   removeItem: (id: string) => request<void>('DELETE', `/plaid/items/${id}`),
   reconnected: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/reconnected`),
   syncAll: () => request<SyncResult[]>('POST', '/sync'),
+  /** Home's "Update bank data" (DECISIONS.md 242): Plaid checks each bank now (paid, per bank), then everything syncs. */
+  checkBanks: () => request<BankUpdate>('POST', '/plaid/check-banks'),
   /** The Plaid session to pick up again after a bank's own sign-in sends you back (DECISIONS.md 185); 404 when none. */
   oauthPending: () => request<{ linkToken: string; itemId: string | null; addAccounts: boolean }>('GET', '/plaid/oauth-pending'),
   clearOAuthPending: () => request<void>('DELETE', '/plaid/oauth-pending'),

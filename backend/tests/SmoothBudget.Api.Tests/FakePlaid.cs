@@ -26,6 +26,8 @@ public sealed class FakePlaid : HttpMessageHandler
     private readonly ConcurrentDictionary<string, string> _publicTokens = new();
     public ConcurrentQueue<(string Path, string Body, string? ClientId, string? Secret)> Requests { get; } = new();
     public ConcurrentDictionary<string, string> SyncErrors { get; } = new(); // access token -> error_code
+    /// <summary>When set, /transactions/refresh fails with this error_code (e.g. INVALID_PRODUCT: not enabled).</summary>
+    public string? RefreshError { get; set; }
     /// <summary>The redirect URI "registered in the dashboard"; any other is refused like Plaid does (INVALID_FIELD).</summary>
     public string? AllowedRedirectUri { get; set; }
 
@@ -128,6 +130,8 @@ public sealed class FakePlaid : HttpMessageHandler
                 return Ok(new JsonObject { ["institution"] = new JsonObject { ["name"] = "Fake Bank" } });
             case "item/remove":
                 return Ok(new JsonObject());
+            case "transactions/refresh":
+                return RefreshError is { } refreshError ? Error("INVALID_INPUT", refreshError) : Ok(new JsonObject { ["request_id"] = "fake" });
             case "transactions/sync":
                 var token = Str("access_token")!;
                 if (SyncErrors.TryRemove(token, out var code))

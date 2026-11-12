@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, plaidApi, type CashCheck, type Category, type HomeSummary, type Me, type PickUp, type Transaction } from './api'
+import { ApiError, api, budgetApi, plaidApi, type BankUpdate, type CashCheck, type Category, type HomeSummary, type Me, type PickUp, type Transaction } from './api'
 import { TransactionList } from './BudgetScreen'
 import TransactionSheet from './TransactionSheet'
 import { formatCents, formatDay, formatTime } from './format'
@@ -86,6 +86,53 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
     setSyncing(false)
   }
 
+  // "Update bank data" (DECISIONS.md 242): Plaid goes to each bank now (a fee per bank, limited), then everything syncs.
+  // What a bank sends a little later comes by webhook, and one more free sync half a minute on.
+  const [bankNote, setBankNote] = useState<string | null>(null)
+  // Bank updates left this month (DECISIONS.md 243). Each bank has its own monthly cap, and one tap uses one from every
+  // bank, so what's left is the busiest bank's.
+  const [checksLeft, setChecksLeft] = useState<{ left: number; per: number } | null>(null)
+  const hasBanks = !!summary && summary.sync.state !== 'none'
+  const loadChecks = useCallback(
+    () =>
+      plaidApi
+        .items()
+        .then((items) => {
+          const active = items.filter((i) => i.status === 'Active')
+          setChecksLeft(
+            active.length === 0
+              ? null
+              : { left: Math.max(0, active[0].bankCheck.perMonth - Math.max(...active.map((i) => i.bankCheck.thisMonth))), per: active[0].bankCheck.perMonth },
+          )
+        })
+        .catch(() => {}), // extra: the button works without it
+    [],
+  )
+  useEffect(() => {
+    if (hasBanks) void loadChecks()
+  }, [hasBanks, loadChecks])
+
+  async function updateBanks() {
+    setLoading(true)
+    setSyncing(true)
+    setBankNote(null)
+    try {
+      const r = await plaidApi.checkBanks()
+      setBankNote(describeBankUpdate(r))
+      void loadChecks()
+      window.setTimeout(() => {
+        plaidApi
+          .syncAll()
+          .then(() => load())
+          .catch(() => {})
+      }, 30_000)
+    } catch (e) {
+      setBankNote(e instanceof Error ? e.message : 'Couldn’t reach your banks.')
+    }
+    await load()
+    setSyncing(false)
+  }
+
   const startY = useRef<number | null>(null)
   const [pull, setPull] = useState(0)
   const [syncing, setSyncing] = useState(false)
@@ -161,22 +208,71 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
         {summary && <Summary summary={summary} stale={!!savedAt} />}
         {summary && online && <RecentTransactions summary={summary} onChanged={() => void load()} />}
 
+        {/* With banks connected: one button that has Plaid check them all now (DECISIONS.md 242). Pull to refresh stays free. */}
+        {summary && summary.sync.state !== 'none' && online && (
+          <div className="mt-8 flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void updateBanks()}
+              disabled={loading}
+              className="rounded-full neu-sm px-5 py-2.5 text-sm font-semibold text-accent disabled:opacity-50"
+            >
+              {loading && syncing ? 'Updating…' : 'Update bank data'}
+            </button>
+            {checksLeft && checksLeft.per > 0 && (
+              <div className="w-24" role="img" aria-label={`${checksLeft.left} of ${checksLeft.per} bank updates left this month`}>
+                <p className="text-center text-[11px] tabular-nums text-ink-faint">
+                  {checksLeft.left} / {checksLeft.per}
+                </p>
+                <div className="mt-0.5 h-1 overflow-hidden rounded-full neu-inset">
+                  <div
+                    className={`h-full rounded-full ${checksLeft.left <= checksLeft.per * 0.2 ? 'bg-gold' : 'bg-accent'}`}
+                    style={{ width: `${(checksLeft.left / checksLeft.per) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {bankNote && (
+              <p role="status" className="max-w-xs text-center text-xs text-ink-soft">
+                {bankNote}
+              </p>
+            )}
+          </div>
+        )}
+
         {summary && (
-          <p className="mt-8 text-center text-xs text-ink-faint">
+          <p className={`${summary.sync.state !== 'none' && online ? 'mt-3' : 'mt-8'} text-center text-xs text-ink-faint`}>
             {summary.sync.state !== 'none' && summary.sync.lastSyncedUtc
               ? `Synced ${formatTime(summary.sync.lastSyncedUtc)}`
               : summary.lastUpdatedUtc
                 ? `Updated ${formatTime(summary.lastUpdatedUtc)}`
                 : 'No transactions yet'}
-            {' · '}
-            <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-accent disabled:opacity-50">
-              {loading ? 'Syncing…' : 'Refresh'}
-            </button>
+            {(summary.sync.state === 'none' || !online) && (
+              <>
+                {' · '}
+                <button type="button" onClick={refresh} disabled={loading} className="font-semibold text-accent disabled:opacity-50">
+                  {loading ? 'Syncing…' : 'Refresh'}
+                </button>
+              </>
+            )}
           </p>
         )}
       </main>
     </div>
   )
+}
+
+/** "Asked Chase for new activity: 2 new." or, when every bank was checked lately, when the next check can happen. */
+function describeBankUpdate(r: BankUpdate): string {
+  const added = r.results.reduce((n, x) => n + (x.ok ? x.added : 0), 0)
+  const parts: string[] = []
+  if (r.checked.length > 0)
+    parts.push(`Asked ${r.checked.join(' and ')} for new activity: ${added === 0 ? 'nothing new yet' : `${added} new`}. More may show up in a minute.`)
+  else if (r.nextCheckUtc)
+    parts.push(`Your banks were updated recently, so this synced what Plaid already had (${added} new). Next bank update ${formatTime(r.nextCheckUtc)}.`)
+  else if (r.problems.length === 0) parts.push(`Synced: ${added} new.`)
+  parts.push(...r.problems)
+  return parts.join(' ')
 }
 
 /** Whole days from one ISO date to another. */
