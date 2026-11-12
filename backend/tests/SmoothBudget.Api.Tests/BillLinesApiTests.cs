@@ -186,6 +186,9 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Accounts.Add(new Account { Id = savingsAcct, HouseholdId = household, Name = "Test Savings", Mask = "9999", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow });
             db.SavingsGoals.Add(new SavingsGoal { Id = Guid.NewGuid(), HouseholdId = household, Name = "Test fund", TargetCents = 1_000_00, AccountId = savingsAcct, CreatedUtc = DateTime.UtcNow });
+            db.Transactions.AddRange(
+                T(household, savingsAcct, new DateOnly(2027, 1, 12), null, -150_00, "TRANSFER IN"),
+                T(household, savingsAcct, new DateOnly(2027, 2, 1), null, 40_00, "WITHDRAWAL"));
             db.Categories.AddRange(
                 new Category { Id = debtLine, HouseholdId = household, Name = "Card payments", Type = CategoryType.DebtPayment, SortOrder = 5 },
                 new Category { Id = Guid.NewGuid(), HouseholdId = household, Name = "Savings", Type = CategoryType.SavingsTransfer, SortOrder = 6 },
@@ -207,6 +210,31 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         var rows = await check.ServiceProvider.GetRequiredService<AppDbContext>().Transactions.Where(t => t.Id == payment.Id || t.Id == moved.Id).ToListAsync();
         Assert.Equal((debtLine, "Toward Test Visa: you said so."), (rows.Single(t => t.Id == payment.Id).CategoryId!.Value, rows.Single(t => t.Id == payment.Id).CategoryReason));
         Assert.Equal(fundLine, rows.Single(t => t.Id == moved.Id).CategoryId);
+
+        // DECISIONS.md 239: past savings transactions are the savings account's, in (+) and out (−), newest first.
+        var past = (await c.GetFromJsonAsync<List<SmoothBudget.Api.Savings.SavingsHistoryItemDto>>("/api/savings/transactions", Json))!;
+        Assert.Equal([(new DateOnly(2027, 2, 1), -40_00L), (new DateOnly(2027, 1, 12), 150_00L)], past.Select(x => (x.Date, x.Cents)));
+        Assert.All(past, x => Assert.Equal("Test Savings", x.Account));
+    }
+
+    [Fact]
+    public void Uploads_due_are_this_months_schedule_next_months_from_the_20th_and_missing_stubs()
+    {
+        // DECISIONS.md 238. Nothing until you've uploaded something.
+        var rules = SmoothBudget.Core.Pay.PayRules.Default;
+        Assert.Empty(PaydayService.UploadsDue(new DateOnly(2027, 2, 21), rules, [], []));
+
+        // A stub for every check and this month's schedule: on the 10th nothing's due; from the 20th, next month's schedule.
+        var today = new DateOnly(2027, 2, 21);
+        var checks = SmoothBudget.Core.Pay.PayCalendar.From(today.AddDays(-60), rules).TakeWhile(p => p.PayDate <= today).Select(p => p.PayDate).ToList();
+        Assert.Empty(PaydayService.UploadsDue(new DateOnly(2027, 2, 10), rules, [(2027, 2)], checks.Where(d => d <= new DateOnly(2027, 2, 10)).ToList()));
+        var due = PaydayService.UploadsDue(today, rules, [(2027, 2)], checks);
+        Assert.Equal([("schedule", new DateOnly(2027, 3, 1))], due.Select(d => (d.Kind, d.Date)));
+        Assert.Equal("March schedule", due[0].Label);
+
+        // The latest check's stub missing: it's due too.
+        due = PaydayService.UploadsDue(today, rules, [(2027, 2), (2027, 3)], checks.SkipLast(1).ToList());
+        Assert.Equal([("stub", checks[^1])], due.Select(d => (d.Kind, d.Date)));
     }
 
     [Fact]
@@ -247,6 +275,15 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
 
         var debt = (await c.GetFromJsonAsync<SmoothBudget.Api.Debt.DebtSummaryDto>("/api/debt", Json))!.Debts.Single(d => d.Name == "Test Visa");
         Assert.Equal((62_50L, 32_50L, new DateOnly(2027, 2, 9)), (debt.InterestChargedThisYearCents, debt.LastInterestCents!.Value, debt.LastInterestDate!.Value));
+
+        // DECISIONS.md 237: the Debt tab's chart (12 calendar months) and the list of past charges.
+        var h = (await c.GetFromJsonAsync<SmoothBudget.Api.Debt.InterestHistoryDto>("/api/debt/interest", Json))!;
+        Assert.Equal(12, h.Months.Count);
+        Assert.Equal((new DateOnly(2027, 2, 1), 32_50L, true), (h.Months[^1].Month, h.Months[^1].Cents, h.Months[^1].Current));
+        Assert.Equal(30_00L, h.Months[^2].Cents);
+        Assert.Equal(62_50L, h.LastYearCents);
+        Assert.Equal([inReview.Id, filedAsFee.Id], h.Charges.Select(x => x.Id));
+        Assert.All(h.Charges, x => Assert.Equal("Test Visa", x.DebtName));
     }
 
     [Fact]

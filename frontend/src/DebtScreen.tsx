@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ask } from './confirm'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
 import { useRemembered } from './offline'
+import { InterestCard } from './DebtInterest'
 import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
@@ -153,6 +154,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
         <PayoffChart past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))} points={plan.chart} />
       )}
       {s.history && s.history.length > 0 && <PastPayments history={s.history} />}
+      <InterestCard />
 
       {plan && (
         <section aria-labelledby="plan-h" className="mt-4 rounded-3xl neu p-4">

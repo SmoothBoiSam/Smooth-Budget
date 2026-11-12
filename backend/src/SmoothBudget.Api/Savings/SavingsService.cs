@@ -23,6 +23,9 @@ public record SavingsSummaryDto(
 
 public record SavingsTransferDto(DateOnly Date, long Cents, string Account, string Description);
 
+/// <summary>One past savings transaction (DECISIONS.md 239): Cents positive into savings, negative out of it.</summary>
+public record SavingsHistoryItemDto(Guid Id, DateOnly Date, long Cents, string Account, string Description, string? Goal);
+
 public record GoalRequest(string Name, long TargetCents, Guid? AccountId, long? ManualSavedCents, long? MonthlyCents);
 public record PriorityRequest(List<PriorityStep> Order);
 public record BalanceRequest(long BalanceCents);
@@ -151,6 +154,29 @@ public static class SavingsEndpoints
         var g = app.MapGroup("/api/savings").RequireAuthorization();
 
         g.MapGet("", async (HttpContext ctx, SavingsService svc, CancellationToken ct) => await svc.SummaryAsync(ctx.User.HouseholdId(), ct));
+
+        // Every past savings transaction, newest first (DECISIONS.md 239): money into and out of your savings accounts, or,
+        // with none linked, what you filed as savings (with the goal its line is for).
+        g.MapGet("/transactions", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var ids = await db.Accounts.AsNoTracking()
+                .Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget).Select(a => a.Id).ToListAsync(ct);
+            var goals = await db.SavingsGoals.AsNoTracking().Where(x => x.HouseholdId == householdId).Select(x => x.Name).ToListAsync(ct);
+            var rows = ids.Count > 0
+                ? await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId))
+                    .OrderByDescending(t => t.Date).ThenBy(t => t.Merchant).Take(500)
+                    .Select(t => new { t.Id, t.Date, Cents = -t.AmountCents, Account = t.Account.Name, t.IsTransfer, t.Merchant, t.Description, Line = (string?)null })
+                    .ToListAsync(ct)
+                : await db.Transactions.AsNoTracking()
+                    .Where(t => t.HouseholdId == householdId && t.Category != null && t.Category.Type == CategoryType.SavingsTransfer)
+                    .OrderByDescending(t => t.Date).ThenBy(t => t.Merchant).Take(500)
+                    .Select(t => new { t.Id, t.Date, Cents = t.AmountCents, Account = t.Account.Name, t.IsTransfer, t.Merchant, t.Description, Line = (string?)t.Category!.Name })
+                    .ToListAsync(ct);
+            return rows.Select(t => new SavingsHistoryItemDto(t.Id, t.Date, t.Cents, t.Account,
+                t.IsTransfer ? (t.Cents >= 0 ? "Moved to savings" : "Moved out of savings") : (string.IsNullOrWhiteSpace(t.Merchant) ? t.Description : t.Merchant),
+                t.Line is not null && goals.Contains(t.Line) ? t.Line : null)).ToList();
+        });
 
         g.MapPost("/goals", async (GoalRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {

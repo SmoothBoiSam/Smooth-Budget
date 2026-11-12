@@ -5,14 +5,14 @@ import type { ReactNode } from 'react'
 import { icons } from './icons'
 import { bubbleStyle, bubbleText } from './theme'
 
-export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'more' | 'friends' | 'friend'
+export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'debtinterest' | 'savings' | 'savingshistory' | 'payday' | 'paysetup' | 'more' | 'friends' | 'friend'
 
 const tabs: { label: string; route: Route; icon: ReactNode; also: Route[] }[] = [
   { label: 'Home', route: 'home', icon: icons.home, also: ['transactions'] },
   { label: 'Budget', route: 'budget', icon: icons.budget, also: [] },
   { label: 'Tasks', route: 'tasks', icon: icons.tasks, also: ['review', 'paytasks'] },
   // Payday setup, Debt and Savings live under Plan; Friends under More.
-  { label: 'Plan', route: 'payday', icon: icons.payday, also: ['paysetup', 'debt', 'savings'] },
+  { label: 'Plan', route: 'payday', icon: icons.payday, also: ['paysetup', 'debt', 'debtinterest', 'savings', 'savingshistory'] },
   { label: 'More', route: 'more', icon: icons.more, also: ['friends', 'friend'] },
 ]
 

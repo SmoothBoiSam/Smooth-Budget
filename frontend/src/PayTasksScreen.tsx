@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, openPlanItems, paydayApi, type PayCheck, type PaydaySummary, type PlanItem } from './api'
+import { ApiError, payBadge, paydayApi, type PayCheck, type PaydaySummary, type PlanItem } from './api'
 import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay } from './format'
 import { finished, weekday } from './paycheck'
@@ -26,7 +26,7 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
     try {
       const p = await paydayApi.summary()
       setS(p)
-      onOpenItems(openPlanItems(p))
+      onOpenItems(payBadge(p))
       setError(null)
     } catch (e) {
       fail(e)
@@ -37,7 +37,7 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
       .summary()
       .then((p) => {
         setS(p)
-        onOpenItems(openPlanItems(p))
+        onOpenItems(payBadge(p))
       })
       .catch(fail)
   }, [fail, onOpenItems])

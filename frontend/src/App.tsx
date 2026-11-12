@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, needsLook, openPlanItems, paydayApi, recurringApi, type Me } from './api'
+import { ApiError, api, budgetApi, needsLook, payBadge, paydayApi, recurringApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
+import InterestScreen from './DebtInterest'
+import SavingsHistoryScreen from './SavingsHistory'
 import HomeScreen from './HomeScreen'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
@@ -46,7 +48,7 @@ function currentRoute(): Route {
   if (hash === 'tasks') return 'tasks'
   if (hash === 'tasks/payday') return 'paytasks'
   if (hash.startsWith('tasks/')) return 'review' // tasks/transactions, tasks/bills[/<key>]
-  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'debt/interest' ? 'debtinterest' : hash === 'savings' ? 'savings' : hash === 'savings/history' ? 'savingshistory' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {
@@ -101,7 +103,7 @@ export default function App() {
     if (!me || route === 'payday' || route === 'tasks' || route === 'paytasks') return
     paydayApi
       .summary()
-      .then((s) => setPlanCount(openPlanItems(s)))
+      .then((s) => setPlanCount(payBadge(s)))
       .catch(() => undefined)
   }, [me, route])
 
@@ -158,7 +160,6 @@ export default function App() {
         <TasksScreen
           inboxCount={inboxCount}
           billsCount={billsCount}
-          planCount={planCount}
           onInboxCount={setInboxCount}
           onBillsCount={setBillsCount}
           onPlanCount={setPlanCount}
@@ -168,7 +169,9 @@ export default function App() {
       {route === 'paytasks' && <PayTasksScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} billsCount={billsCount} onBillsCount={setBillsCount} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
+      {route === 'debtinterest' && <InterestScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
+      {route === 'savingshistory' && <SavingsHistoryScreen onSignedOut={signedOut} />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
       {route === 'friends' && <FriendsScreen onSignedOut={signedOut} />}

@@ -117,6 +117,13 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
           )}
 
           <TransfersCard s={s} />
+          {/* Every past savings transaction, on its own page (DECISIONS.md 239). */}
+          <a href="#/savings/history" className="mt-3 flex items-center justify-between rounded-2xl neu px-4 py-3 text-sm font-semibold">
+            Past savings transactions
+            <span className="text-ink-soft" aria-hidden>
+              ›
+            </span>
+          </a>
 
           <section aria-labelledby="goals-h" className="mt-6">
             <h2 id="goals-h" className="px-1 text-sm font-semibold text-ink-soft">

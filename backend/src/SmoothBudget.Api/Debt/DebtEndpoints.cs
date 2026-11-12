@@ -5,6 +5,15 @@ using SmoothBudget.Core.Debt;
 
 namespace SmoothBudget.Api.Debt;
 
+/// <summary>One calendar month's interest charged, across every card and loan (DECISIONS.md 237).</summary>
+public record InterestMonthDto(DateOnly Month, long Cents, bool Current);
+
+/// <summary>One interest charge, and the card or loan it was charged on when known.</summary>
+public record InterestChargeDto(Guid Id, DateOnly Date, string Merchant, long AmountCents, Guid? DebtId, string? DebtName);
+
+/// <summary>The Debt tab's interest: the last 12 months, and every charge (newest first).</summary>
+public record InterestHistoryDto(IReadOnlyList<InterestMonthDto> Months, IReadOnlyList<InterestChargeDto> Charges, long LastYearCents);
+
 /// <summary>SPEC 4.4 and section 9: <c>GET /debt</c> (summary and projection; <c>?extra=</c> and <c>?strategy=</c> for the what-if slider).</summary>
 public static class DebtEndpoints
 {
@@ -19,6 +28,33 @@ public static class DebtEndpoints
             extra is < 0 or > MaxCents
                 ? Results.ValidationProblem(new Dictionary<string, string[]> { ["extra"] = ["Use 0 or more."] })
                 : Results.Ok(await debts.SummaryAsync(ctx.User.HouseholdId(), extra, strategy, ct)));
+
+        // Interest charged (DECISIONS.md 237): the Card interest line's charges, by calendar month for the chart and one by one.
+        g.MapGet("/interest", async (HttpContext ctx, AppDbContext db, CardInterestService interest, TimeProvider clock, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            await interest.EnsureAsync(householdId, ct); // interest still in spending moves, and gets its card
+            var tz = await db.Households.Where(h => h.Id == householdId).Select(h => h.TimeZoneId).SingleAsync(ct);
+            var today = Home.HomeSummaryService.TodayIn(tz, clock);
+            var line = await db.Categories.AsNoTracking()
+                .Where(c => c.HouseholdId == householdId && c.Type == Core.Budgeting.CategoryType.FixedBill && c.Name == Core.Transactions.CardInterest.CategoryName)
+                .Select(c => (Guid?)c.Id).FirstOrDefaultAsync(ct);
+            var debts = await db.DebtAccounts.AsNoTracking().Where(d => d.HouseholdId == householdId)
+                .Select(d => new { d.Id, d.Name, Mask = d.Account != null ? d.Account.Mask : null }).ToDictionaryAsync(d => d.Id, ct);
+            var charges = line is not { } lineId ? [] : await db.Transactions.AsNoTracking()
+                .Where(t => t.HouseholdId == householdId && t.CategoryId == lineId && t.AmountCents > 0)
+                .OrderByDescending(t => t.Date).ThenBy(t => t.Merchant).Take(500)
+                .Select(t => new { t.Id, t.Date, t.Merchant, t.AmountCents, t.DebtAccountId }).ToListAsync(ct);
+
+            var thisMonth = new DateOnly(today.Year, today.Month, 1);
+            var months = Enumerable.Range(0, 12).Select(i => thisMonth.AddMonths(i - 11))
+                .Select(m => new InterestMonthDto(m, charges.Where(t => t.Date >= m && t.Date < m.AddMonths(1)).Sum(t => t.AmountCents), m == thisMonth))
+                .ToList();
+            string? Name(Guid? id) => id is { } d && debts.TryGetValue(d, out var x) ? (x.Mask is null ? x.Name : $"{x.Name} ••{x.Mask}") : null;
+            return Results.Ok(new InterestHistoryDto(months,
+                charges.Select(t => new InterestChargeDto(t.Id, t.Date, t.Merchant, t.AmountCents, t.DebtAccountId, Name(t.DebtAccountId))).ToList(),
+                months.Sum(m => m.Cents)));
+        });
 
         // A loan or other debt entered by hand (cards are added automatically from their accounts).
         g.MapPost("", async (DebtRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>

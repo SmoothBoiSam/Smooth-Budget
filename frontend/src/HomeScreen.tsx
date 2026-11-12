@@ -256,7 +256,8 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
 
 /**
  * Left to Spend checked against the bank (DECISIONS.md 183): checking now and money still coming, less what still has to
- * go out this month. Folded, it says whether the accounts cover Left to Spend; open, it shows every part.
+ * go out this month. Folded, it says whether the accounts cover Left to Spend; open, it shows every part. Shown only
+ * while they don't (DECISIONS.md 236).
  */
 function CashCheckRow({ cash: c, shortCents, pickUp }: { cash: CashCheck; shortCents: number; pickUp: PickUp | null }) {
   const rows: [string, number, 1 | -1][] = [
@@ -431,7 +432,8 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
           {s.carriedInDeficitCents > 0 && <Row label="Carried over" value={`−${formatCents(s.carriedInDeficitCents)}`} tone="danger" />}
           {s.unfiledSpendingCents > 0 && <Row label="Not in a category" value={`−${formatCents(s.unfiledSpendingCents)}`} tone="danger" href="#/tasks/transactions" />}
           {s.overplannedCents > 0 && <Row label="Planned beyond your money" value={`−${formatCents(s.overplannedCents)}`} tone="danger" href="#/budget/plan" />}
-          {s.cash && <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />}
+          {/* Only when the budget couldn't shrink enough to fit the accounts (DECISIONS.md 236): otherwise there's nothing to act on. */}
+          {s.cash && s.cashShortCents > 0 && <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />}
           {s.nextPayday && (
             <Row
               label={`Payday ${formatDay(s.nextPayday.payDate)}`}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ApiError, budgetApi, needsLook, openPlanItems, paydayApi, recurringApi, type PaydaySummary } from './api'
+import { ApiError, budgetApi, needsLook, openPlanItems, payBadge, paydayApi, recurringApi, type PaydaySummary } from './api'
 import { icons } from './icons'
 import { weekday } from './paycheck'
 import { Card, Page, PageHeader, Row, Rows } from './ui'
@@ -12,7 +12,6 @@ import { Card, Page, PageHeader, Row, Rows } from './ui'
 export default function TasksScreen({
   inboxCount,
   billsCount,
-  planCount,
   onInboxCount,
   onBillsCount,
   onPlanCount,
@@ -20,7 +19,6 @@ export default function TasksScreen({
 }: {
   inboxCount: number
   billsCount: number
-  planCount: number
   onInboxCount: (n: number) => void
   onBillsCount: (n: number) => void
   onPlanCount: (n: number) => void
@@ -45,16 +43,20 @@ export default function TasksScreen({
       .summary()
       .then((p) => {
         setPayday(p)
-        onPlanCount(openPlanItems(p))
+        onPlanCount(payBadge(p))
       })
       .catch(signedOut)
   }, [onInboxCount, onBillsCount, onPlanCount, onSignedOut])
 
   const current = payday?.checks.find((c) => c.isCurrent && c.plan && c.plan.items.length > 0)
   const hasPayTasks = !!payday?.checks.some((c) => c.plan && c.plan.items.length > 0)
+  // planCount (the tab badge) includes uploads due; the pay period row counts only its own steps.
+  const steps = payday ? openPlanItems(payday) : 0
+  const uploads = payday?.uploadsDue ?? []
+  const both = uploads.some((u) => u.kind === 'schedule') && uploads.some((u) => u.kind === 'stub')
   const payHint = current
-    ? planCount > 0
-      ? `${planCount} to do for the check paid ${weekday(current.payDate)}`
+    ? steps > 0
+      ? `${steps} to do for the check paid ${weekday(current.payDate)}`
       : `All done for the check paid ${weekday(current.payDate)}`
     : 'The steps for your next check'
 
@@ -82,8 +84,22 @@ export default function TasksScreen({
               icon={icons.payTasks}
               label={<span className="font-semibold">Pay period tasks</span>}
               hint={payHint}
-              badge={planCount}
+              badge={steps}
               href="#/tasks/payday"
+            />
+          )}
+          {/* Schedules and stubs to upload (DECISIONS.md 238): they keep the paycheck forecast right. */}
+          {uploads.length > 0 && (
+            <Row
+              icon={icons.payday}
+              label={
+                <span className="font-semibold">
+                  Upload {both ? 'schedule and pay stubs' : uploads[0].kind === 'schedule' ? (uploads.length === 1 ? 'your schedule' : 'schedules') : uploads.length === 1 ? 'a pay stub' : 'pay stubs'}
+                </span>
+              }
+              hint={uploads.length === 1 ? uploads[0].label : `${uploads[0].label}, and ${uploads.length - 1} more`}
+              badge={uploads.length}
+              href="#/payday/setup"
             />
           )}
         </Rows>

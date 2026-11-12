@@ -718,7 +718,25 @@ export interface DebtFields {
   isHidden?: boolean
 }
 
+/** One past savings transaction (DECISIONS.md 239): cents positive into savings, negative out. */
+export interface SavingsHistoryItem {
+  id: string
+  date: string
+  cents: number
+  account: string
+  description: string
+  goal: string | null
+}
+
+/** Interest charged on every card and loan (DECISIONS.md 237): 12 calendar months, and each charge newest first. */
+export interface InterestHistory {
+  months: { month: string; cents: number; current: boolean }[]
+  charges: { id: string; date: string; merchant: string; amountCents: number; debtId: string | null; debtName: string | null }[]
+  lastYearCents: number
+}
+
 export const debtApi = {
+  interest: () => request<InterestHistory>('GET', '/debt/interest'),
   summary: (opts: { extraCents?: number; strategy?: DebtStrategy } = {}) => {
     const q = new URLSearchParams()
     if (opts.extraCents !== undefined) q.set('extra', String(opts.extraCents))
@@ -992,6 +1010,7 @@ export interface GoalFields {
 }
 
 export const savingsApi = {
+  transactions: () => request<SavingsHistoryItem[]>('GET', '/savings/transactions'),
   summary: () => request<SavingsSummary>('GET', '/savings'),
   addGoal: (g: GoalFields) => request<{ id: string }>('POST', '/savings/goals', g),
   updateGoal: (id: string, g: GoalFields) => request<void>('PUT', `/savings/goals/${id}`, g),
@@ -1080,6 +1099,8 @@ export interface PaydaySummary {
   checks: PayCheck[]
   history: PayHistory[]
   scheduleMonths: string[]
+  /** Schedules and pay stubs to upload now (DECISIONS.md 238). */
+  uploadsDue?: { kind: 'schedule' | 'stub'; label: string; date: string }[]
 }
 export interface Trip {
   key: string
@@ -1226,6 +1247,9 @@ function fileForm(file: File, extra?: Record<string, string>) {
 /** Payday plan steps still to do on the check you're on now: the Plan tab's badge (DECISIONS.md 188). */
 export const openPlanItems = (s: PaydaySummary) =>
   s.checks.filter((c) => c.isCurrent && c.plan).reduce((n, c) => n + c.plan!.items.filter((i) => !i.done && !i.skipped).length, 0)
+
+/** What the pay side adds to the Tasks badge: open steps on the check you're on, plus uploads due (DECISIONS.md 238). */
+export const payBadge = (s: PaydaySummary) => openPlanItems(s) + (s.uploadsDue?.length ?? 0)
 
 export const paydayApi = {
   summary: () => request<PaydaySummary>('GET', '/payday'),

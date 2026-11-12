@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, debtApi, openPlanItems, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type SavingsSummary } from './api'
+import { ApiError, debtApi, payBadge, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type SavingsSummary } from './api'
 import { icons } from './icons'
 import { useRemembered } from './offline'
 import { Card, Caret, Chevron, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows } from './ui'
@@ -33,7 +33,7 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
       // Debt and Savings are extras here: the plan still shows without them.
       const [p, d, sv] = await Promise.all([paydayApi.summary(), debtApi.summary().catch(() => null), savingsApi.summary().catch(() => null)])
       setS(p)
-      onOpenItems(openPlanItems(p))
+      onOpenItems(payBadge(p))
       setDebt(d)
       setSavings(sv)
       setError(null)

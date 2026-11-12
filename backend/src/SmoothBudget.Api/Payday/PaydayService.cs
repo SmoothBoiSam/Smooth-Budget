@@ -51,7 +51,10 @@ public record PickUpDto(int Hours, long RateCents, long TakeHomePerHourCents);
 
 public record PaydayDto(
     ProfileDto Profile, int StubCount, bool ModelLearned, bool ModelEdited, IReadOnlyList<CheckDto> Checks, IReadOnlyList<HistoryDto> History,
-    IReadOnlyList<string> ScheduleMonths);
+    IReadOnlyList<string> ScheduleMonths, IReadOnlyList<UploadDueDto>? UploadsDue = null);
+
+/// <summary>A schedule or pay stub to upload (DECISIONS.md 238): Kind "schedule" (Date = the month's 1st) or "stub" (the pay date).</summary>
+public record UploadDueDto(string Kind, string Label, DateOnly Date);
 
 /// <summary>Everything the pay engine needs for one household.</summary>
 public sealed record PayContext(
@@ -227,7 +230,34 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 r.ActualNetCents - r.PredictedNetCents, r.ActualSource)).ToList();
 
         return new PaydayDto(ProfileOf(c), c.Stubs.Count, c.LearnedModel is not null, c.Profile.ModelJson is not null, checks, history,
-            c.Months.Keys.OrderByDescending(k => k).Select(k => $"{k.Year}-{k.Month:00}").ToList());
+            c.Months.Keys.OrderByDescending(k => k).Select(k => $"{k.Year}-{k.Month:00}").ToList(),
+            UploadsDue(c.Today, c.Rules, c.Months.Keys.ToList(), c.Stubs.Select(s => s.Item2.PayDate).ToList()));
+    }
+
+    /// <summary>The day of the month from which next month's schedule is expected to be out (DECISIONS.md 238).</summary>
+    public const int NextScheduleFromDay = 20;
+
+    /// <summary>
+    /// What to upload now (DECISIONS.md 238), once you've uploaded any schedule or stub: this month's schedule if it's
+    /// missing, next month's from the 20th, and the stub for each check paid in the last 5 weeks that has none (a stub
+    /// dated within 3 days of the pay date counts, for holidays and weekends). Nothing from before your first upload.
+    /// </summary>
+    public static IReadOnlyList<UploadDueDto> UploadsDue(DateOnly today, PayRules rules, IReadOnlyCollection<(int Year, int Month)> schedules, IReadOnlyCollection<DateOnly> stubDates)
+    {
+        if (schedules.Count == 0 && stubDates.Count == 0) return [];
+        var due = new List<UploadDueDto>();
+        var thisMonth = new DateOnly(today.Year, today.Month, 1);
+        var months = new List<DateOnly> { thisMonth };
+        if (today.Day >= NextScheduleFromDay) months.Add(thisMonth.AddMonths(1));
+        foreach (var m in months.Where(m => !schedules.Contains((m.Year, m.Month))))
+            due.Add(new UploadDueDto("schedule", $"{m.ToString("MMMM", System.Globalization.CultureInfo.InvariantCulture)} schedule", m));
+
+        var firstUpload = new[] { stubDates.Count > 0 ? stubDates.Min() : DateOnly.MaxValue, schedules.Count > 0 ? schedules.Min(s => new DateOnly(s.Year, s.Month, 1)) : DateOnly.MaxValue }.Min();
+        var from = today.AddDays(-35) > firstUpload ? today.AddDays(-35) : firstUpload;
+        foreach (var p in PayCalendar.From(from, rules).TakeWhile(p => p.PayDate <= today))
+            if (!stubDates.Any(d => Math.Abs(d.DayNumber - p.PayDate.DayNumber) <= 3))
+                due.Add(new UploadDueDto("stub", $"Pay stub for the check paid {p.PayDate.ToString("MMM d", System.Globalization.CultureInfo.InvariantCulture)}", p.PayDate));
+        return due;
     }
 
     public static ProfileDto ProfileOf(PayContext c)
