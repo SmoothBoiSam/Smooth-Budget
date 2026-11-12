@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
-import { useRemembered } from './offline'
-import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
-import { centsToInput, formatCents, formatDay, parseDollars } from './format'
+import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
+import { centsToInput, formatCents, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 const formatMonth = (iso: string) => monthFmt.format(new Date(iso + 'T00:00:00Z'))
@@ -13,8 +12,8 @@ const stepLabel: Record<PriorityStep, { title: string; hint: string }> = {
 }
 
 /**
- * The Savings tab (SPEC 4.5): what you've saved, each goal with progress from its account's balance and a projected
- * date at your monthly rate, the order money left over goes in, and a chart of your savings over the last year.
+ * The Savings tab (SPEC 4.5): what you've saved with a chart of it over the last year, each goal with progress from its
+ * account's balance and a projected date at your monthly rate, and the order money left over goes in.
  */
 export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [s, setS] = useState<SavingsSummary | null>(null)
@@ -76,54 +75,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
 
       {s && (
         <>
-          <section aria-label="Total" className="mt-4 rounded-3xl neu p-5">
-            <p className="text-sm text-ink-soft">You’ve saved</p>
-            <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.totalSavedCents)}</p>
-            {s.accounts.length === 0 && (
-              <p className="mt-2 text-xs text-ink-soft">No savings account yet. Add it in More → Bank connections, or import its CSV.</p>
-            )}
-          </section>
-
-          {s.accounts.length > 0 && (
-            <section aria-labelledby="accts-h" className="mt-4">
-              <h2 id="accts-h" className="px-1 text-sm font-semibold text-ink-soft">
-                Savings accounts
-              </h2>
-              <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
-                {s.accounts.map((a) => (
-                  <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">
-                        {a.name}
-                        {a.mask && <span className="text-ink-faint"> ••{a.mask}</span>}
-                      </span>
-                      <span className="block text-xs text-ink-soft">
-                        {a.paceCents > 0 ? `About ${formatCents(a.paceCents)} a month going in lately` : 'No regular deposits lately'}
-                        {a.balanceFromBank ? ' · from your bank' : ''}
-                      </span>
-                    </span>
-                    {a.balanceFromBank ? (
-                      <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCents(a.balanceCents)}</span>
-                    ) : (
-                      <BalanceEditor
-                        cents={a.balanceCents}
-                        onSave={(cents) => act(() => savingsApi.setBalance(a.id, cents), `${a.name} is now ${formatCents(cents)}.`)}
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <TransfersCard s={s} />
-          {/* Every past savings transaction, on its own page (DECISIONS.md 239). */}
-          <a href="#/savings/history" className="mt-3 flex items-center justify-between rounded-2xl neu px-4 py-3 text-sm font-semibold">
-            Past savings transactions
-            <span className="text-ink-soft" aria-hidden>
-              ›
-            </span>
-          </a>
+          <SavedCard s={s} />
 
           <section aria-labelledby="goals-h" className="mt-6">
             <h2 id="goals-h" className="px-1 text-sm font-semibold text-ink-soft">
@@ -140,8 +92,6 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
               + Add a goal
             </button>
           </section>
-
-          {s.history.some((p) => p.balanceCents !== 0) && <SavingsChart points={s.history} />}
 
           <section aria-labelledby="prio-h" className="mt-6">
             <h2 id="prio-h" className="px-1 text-sm font-semibold text-ink-soft">
@@ -214,33 +164,27 @@ function GoalCard({ g, onOpen }: { g: SavingsGoal; onOpen: () => void }) {
   )
 }
 
-function BalanceEditor({ cents, onSave }: { cents: number; onSave: (cents: number) => void }) {
-  const [open, setOpen] = useState(false)
-  const [value, setValue] = useState(centsToInput(cents))
-  if (!open)
-    return (
-      <button type="button" onClick={() => setOpen(true)} className={`${smallBtn} shrink-0 text-sm! tabular-nums text-accent`}>
-        {formatCents(cents)}
-      </button>
-    )
-  const parsed = parseDollars(value)
+/**
+ * Saved (DECISIONS.md 241): the total in savings now, a chart of it at the end of each month over the last year (one line,
+ * the title names it; hover or touch for a month), and a button to every savings transaction, like the Debt tab's cards.
+ */
+function SavedCard({ s }: { s: SavingsSummary }) {
+  const points = s.history
+  const chart = points.length > 1 && points.some((p) => p.balanceCents !== 0)
   return (
-    <form
-      className="flex shrink-0 items-center gap-1"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (parsed !== null) onSave(parsed)
-      }}
-    >
-      <input aria-label="Balance" value={value} onChange={(e) => setValue(e.target.value)} inputMode="decimal" className="w-24 rounded-xl neu-inset px-2 py-1 text-right text-sm tabular-nums" />
-      <button type="submit" disabled={parsed === null} className="rounded-lg bg-primary shadow-neu-sm px-2 py-1 text-xs font-semibold text-primary-ink disabled:opacity-40">
-        Save
-      </button>
-    </form>
+    <section aria-labelledby="saved-h" className="mt-4 rounded-3xl neu p-5">
+      <h2 id="saved-h" className="text-sm font-semibold">
+        Saved
+      </h2>
+      <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.totalSavedCents)}</p>
+      {s.accounts.length === 0 && <p className="mt-2 text-xs text-ink-soft">No savings account yet. Add it in More → Bank connections, or import its CSV.</p>}
+      {chart && <SavingsChart points={points} />}
+      <CardLink href="#/savings/history">Savings transactions</CardLink>
+    </section>
   )
 }
 
-/** Total in savings at the end of each month: one line (the title names it), hover or touch for a month. */
+/** Total in savings at the end of each month. */
 function SavingsChart({ points }: { points: { date: string; balanceCents: number }[] }) {
   const [hover, setHover] = useState<number | null>(null)
   const W = 340
@@ -262,10 +206,10 @@ function SavingsChart({ points }: { points: { date: string; balanceCents: number
   }
 
   return (
-    <figure className="mt-6 rounded-3xl neu p-4">
-      <figcaption className="flex items-baseline justify-between gap-3">
-        <span className="text-sm font-semibold">Saved over the last year</span>
-        <span className="text-xs tabular-nums text-ink-soft" aria-live="polite">
+    <figure className="mt-3">
+      <figcaption className="flex items-baseline justify-between gap-3 text-xs text-ink-soft">
+        <span>The last year</span>
+        <span className="tabular-nums" aria-live="polite">
           {h ? `${formatMonth(h.date)}: ${formatCents(Math.max(0, h.balanceCents))}` : ''}
         </span>
       </figcaption>
@@ -423,52 +367,5 @@ function Money({ value, onChange, label }: { value: string; onChange: (v: string
       <span className="text-sm text-ink-soft">$</span>
       <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" className="w-full bg-transparent px-1 text-right tabular-nums outline-none" />
     </div>
-  )
-}
-
-/** Money moved into savings, tracked from your accounts (DECISIONS.md 142): this month against the budget, and the latest moves. */
-function TransfersCard({ s }: { s: SavingsSummary }) {
-  const [open, setOpen] = useRemembered('savings.transfers', false)
-  const list = s.transfers ?? []
-  const pct = s.plannedCents > 0 ? Math.min(100, Math.round((s.thisMonthCents * 100) / s.plannedCents)) : 0
-  return (
-    <section aria-labelledby="moved-h" className="mt-6 rounded-3xl neu p-4">
-      <h2 id="moved-h">
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
-          <span className="flex items-center gap-1 text-sm font-semibold">
-            <Caret open={open} />
-            Moved to savings this month
-          </span>
-          <span className="text-sm font-semibold tabular-nums">
-            {formatCents(s.thisMonthCents)}
-            {s.plannedCents > 0 && <span className="font-normal text-ink-soft"> of {formatCents(s.plannedCents)}</span>}
-          </span>
-        </button>
-      </h2>
-      {s.plannedCents > 0 && (
-        <div className="mt-2 h-2 overflow-hidden rounded-full neu-inset" aria-hidden>
-          <div className="h-full rounded-full bg-good" style={{ width: `${pct}%` }} />
-        </div>
-      )}
-      <p className="mt-1.5 text-xs text-ink-soft">{s.plannedCents > 0 ? 'Out of what this month’s budget plans for savings.' : 'Tracked from your accounts.'}</p>
-      {open &&
-        (list.length === 0 ? (
-          <p className="mt-2 text-sm text-ink-soft">No transfers into savings seen yet.</p>
-        ) : (
-          <ul className="mt-2 divide-y divide-ink/[0.07] text-sm">
-            {list.map((t, i) => (
-              <li key={t.date + t.cents + i} className="flex items-center justify-between gap-3 py-2">
-                <span className="min-w-0">
-                  <span className="block truncate">{t.description}</span>
-                  <span className="block text-xs text-ink-soft">
-                    {formatDay(t.date)} · {t.account}
-                  </span>
-                </span>
-                <span className="shrink-0 font-semibold tabular-nums text-good">+{formatCents(t.cents)}</span>
-              </li>
-            ))}
-          </ul>
-        ))}
-    </section>
   )
 }

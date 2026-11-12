@@ -247,11 +247,12 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         var filedAsFee = T(household, card, new DateOnly(2027, 1, 20), fees, 30_00, "INTEREST ON CARD BALANCE");
         var lateFee = T(household, card, new DateOnly(2027, 1, 21), fees, 29_00, "LATE FEE");
         var inReview = T(household, card, new DateOnly(2027, 2, 9), null, 32_50, "MONTHLY CHARGE");
+        var payment = T(household, card, new DateOnly(2027, 1, 25), null, -200_00, "PAYMENT THANK YOU", TransactionKind.CardPayment);
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Categories.Add(new Category { Id = fees, HouseholdId = household, Name = "Fees & interest", Type = CategoryType.Variable, SortOrder = 3 });
-            db.Transactions.AddRange(filedAsFee, lateFee, inReview);
+            db.Transactions.AddRange(filedAsFee, lateFee, inReview, payment);
             await db.SaveChangesAsync();
         }
         await c.GetAsync("/api/debt"); // the card becomes a debt
@@ -284,6 +285,10 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(62_50L, h.LastYearCents);
         Assert.Equal([inReview.Id, filedAsFee.Id], h.Charges.Select(x => x.Id));
         Assert.All(h.Charges, x => Assert.Equal("Test Visa", x.DebtName));
+
+        // DECISIONS.md 240: past payments, the card's payments received, as positive amounts, tied to the card.
+        var paid = (await c.GetFromJsonAsync<List<SmoothBudget.Api.Debt.DebtPaymentDto>>("/api/debt/payments", Json))!;
+        Assert.Equal([(payment.Id, 200_00L, "Test Visa")], paid.Select(x => (x.Id, x.AmountCents, x.DebtName)));
     }
 
     [Fact]

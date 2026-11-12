@@ -11,6 +11,9 @@ public record InterestMonthDto(DateOnly Month, long Cents, bool Current);
 /// <summary>One interest charge, and the card or loan it was charged on when known.</summary>
 public record InterestChargeDto(Guid Id, DateOnly Date, string Merchant, long AmountCents, Guid? DebtId, string? DebtName);
 
+/// <summary>One payment to a card or loan (DECISIONS.md 240), as a positive amount.</summary>
+public record DebtPaymentDto(Guid Id, DateOnly Date, string Merchant, long AmountCents, Guid? DebtId, string? DebtName);
+
 /// <summary>The Debt tab's interest: the last 12 months, and every charge (newest first).</summary>
 public record InterestHistoryDto(IReadOnlyList<InterestMonthDto> Months, IReadOnlyList<InterestChargeDto> Charges, long LastYearCents);
 
@@ -54,6 +57,35 @@ public static class DebtEndpoints
             return Results.Ok(new InterestHistoryDto(months,
                 charges.Select(t => new InterestChargeDto(t.Id, t.Date, t.Merchant, t.AmountCents, t.DebtAccountId, Name(t.DebtAccountId))).ToList(),
                 months.Sum(m => m.Cents)));
+        });
+
+        // Past payments (DECISIONS.md 240): payments a card received (from its own account), and payments you filed toward
+        // a loan or a debt without a linked account. Newest first.
+        g.MapGet("/payments", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var debts = await db.DebtAccounts.AsNoTracking().Where(d => d.HouseholdId == householdId)
+                .Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null }).ToListAsync(ct);
+            var byAccount = debts.Where(d => d.AccountId is not null).GroupBy(d => d.AccountId!.Value).ToDictionary(g => g.Key, g => g.First().Id);
+            var cardIds = byAccount.Keys.ToList();
+            var unlinked = debts.Where(d => d.AccountId is null).Select(d => d.Id).ToList();
+            var onCards = await db.Transactions.AsNoTracking()
+                .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && t.Kind == Core.Transactions.TransactionKind.CardPayment && t.AmountCents < 0)
+                .OrderByDescending(t => t.Date).Take(500)
+                .Select(t => new { t.Id, t.Date, t.Merchant, Cents = -t.AmountCents, t.AccountId, Debt = (Guid?)null }).ToListAsync(ct);
+            var toward = await db.Transactions.AsNoTracking()
+                .Where(t => t.HouseholdId == householdId && t.DebtAccountId != null && unlinked.Contains(t.DebtAccountId.Value) && t.AmountCents > 0
+                            && t.Category != null && t.Category.Type == Core.Budgeting.CategoryType.DebtPayment)
+                .OrderByDescending(t => t.Date).Take(500)
+                .Select(t => new { t.Id, t.Date, t.Merchant, Cents = t.AmountCents, t.AccountId, Debt = t.DebtAccountId }).ToListAsync(ct);
+            string? Name(Guid? id) => debts.FirstOrDefault(d => d.Id == id) is { } d ? (d.Mask is null ? d.Name : $"{d.Name} ••{d.Mask}") : null;
+            return onCards.Concat(toward)
+                .Select(t =>
+                {
+                    var debt = t.Debt ?? (byAccount.TryGetValue(t.AccountId, out var id) ? id : null);
+                    return new DebtPaymentDto(t.Id, t.Date, t.Merchant, t.Cents, debt, Name(debt));
+                })
+                .OrderByDescending(p => p.Date).ThenBy(p => p.Merchant).Take(500).ToList();
         });
 
         // A loan or other debt entered by hand (cards are added automatically from their accounts).

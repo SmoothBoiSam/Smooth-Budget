@@ -735,8 +735,12 @@ export interface InterestHistory {
   lastYearCents: number
 }
 
+/** A payment a card or loan received (DECISIONS.md 240). */
+export type DebtPayment = InterestHistory['charges'][number]
+
 export const debtApi = {
   interest: () => request<InterestHistory>('GET', '/debt/interest'),
+  payments: () => request<DebtPayment[]>('GET', '/debt/payments'),
   summary: (opts: { extraCents?: number; strategy?: DebtStrategy } = {}) => {
     const q = new URLSearchParams()
     if (opts.extraCents !== undefined) q.set('extra', String(opts.extraCents))

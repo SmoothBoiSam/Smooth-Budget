@@ -307,3 +307,15 @@ export function Caret({ open }: { open: boolean }) {
     </svg>
   )
 }
+
+/** The button at the bottom of a chart card that opens its own page (DECISIONS.md 237, 240, 241). */
+export function CardLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} className="mt-4 flex items-center justify-between rounded-2xl neu-sm px-4 py-2.5 text-sm font-semibold">
+      {children}
+      <span className="text-ink-soft" aria-hidden>
+        ›
+      </span>
+    </a>
+  )
+}

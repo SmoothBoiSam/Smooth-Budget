@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ask } from './confirm'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
-import { useRemembered } from './offline'
 import { InterestCard } from './DebtInterest'
-import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
+import { CardLink, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -153,7 +152,6 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
       {plan && !plan.neverPaysOff && plan.chart.length > 1 && (
         <PayoffChart past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))} points={plan.chart} />
       )}
-      {s.history && s.history.length > 0 && <PastPayments history={s.history} />}
       <InterestCard />
 
       {plan && (
@@ -381,45 +379,6 @@ function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
  * Total balance over time under the plan: one series (the title names it), a 2px line over a light fill,
  * recessive gridlines, and a crosshair tooltip on hover or touch.
  */
-/** The last year of payments, newest first (DECISIONS.md 141). */
-function PastPayments({ history }: { history: { month: string; owedCents: number; paidCents: number }[] }) {
-  const [open, setOpen] = useRemembered('debt.past', false)
-  const paid = history.reduce((sum, h) => sum + h.paidCents, 0)
-  return (
-    <section className="mt-4 rounded-3xl neu p-4">
-      <h2>
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-baseline justify-between gap-3 text-left">
-          <span className="flex items-center gap-1 text-sm font-semibold">
-            <Caret open={open} />
-            Past payments
-          </span>
-          <span className="text-xs tabular-nums text-ink-soft">{formatCents(paid)} paid in {history.length} months</span>
-        </button>
-      </h2>
-      {open && (
-        <table className="mt-2 w-full text-sm tabular-nums">
-          <thead>
-            <tr className="text-xs text-ink-soft">
-              <th className="py-1 text-left font-normal">Month</th>
-              <th className="py-1 text-right font-normal">Paid</th>
-              <th className="py-1 text-right font-normal">Owed at the end</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink/[0.07]">
-            {[...history].reverse().map((h) => (
-              <tr key={h.month}>
-                <td className="py-1.5">{formatMonth(h.month)}</td>
-                <td className="py-1.5 text-right">{formatCents(h.paidCents)}</td>
-                <td className="py-1.5 text-right">{formatCents(h.owedCents)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
-  )
-}
-
 /** What you owed over the last year (solid) running into your plan from here (dashed). */
 function PayoffChart({ past, points: plan }: { past: { month: string; balanceCents: number }[]; points: { month: string; balanceCents: number }[] }) {
   const [hover, setHover] = useState<number | null>(null)
@@ -451,7 +410,7 @@ function PayoffChart({ past, points: plan }: { past: { month: string; balanceCen
   return (
     <figure className="mt-4 rounded-3xl neu p-4">
       <figcaption className="flex items-baseline justify-between gap-3">
-        <span className="text-sm font-semibold">{past.length > 0 ? 'Owed: the last year, then your plan' : 'Total owed under your plan'}</span>
+        <span className="text-sm font-semibold">Owed</span>
         <span className="text-xs tabular-nums text-ink-soft" aria-live="polite">
           {h ? `${formatMonth(h.month)}: ${formatCents(h.balanceCents)}` : ''}
         </span>
@@ -494,21 +453,8 @@ function PayoffChart({ past, points: plan }: { past: { month: string; balanceCen
           </g>
         )}
       </svg>
-      <details className="mt-1 text-xs text-ink-soft">
-        <summary className="cursor-pointer">Month by month</summary>
-        <table className="mt-2 w-full tabular-nums">
-          <tbody>
-            {points
-              .filter((_, i) => i % 3 === 0 || i === points.length - 1)
-              .map((p) => (
-                <tr key={p.month}>
-                  <td className="py-0.5">{formatMonth(p.month)}</td>
-                  <td className="py-0.5 text-right">{formatCents(p.balanceCents)}</td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </details>
+      {/* Past payments on their own page, like interest's (DECISIONS.md 240). */}
+      <CardLink href="#/debt/payments">Past payments</CardLink>
     </figure>
   )
 }

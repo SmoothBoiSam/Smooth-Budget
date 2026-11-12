@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ApiError, debtApi, type InterestHistory } from './api'
-import { ErrorNotice, Loading, Page, PageHeader } from './ui'
+import { ApiError, debtApi, type DebtPayment, type InterestHistory } from './api'
+import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
 import { formatCents, formatDay, titleCase } from './format'
 
 const shortMonth = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' })
@@ -81,35 +81,51 @@ export function InterestCard() {
         ))}
       </ul>
 
-      <a href="#/debt/interest" className="mt-4 flex items-center justify-between rounded-2xl neu-sm px-4 py-2.5 text-sm font-semibold">
-        Past interest charges
-        <span className="text-ink-soft" aria-hidden>
-          ›
-        </span>
-      </a>
+      <CardLink href="#/debt/interest">Past interest charges</CardLink>
     </section>
   )
 }
 
 /** Debt → Past interest charges (DECISIONS.md 237): every interest charge, newest first, by month, for one card or all. */
 export default function InterestScreen({ onSignedOut }: { onSignedOut: () => void }) {
-  const [h, setH] = useState<InterestHistory | null>(null)
+  const fetch = useCallback(() => debtApi.interest().then((h) => h.charges), [])
+  return <DebtMoneyList title="Interest charges" empty="No interest charges yet." fetch={fetch} onSignedOut={onSignedOut} />
+}
+
+/** Debt → Past payments (DECISIONS.md 240): the same layout, for payments to your cards and loans. */
+export function PaymentsScreen({ onSignedOut }: { onSignedOut: () => void }) {
+  const fetch = useCallback(() => debtApi.payments(), [])
+  return <DebtMoneyList title="Past payments" empty="No payments seen yet." fetch={fetch} onSignedOut={onSignedOut} />
+}
+
+/** A list of money tied to cards and loans, newest first, by month with each month's total, for one card or all. */
+function DebtMoneyList({
+  title,
+  empty,
+  fetch,
+  onSignedOut,
+}: {
+  title: string
+  empty: string
+  fetch: () => Promise<DebtPayment[]>
+  onSignedOut: () => void
+}) {
+  const [h, setH] = useState<{ charges: DebtPayment[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [debt, setDebt] = useState<string>('all')
 
   const load = useCallback(
     () =>
-      debtApi
-        .interest()
+      fetch()
         .then((x) => {
-          setH(x)
+          setH({ charges: x })
           setError(null)
         })
         .catch((e) => {
           if (e instanceof ApiError && e.status === 401) return onSignedOut()
           setError(e instanceof Error ? e.message : 'Something went wrong.')
         }),
-    [onSignedOut],
+    [fetch, onSignedOut],
   )
   useEffect(() => {
     void load()
@@ -137,7 +153,7 @@ export default function InterestScreen({ onSignedOut }: { onSignedOut: () => voi
 
   return (
     <Page>
-      <PageHeader title="Interest charges" back={{ href: '#/debt', label: 'Debt' }} />
+      <PageHeader title={title} back={{ href: '#/debt', label: 'Debt' }} />
       {!h ? (
         error ? (
           <ErrorNotice message={error} onRetry={() => void load()} />
@@ -163,7 +179,7 @@ export default function InterestScreen({ onSignedOut }: { onSignedOut: () => voi
             </div>
           )}
           {byMonth.length === 0 ? (
-            <p className="mt-4 rounded-3xl neu px-5 py-4 text-sm text-ink-soft">No interest charges yet.</p>
+            <p className="mt-4 rounded-3xl neu px-5 py-4 text-sm text-ink-soft">{empty}</p>
           ) : (
             byMonth.map((g) => (
               <section key={g.month} className="mt-5">

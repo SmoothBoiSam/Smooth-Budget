@@ -3,7 +3,7 @@ import { ApiError, api, budgetApi, needsLook, payBadge, paydayApi, recurringApi,
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
-import InterestScreen from './DebtInterest'
+import InterestScreen, { PaymentsScreen } from './DebtInterest'
 import SavingsHistoryScreen from './SavingsHistory'
 import HomeScreen from './HomeScreen'
 import LoginScreen from './LoginScreen'
@@ -48,7 +48,7 @@ function currentRoute(): Route {
   if (hash === 'tasks') return 'tasks'
   if (hash === 'tasks/payday') return 'paytasks'
   if (hash.startsWith('tasks/')) return 'review' // tasks/transactions, tasks/bills[/<key>]
-  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'debt/interest' ? 'debtinterest' : hash === 'savings' ? 'savings' : hash === 'savings/history' ? 'savingshistory' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
+  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'debt/interest' ? 'debtinterest' : hash === 'debt/payments' ? 'debtpayments' : hash === 'savings' ? 'savings' : hash === 'savings/history' ? 'savingshistory' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {
@@ -170,6 +170,7 @@ export default function App() {
       {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} billsCount={billsCount} onBillsCount={setBillsCount} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'debtinterest' && <InterestScreen onSignedOut={signedOut} />}
+      {route === 'debtpayments' && <PaymentsScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
       {route === 'savingshistory' && <SavingsHistoryScreen onSignedOut={signedOut} />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
