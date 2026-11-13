@@ -51,6 +51,8 @@ public class TransferDetectionService(AppDbContext db)
                 _ => null,
             };
             t.CategorySource = t.CategoryId is null ? CategorySource.None : CategorySource.Transfer;
+            // Nothing is left from the guess it had as a purchase (DECISIONS.md 252): a transfer isn't waiting for review.
+            (t.NeedsReview, t.CategoryUnsure, t.SuggestedCategoryId, t.CategoryReason) = (false, false, null, null);
         }
         await db.SaveChangesAsync(ct);
     }

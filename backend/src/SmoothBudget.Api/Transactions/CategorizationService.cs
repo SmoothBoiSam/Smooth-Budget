@@ -50,6 +50,12 @@ public sealed class CategorizationContext(
                 t.Kind = TransactionKind.Income;
             return;
         }
+        // Settled without being your own pick (DECISIONS.md 252): a rule you made with "always" settled what was already
+        // here (224), and card interest is filed for you (159). Re-running leaves those as they are: interest stays on its
+        // line, and the rest only come back to Review if the answer changes.
+        var settled = !t.NeedsReview && t.CategoryId is not null && !t.IsPartnerTransfer;
+        if (settled && CardInterest.IsCharge(t.Merchant, t.Description, t.BankCategory, t.AmountCents))
+            return;
         t.SuggestedCategoryId = null;
         var labeling = friend?.LabelsStartAfter is { } start && t.Date > start; // before that, as it always was
 
@@ -83,14 +89,15 @@ public sealed class CategorizationContext(
         // Re-running only improves things: with no opinion now, keep a category that still exists.
         if (guess.CategoryId is null && t.CategoryId is { } current && CategoryIdsByName.Values.Contains(current))
         {
-            t.NeedsReview = true; // still automatic, so still waiting for the user
+            if (!settled) t.NeedsReview = true; // still automatic, so still waiting for the user
             return;
         }
+        var same = settled && guess.CategoryId == t.CategoryId;
         t.CategoryId = guess.CategoryId;
         t.CategorySource = guess.Source;
         // Every automatic category waits for the user to confirm it (DECISIONS.md 80); "unsure" only sorts the review list.
-        t.NeedsReview = guess.CategoryId is not null;
-        t.CategoryUnsure = guess.CategoryId is not null && guess.Unsure;
+        t.NeedsReview = guess.CategoryId is not null && !same;
+        t.CategoryUnsure = guess.CategoryId is not null && guess.Unsure && !same;
         t.CategoryReason = Clip(guess.Reason);
     }
 
@@ -121,7 +128,9 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
 {
     public async Task<CategorizationContext> ContextAsync(Guid householdId, CancellationToken ct)
     {
-        var rules = await db.CategoryRules.Where(r => r.HouseholdId == householdId)
+        // A rule for a category you've hidden is ignored (DECISIONS.md 252): it would file new charges where they count
+        // nowhere. It's kept, so it works again if you bring the category back.
+        var rules = await db.CategoryRules.Where(r => r.HouseholdId == householdId && !r.Category.IsHidden)
             .Select(r => new MerchantRule(r.CategoryId, r.Pattern, r.CreatedUtc)).ToListAsync(ct);
         var shown = await db.Categories.Where(c => c.HouseholdId == householdId && !c.IsHidden)
             .Select(c => new { c.Name, c.Id, c.MergedNames }).ToListAsync(ct);

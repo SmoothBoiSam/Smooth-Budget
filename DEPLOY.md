@@ -86,6 +86,16 @@ git push
 
 CI runs the tests, and Render rebuilds and redeploys in a few minutes. Database changes (migrations) apply automatically when the new version starts. Your phone picks up the new version the next time you open the app.
 
+## Checking your hosted data
+
+To look over the hosted data without touching it:
+
+```powershell
+pwsh scripts/pull-data.ps1
+```
+
+It asks for the External Database URL (Render → your database → Connect → External), copies the hosted database into a separate local database called `smoothbudget_check`, blanks the sign-ins and bank tokens in that copy, and runs `scripts/check-data.sql` on it. The results are printed and saved to `private/pull/check.txt`. The hosted database is only read, and your local development database is left alone.
+
 ## Good to know
 
 - **Backups:** check your Render database plan's backup and recovery options, and turn on whatever it offers.

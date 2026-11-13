@@ -174,6 +174,7 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/partner/early/{early.Id}", null)).StatusCode);
         var b = await Budget(c);
         Assert.Equal(("received", 0L), (Assert.Single(b.Contributions!).State, b.PartnerShortfallCents));
+        Assert.Equal(800_00, b.PartnerReceivedCents); // "in so far" agrees, though it's dated before the month (DECISIONS.md 252)
         var after = (await c.GetFromJsonAsync<PartnerOverviewDto>("/api/partner", Json))!;
         Assert.Empty(after.EarlyCandidates);
         Assert.Equal(early.Id, Assert.Single(after.CountedEarly).Id);

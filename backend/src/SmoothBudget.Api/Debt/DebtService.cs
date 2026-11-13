@@ -17,7 +17,9 @@ public record DebtDto(
     // The balance comes from the bank (a linked card), so it isn't editable here.
     bool BalanceFromBank = false,
     // Interest charged on it this year, and the latest charge (DECISIONS.md 232).
-    long InterestChargedThisYearCents = 0, long? LastInterestCents = null, DateOnly? LastInterestDate = null);
+    long InterestChargedThisYearCents = 0, long? LastInterestCents = null, DateOnly? LastInterestDate = null,
+    // A card that isn't bank-linked (DECISIONS.md 253): the balance you typed and when; what's owed follows from there.
+    long? TypedBalanceCents = null, DateOnly? TypedOn = null);
 
 public record ChartPoint(DateOnly Month, long BalanceCents);
 
@@ -75,8 +77,35 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
             if (card.CreditLimitCents is { } limit)
                 d.CreditLimitCents = limit;
         }
+        await FollowTypedBalancesAsync(householdId, debts, ct);
         await db.SaveChangesAsync(ct);
         return debts.Where(d => d.AccountId is null || d.Account!.IncludedInBudget).ToList();
+    }
+
+    /// <summary>
+    /// A card that isn't bank-linked follows what the app can see (DECISIONS.md 253): the balance you typed, plus what was
+    /// charged to it on later days (purchases, fees and interest, less refunds, from its uploads), less what it was paid
+    /// on later days. A payment counts as it leaves checking, before the card's next upload shows it
+    /// (<see cref="CardPayments"/>, which never counts both sides). Typing the balance again starts over from that day.
+    /// </summary>
+    private async Task FollowTypedBalancesAsync(Guid householdId, List<DebtAccount> debts, CancellationToken ct)
+    {
+        var typed = debts.Where(d => d.Account is { PlaidAccountId: null } && d.TypedOn is not null && d.TypedBalanceCents is not null).ToList();
+        if (typed.Count == 0) return;
+        var from = typed.Min(d => d.TypedOn!.Value).AddDays(1);
+        var cardIds = typed.Select(d => d.AccountId!.Value).ToList();
+        var charges = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && t.Date >= from && !t.IsTransfer
+                        && t.Kind != Core.Transactions.TransactionKind.CardPayment)
+            .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
+        var payments = await CardPayments.LoadAsync(db, householdId, from, null, ct);
+        foreach (var d in typed)
+        {
+            var on = d.TypedOn!.Value;
+            d.BalanceCents = Math.Max(0, d.TypedBalanceCents!.Value
+                + charges.Where(t => t.AccountId == d.AccountId && t.Date > on).Sum(t => t.AmountCents)
+                - payments.Where(p => p.CardAccountId == d.AccountId && p.Date > on).Sum(p => p.Cents));
+        }
     }
 
     public async Task<DebtSummaryDto> SummaryAsync(Guid householdId, long? extraOverride, DebtStrategy? strategyOverride, CancellationToken ct)
@@ -127,7 +156,8 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
                     !d.IsHidden && d.BalanceCents > 0 && (d.AprBps is null || d.MinimumPaymentCents is null),
                     outcome is null ? null : plan!.NeverPaysOff && outcome.PaidOffInMonth is null ? null : MonthOf(outcome.PaidOffInMonth),
                     outcome?.InterestCents ?? 0, d.Account?.PlaidAccountId is not null,
-                    interestByDebt.TryGetValue(d.Id, out var i) ? Math.Max(0, i.Year) : 0, i.Last?.AmountCents, i.Last?.Date);
+                    interestByDebt.TryGetValue(d.Id, out var i) ? Math.Max(0, i.Year) : 0, i.Last?.AmountCents, i.Last?.Date,
+                    d.Account is { PlaidAccountId: null } ? d.TypedBalanceCents : null, d.Account is { PlaidAccountId: null } ? d.TypedOn : null);
             }).ToList();
 
         DebtPlanDto? planDto = plan is null ? null : new DebtPlanDto(

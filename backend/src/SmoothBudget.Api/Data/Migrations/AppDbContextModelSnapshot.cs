@@ -519,6 +519,12 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<long>("StartingBalanceCents")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("TypedBalanceCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly?>("TypedOn")
+                        .HasColumnType("date");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId")

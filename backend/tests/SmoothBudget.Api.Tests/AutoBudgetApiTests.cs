@@ -144,4 +144,43 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         await c.PutAsJsonAsync($"/api/budget/categories/{eating}", new UpdateCategoryRequest("Eating out", CategoryType.Variable, 300_00, CategoryPriority.Low, false, "permanent"), Json);
         Assert.False((await Summary(c)).Auto!.On);
     }
+
+    [Fact]
+    public async Task Other_income_that_lands_adds_to_the_months_money_and_a_paycheck_does_not()
+    {
+        var (c, rent, _, _) = await NewHouseholdAsync();
+        foreach (var stub in PayFixtures.Stubs)
+            (await c.PostAsJsonAsync("/api/payday/paystubs/confirm", stub, Json)).EnsureSuccessStatusCode();
+        await Upload(c, "/api/payday/schedule", Encoding.UTF8.GetBytes(PayFixtures.Text), "schedule.txt", "text/plain", confirm: true);
+        var before = await Summary(c);
+        var plan = (await c.GetFromJsonAsync<GeneratorDto>("/api/budget/generator", Json))!;
+        var firstCheck = (long)(decimal.Parse(System.Text.RegularExpressions.Regex.Match(plan.IncomeExplanation, @"Feb 8 \$([\d,]+\.\d\d)").Groups[1].Value,
+            System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture) * 100);
+
+        async Task DepositAsync(DateOnly date, long cents, string merchant)
+        {
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var household = db.Categories.Single(x => x.Id == rent).HouseholdId;
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(), HouseholdId = household, AccountId = db.Accounts.Single(a => a.HouseholdId == household).Id, Date = date, AmountCents = -cents,
+                    Merchant = merchant, Description = merchant, Kind = TransactionKind.Income, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+            await c.PutAsJsonAsync("/api/settings/budget", new BudgetSettingsDto(SweepTarget.Debt, 50, AutoBudget: true), Json); // any save: the budget refreshes
+        }
+
+        // The Feb 8 paycheck lands, a few dollars off its estimate: it's that check, not extra money.
+        await DepositAsync(new DateOnly(2027, 2, 8), firstCheck - 12_00, "EMPLOYER PAYROLL");
+        Assert.Equal(before.IncomeExpectedCents, (await Summary(c)).IncomeExpectedCents);
+
+        // A cash-out from a payment app the next day isn't a paycheck (DECISIONS.md 252): the month has that much more.
+        await DepositAsync(new DateOnly(2027, 2, 9), 37_50, "PAYMENT APP CASHOUT");
+        var after = await Summary(c);
+        Assert.Equal(before.IncomeExpectedCents + 37_50, after.IncomeExpectedCents);
+        Assert.Contains("$37.50 of other income", (await c.GetFromJsonAsync<GeneratorDto>("/api/budget/generator", Json))!.IncomeExplanation);
+    }
 }

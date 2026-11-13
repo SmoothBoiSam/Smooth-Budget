@@ -366,4 +366,66 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         await c.PostAsJsonAsync("/api/payday/paystubs/confirm", PayFixtures.Stubs[3], Json);
         Assert.False((await c.GetFromJsonAsync<ModelDto>("/api/payday/model", Json))!.Edited);
     }
+
+    [Fact]
+    public async Task A_check_keeps_money_for_the_next_one_when_that_one_cannot_cover_its_bills()
+    {
+        // Feb 24, 2027: living on the Feb 22 check; the next is Mar 8, and rent is due Mar 10.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var me = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!;
+        var nextNet = (await Payday(c)).Checks[1].NetCents;
+        var rent = nextNet + 300_00; // $300 more than the Mar 8 check
+        Guid checkingId;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var h = me.HouseholdId;
+            var checking = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = "test-chk-hold", CurrentBalanceCents = 2_000_00, CreatedUtc = DateTime.UtcNow };
+            checkingId = checking.Id;
+            var home = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Rent", Type = SmoothBudget.Core.Budgeting.CategoryType.FixedBill, MonthlyLimitCents = rent };
+            db.AddRange(checking, home);
+            foreach (var d in new[] { new DateOnly(2026, 12, 10), new DateOnly(2027, 1, 10), new DateOnly(2027, 2, 10) })
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(), HouseholdId = h, AccountId = checking.Id, Date = d, AmountCents = rent, Merchant = "TEST LANDLORD", Description = "TEST",
+                    Kind = TransactionKind.Purchase, CategoryId = home.Id, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+                });
+            await db.SaveChangesAsync();
+        }
+        async Task BalanceAsync(long cents)
+        {
+            using var scope = app.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Accounts.SingleAsync(a => a.Id == checkingId)).CurrentBalanceCents = cents;
+            await db.SaveChangesAsync();
+        }
+
+        var p = await Payday(c);
+        var (now, next) = (p.Checks[0], p.Checks[1]);
+        Assert.Equal((new DateOnly(2027, 2, 22), new DateOnly(2027, 3, 8)), (now.PayDate, next.PayDate));
+        Assert.True(now.NetCents > 300_00, "the test needs a Feb 22 check with room to keep $300");
+
+        // DECISIONS.md 253: the Feb 22 check keeps the $300 the Mar 8 check lacks, and that check isn't short any more.
+        var hold = now.Plan!.Items.Single(i => i.Kind == "hold");
+        Assert.Equal(("bills after Mar 8", 300_00L, "Test Checking ••1111", "hold:2027-03-08"), (hold.Label, hold.Cents, hold.Destination, hold.Key));
+        Assert.Contains("Leave $300.00 of this check in the account", hold.Why);
+        Assert.Equal((true, true, "Test Checking has $2,000.00, enough for this."), (hold.Done, hold.Auto, hold.Status));
+        Assert.Equal((0L, 300_00L, new DateOnly(2027, 2, 22)), (next.Plan!.ShortCents, next.Plan.HeldEarlierCents, next.Plan.HeldOn!.Value));
+        Assert.DoesNotContain(next.Plan.Items, i => i.Kind == "hold" && i.Cents == 0);
+
+        // Spent down: the task is open again, and says how far short the account is.
+        await BalanceAsync(100_00);
+        hold = (await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "hold");
+        Assert.Equal((false, "Test Checking has $100.00: $200.00 short of this."), (hold.Done, hold.Status));
+
+        // On Mar 9 you're on the Mar 8 check. The money you kept is in the account, so it isn't short; with the account
+        // empty, it's short what the check itself can't cover.
+        app.Clock.SetUtcNow(new DateTimeOffset(2027, 3, 9, 19, 0, 0, TimeSpan.Zero));
+        await BalanceAsync(rent + 5_00);
+        var onIt = (await Payday(c)).Checks[0];
+        Assert.Equal((new DateOnly(2027, 3, 8), true, 0L), (onIt.PayDate, onIt.IsCurrent, onIt.Plan!.ShortCents));
+        await BalanceAsync(0);
+        Assert.Equal(300_00, (await Payday(c)).Checks[0].Plan!.ShortCents);
+    }
 }

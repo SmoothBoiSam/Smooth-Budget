@@ -107,7 +107,7 @@ public static class DebtEndpoints
             return Results.Ok(new { d.Id });
         });
 
-        g.MapPut("/{id:guid}", async (Guid id, DebtRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        g.MapPut("/{id:guid}", async (Guid id, DebtRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var d = await db.DebtAccounts.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == ctx.User.HouseholdId(), ct);
             if (d is null) return Results.NotFound();
@@ -124,6 +124,13 @@ public static class DebtEndpoints
             {
                 if (d.StartingBalanceCents == 0 && req.StartingBalanceCents is null)
                     d.StartingBalanceCents = req.BalanceCents!.Value; // first time you enter it: that's where you started
+                // A card that isn't bank-linked follows its payments and charges from the day you type its balance
+                // (DECISIONS.md 253). Saving the form without changing the number doesn't start that over.
+                if (d.AccountId is not null && (d.TypedOn is null || d.BalanceCents != req.BalanceCents!.Value))
+                {
+                    var zone = await db.Households.Where(h => h.Id == d.HouseholdId).Select(h => h.TimeZoneId).SingleAsync(ct);
+                    (d.TypedBalanceCents, d.TypedOn) = (req.BalanceCents!.Value, Home.HomeSummaryService.TodayIn(zone, clock));
+                }
                 d.BalanceCents = req.BalanceCents!.Value; // a bank-linked card's balance comes from its account
             }
             if (req.CreditLimitCents is not null || d.AccountId is null)

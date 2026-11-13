@@ -65,12 +65,14 @@ public static class PayForecast
 /// <param name="Account">Where it's charged: a checking bill needs the cash left there.</param>
 /// <param name="Cents">The whole bill: what has to be in the account when it's charged.</param>
 /// <param name="FromOthersCents">The part someone else sends into that account first (your partner's fixed contribution toward rent).</param>
-public record PlanBill(string Key, string Name, long Cents, DateOnly Due, string Account, string? Note = null, long FromOthersCents = 0);
+/// <param name="ArrivedCents">How much of that part has already arrived, so it's sitting in the account now (DECISIONS.md 253).</param>
+public record PlanBill(string Key, string Name, long Cents, DateOnly Due, string Account, string? Note = null, long FromOthersCents = 0, long ArrivedCents = 0);
 /// <param name="FromEarlierCents">The part paid from money already in the account rather than from this check: what you
 /// charged to a card before payday, paid with the spending money you didn't spend from checking (DECISIONS.md 179).</param>
 public record PlanTransfer(string Key, string Label, long Cents, string Destination, string Why, long FromEarlierCents = 0);
 
-/// <param name="Kind">"keep" (bills to leave in an account), "debt", "cardspend" (pay off what you charged), "sweep" or "savings".</param>
+/// <param name="Kind">"keep" (bills to leave in an account), "hold" (money to leave there for the next check's bills,
+/// DECISIONS.md 253), "debt", "cardspend" (pay off what you charged), "sweep" or "savings".</param>
 /// <param name="Bills">For "keep": the bills it covers.</param>
 /// <param name="FromOthersCents">The part that doesn't come out of this check: for "keep", what arrives from someone else;
 /// for "cardspend", what you charged before payday, paid from spending money already in checking.</param>

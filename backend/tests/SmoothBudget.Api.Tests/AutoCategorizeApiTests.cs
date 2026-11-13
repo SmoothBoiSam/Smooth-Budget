@@ -739,4 +739,57 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal((0L, 0L), (after.IncomeReceivedCents, after.PartnerReceivedCents)); // counted once, in Groceries
         Assert.Equal(40_00 + 30_00 - 25_00 - 10_00, after.Groups.SelectMany(g => g.Categories).Single(x => x.Name == "Groceries").SpentCents);
     }
+
+    [Fact]
+    public async Task What_a_rule_settled_stays_settled_when_everything_is_filed_again()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,WAL-MART #1234,Shopping,Sale,-60.00,", "11/12/2026,11/13/2026,WAL-MART #1234,Shopping,Sale,-30.00,");
+        var groceries = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Groceries").Id;
+        var waiting = await Review(c);
+        await c.PatchAsJsonAsync($"/api/transactions/{waiting[0].Id}", new UpdateTransactionRequest(groceries, false, "WAL-MART"), Json);
+        Assert.Empty(await Review(c));
+
+        // Adding a category files everything again (DECISIONS.md 252): the purchase your rule settled doesn't come back.
+        (await c.PostAsJsonAsync("/api/budget/categories", new SmoothBudget.Api.Budget.CategoryRequest("Garden", CategoryType.Variable, 0), Json)).EnsureSuccessStatusCode();
+        Assert.Empty(await Review(c));
+        Assert.Equal(2, (await All(c)).Count(t => t.CategoryName == "Groceries"));
+
+        // A rule that now gives a different answer does bring it back: you haven't seen that one.
+        var shopping = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Shopping").Id;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.CategoryRules.Single(r => r.Pattern == "WAL-MART" && r.CategoryId == groceries).CategoryId = shopping;
+            await db.SaveChangesAsync();
+        }
+        await c.PostAsync("/api/transactions/auto-categorize", null);
+        var back = Assert.Single(await Review(c)); // the other one is yours (you chose it), so it stays
+        Assert.Equal(("Shopping", "Rule"), (back.CategoryName, back.CategorySource));
+    }
+
+    [Fact]
+    public async Task A_rule_for_a_hidden_category_is_ignored()
+    {
+        var c = await NewUserAsync();
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,OLD CLINIC PLAN,Health & Wellness,Sale,-44.00,");
+        var plan = (await (await c.PostAsJsonAsync("/api/budget/categories", new SmoothBudget.Api.Budget.CategoryRequest("Clinic plan", CategoryType.FixedBill, 44_00), Json))
+            .Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>(Json))!["id"]!.GetValue<Guid>();
+        var first = (await All(c)).Single(t => t.Merchant == "OLD CLINIC PLAN");
+        await c.PatchAsJsonAsync($"/api/transactions/{first.Id}", new UpdateTransactionRequest(plan, false, "OLD CLINIC PLAN"), Json);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Categories.Single(x => x.Id == plan).IsHidden = true; // the bill was canceled and its line hidden; the rule is still there
+            await db.SaveChangesAsync();
+        }
+
+        // DECISIONS.md 252: the next charge isn't filed under the hidden line, where it would count nowhere.
+        await ImportAsync(c, card, ChaseCard, "11/14/2026,11/15/2026,OLD CLINIC PLAN,Health & Wellness,Sale,-44.00,");
+        var next = (await All(c)).Single(t => t.Merchant == "OLD CLINIC PLAN" && t.Date == new DateOnly(2026, 11, 14));
+        Assert.NotEqual("Clinic plan", next.CategoryName);
+        Assert.NotEqual("Rule", next.CategorySource);
+    }
 }

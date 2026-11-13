@@ -151,6 +151,12 @@ function TaskCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, ski
       {plan.shortCents > 0 && (
         <p className="mt-2 rounded-lg neu-inset px-3 py-2 text-xs text-danger">This check is {formatCents(plan.shortCents)} short of everything planned for it.</p>
       )}
+      {plan.heldEarlierCents > 0 && plan.heldOn && (
+        <p className="mt-2 rounded-lg neu-inset px-3 py-2 text-xs text-ink-soft">
+          This check doesn’t cover everything planned for it. {formatCents(plan.heldEarlierCents)} comes from what your {formatDay(plan.heldOn)} check keeps
+          for it.
+        </p>
+      )}
       {/* A later check's tasks open on its payday (DECISIONS.md 221): the money isn't there yet. */}
       {!c.isCurrent && <p className="mt-2 text-xs text-ink-soft">You can check these off on payday, {weekday(c.payDate)}.</p>}
       <ul className="mt-2 space-y-1">
@@ -257,6 +263,9 @@ function planText(i: PlanItem) {
     }
     case 'keep':
       return `Keep ${amount} in ${i.destination} for ${i.label}`
+    case 'hold':
+      // On top of the bills above: the next check won't cover everything planned for it.
+      return `Keep ${amount} more in ${i.destination} for ${i.label}`
     case 'cardspend':
       // What you charged to a card: paid from the spending money left in checking, not from this check.
       return `Pay ${amount} to ${i.destination} for what you charged${i.label === 'Charged so far' ? ' so far' : ''}`

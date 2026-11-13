@@ -184,4 +184,60 @@ public class DebtApiTests(TestApp app) : IClassFixture<TestApp>
         var (debt, _) = await scope.ServiceProvider.GetRequiredService<BudgetMonthService>().SweepDestinationsAsync(household, CancellationToken.None);
         Assert.Equal("High card", debt);
     }
+
+    [Fact]
+    public async Task A_card_that_is_not_bank_linked_follows_its_payments_and_charges_from_the_day_you_type_its_balance()
+    {
+        var (c, household) = await NewUserAsync(); // Nov 20
+        await c.PostAsJsonAsync("/api/accounts", new { name = "Sample Rewards", type = "CreditCard", mask = "4321" }, Json);
+        await c.PostAsJsonAsync("/api/accounts", new { name = "Test Checking", type = "Checking", mask = "1111" }, Json);
+        var card = (await Summary(c)).Debts.Single();
+        await Put(c, card, 5_000_00, 1800, 150_00);
+        card = (await Summary(c)).Debts.Single();
+        Assert.Equal((5_000_00L, 5_000_00L, new DateOnly(2026, 11, 20)), (card.BalanceCents, card.TypedBalanceCents!.Value, card.TypedOn!.Value));
+
+        Guid cardAccount;
+        async Task AddAsync(bool onCard, int day, long cents, Core.Transactions.TransactionKind kind, string merchant, bool transfer = false)
+        {
+            using var scope = app.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            var account = db.Accounts.Single(a => a.HouseholdId == household && (a.Type == Data.AccountType.CreditCard) == onCard).Id;
+            db.Transactions.Add(new Data.Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, AccountId = account, Date = new DateOnly(2026, 11, day), AmountCents = cents,
+                Merchant = merchant, Description = merchant, Kind = kind, IsTransfer = transfer, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        using (var scope = app.Services.CreateScope())
+            cardAccount = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>().Accounts.Single(a => a.HouseholdId == household && a.Type == Data.AccountType.CreditCard).Id;
+        Assert.NotEqual(Guid.Empty, cardAccount);
+
+        // Its next upload: what was charged up to the day you typed the balance is already in it; later charges add.
+        await AddAsync(true, 19, 99_00, Core.Transactions.TransactionKind.Purchase, "TEST SHOP");
+        await AddAsync(true, 20, 12_00, Core.Transactions.TransactionKind.Purchase, "TEST SHOP");
+        await AddAsync(true, 21, 40_00, Core.Transactions.TransactionKind.Purchase, "TEST SHOP");
+        await AddAsync(true, 22, 10_00, Core.Transactions.TransactionKind.Fee, "LATE FEE");
+        await AddAsync(true, 22, -5_00, Core.Transactions.TransactionKind.Refund, "TEST SHOP");
+        // A payment leaves checking: it counts right away, before the card's own upload shows it (DECISIONS.md 253).
+        await AddAsync(false, 22, 55_00, Core.Transactions.TransactionKind.CardPayment, "SAMPLE REWARDS PAYMENT", transfer: true);
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 23, 19, 0, 0, TimeSpan.Zero));
+        Assert.Equal(5_000_00 + 40_00 + 10_00 - 5_00 - 55_00, (await Summary(c)).Debts.Single().BalanceCents);
+
+        // The card's upload then shows the same payment: it isn't taken off twice.
+        await AddAsync(true, 21, -55_00, Core.Transactions.TransactionKind.CardPayment, "PAYMENT THANK YOU", transfer: true);
+        card = (await Summary(c)).Debts.Single();
+        Assert.Equal(4_990_00, card.BalanceCents);
+        Assert.Equal(10_00, (await Summary(c)).PaidDownCents);
+
+        // Saving the form without changing the number keeps following from the day you typed it.
+        await Put(c, card, 4_990_00, 1900, 150_00);
+        card = (await Summary(c)).Debts.Single();
+        Assert.Equal((4_990_00L, 5_000_00L, new DateOnly(2026, 11, 20)), (card.BalanceCents, card.TypedBalanceCents!.Value, card.TypedOn!.Value));
+
+        // Typing what the card's own app says starts over from today.
+        await Put(c, card, 4_900_00, 1900, 150_00);
+        card = (await Summary(c)).Debts.Single();
+        Assert.Equal((4_900_00L, 4_900_00L, new DateOnly(2026, 11, 23)), (card.BalanceCents, card.TypedBalanceCents!.Value, card.TypedOn!.Value));
+    }
 }

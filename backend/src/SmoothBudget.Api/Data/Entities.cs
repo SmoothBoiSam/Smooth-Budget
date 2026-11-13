@@ -361,6 +361,12 @@ public class DebtAccount
     /// <summary>What was owed when tracking started, for "paid down so far".</summary>
     public long StartingBalanceCents { get; set; }
     public DateOnly StartedOn { get; set; }
+    /// <summary>
+    /// For a card that isn't bank-linked (DECISIONS.md 253): the balance you typed and the day you typed it. What's owed
+    /// is that, plus what the card was charged and less what it was paid on later days.
+    /// </summary>
+    public long? TypedBalanceCents { get; set; }
+    public DateOnly? TypedOn { get; set; }
     /// <summary>The APR and minimum came from the bank (Plaid Liabilities) and you haven't changed them.</summary>
     public bool FromBank { get; set; }
     /// <summary>Left out of the plan (e.g. a card you pay in full every month).</summary>

@@ -561,6 +561,13 @@ function DebtSheet({
         {balanceEditable ? (
           <Field label="What you owe now">
             <Money value={balance} onChange={setBalance} label="Balance" />
+            {debt?.isCard && (
+              <p className="mt-1 text-xs text-ink-soft">
+                {debt.typedOn && debt.typedBalanceCents !== null
+                  ? `You typed ${formatCents(debt.typedBalanceCents)} on ${formatDay(debt.typedOn)}. Since then it follows your payments to this card and what its uploads show you charged. Type what the card’s own app says to correct it.`
+                  : 'This card isn’t linked to a bank. Type what its own app says you owe; after that it follows your payments to it and what its uploads show you charged.'}
+              </p>
+            )}
           </Field>
         ) : (
           <p className="mt-4 text-sm text-ink-soft">

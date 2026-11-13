@@ -148,6 +148,11 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         // With fixed contributions set up, partner money is those contributions, counted once as offsets (DECISIONS.md 97).
         var moneyIn = MonthData.MoneyIn(row, data.Contributions);
         var partnerExpected = moneyIn - row.IncomeExpectedCents;
+        // "In so far" for a friend's fixed contributions is what was matched to them (DECISIONS.md 252): one sent a day
+        // early, before the month began, counts in the month you moved it to (166), like everywhere else.
+        var partnerReceived = data.Contributions is { Count: > 0 } fixedOnes
+            ? fixedOnes.Sum(x => x.ReceivedCents)
+            : Received(Core.Transactions.TransactionKind.PartnerContribution);
         var partnerName = await Shared.SharedService.TrackedNamesAsync(db, householdId, ct); // everyone whose transfers are tracked (DECISIONS.md 211)
         var reviewCount = db.Transactions.Count(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null && !t.IsTransfer
                                                      && t.Date >= data.Month.Start && t.Date <= data.Month.End);
@@ -157,7 +162,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             lts.TotalVariableLimitCents, lts.TotalVariableSpentCents, lts.CarriedInDeficitCents,
             lts.DaysRemaining, lts.SafeToSpendPerDayCents, lts.UncategorizedSpendingCount,
             row.IncomeExpectedCents, planned, moneyIn - planned,
-            Received(Core.Transactions.TransactionKind.Income), partnerExpected, Received(Core.Transactions.TransactionKind.PartnerContribution),
+            Received(Core.Transactions.TransactionKind.Income), partnerExpected, partnerReceived,
             partnerName, reviewCount,
             groups, last, data.PendingSweeps, ContributionStatusDto.From(data.Contributions, data.Categories, await Shared.SharedService.SendersAsync(db, householdId, ct)), data.PartnerShortfallCents,
             new AutoBudgetDto(db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).Single(), row.AutoNote, row.AutoNoteUtc, row.AutoShortCents,

@@ -22,7 +22,9 @@ public record PlanItemDto(string Key, string Kind, string Label, long Cents, str
     bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null, long ShortCents = 0,
     bool Skippable = false, bool Skipped = false, IReadOnlyList<PlanItemDto>? Parts = null);
 public record PlanBillDto(string Name, long Cents, DateOnly Due);
-public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents)
+/// <param name="ShortCents">What the check still lacks for everything planned for it, after what an earlier check keeps for it.</param>
+/// <param name="HeldEarlierCents">How much of what this check needs is kept back from the check before it, paid on <paramref name="HeldOn"/> (DECISIONS.md 253).</param>
+public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents, long HeldEarlierCents = 0, DateOnly? HeldOn = null)
 {
     /// <summary>Every task as it was before merging: a merged task's parts, and the rest as they are.</summary>
     public IEnumerable<PlanItemDto> AllParts() => Items.SelectMany(i => i.Parts ?? [i]);
@@ -145,6 +147,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
 
         long total = 0;
         var parts = new List<string>();
+        var checks = new List<(DateOnly PayDate, long Cents)>();
         foreach (var p in PayCalendar.From(start, c.Rules).TakeWhile(p => p.PayDate <= end))
         {
             long cents;
@@ -155,9 +158,40 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             else if (typical is { } t) (cents, how) = (t, "a typical check: no schedule yet");
             else return null;
             total += cents;
+            checks.Add((p.PayDate, cents));
             parts.Add($"{p.PayDate:MMM d} {PayEngine.Dollars(cents)} ({how})");
         }
-        return parts.Count == 0 ? null : (total, $"Your paychecks this budget month: {string.Join(", ", parts)}.");
+        if (parts.Count == 0) return null;
+        var other = await OtherIncomeAsync(householdId, start, end, c, checks, ct);
+        return (total + other, $"Your paychecks this budget month: {string.Join(", ", parts)}."
+                               + (other > 0 ? $" Plus {PayEngine.Dollars(other)} of other income that has come in." : ""));
+    }
+
+    /// <summary>
+    /// Income that landed in checking this budget month and isn't a paycheck (a Venmo cash-out, a rebate check): it adds to
+    /// the month's money (DECISIONS.md 252). Without it, such a deposit counted as part of your paychecks arriving, so the
+    /// app expected less still to come than your next check. A deposit is a paycheck when it's linked to a pay date, comes
+    /// from whoever paid a check before (the same name on a deposit that matched a pay stub to the cent), or lands around
+    /// one of the month's pay dates for about that check's amount (the rule <see cref="MatchActualsAsync"/> uses).
+    /// </summary>
+    private async Task<long> OtherIncomeAsync(Guid householdId, DateOnly start, DateOnly end, PayContext c,
+        IReadOnlyList<(DateOnly PayDate, long Cents)> checks, CancellationToken ct)
+    {
+        var to = end < c.Today ? end : c.Today;
+        var deposits = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.Kind == TransactionKind.Income && t.AmountCents < 0 && !t.IsTransfer && !t.IsPartnerTransfer
+                        && t.Account.Type == AccountType.Checking && t.Account.IncludedInBudget && t.Date >= start.AddDays(-200) && t.Date <= to)
+            .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant }).ToListAsync(ct);
+        if (!deposits.Any(d => d.Date >= start)) return 0;
+        var linked = (await db.PayPeriodForecasts.AsNoTracking().Where(f => f.HouseholdId == householdId && f.DepositTransactionId != null)
+            .Select(f => f.DepositTransactionId!.Value).ToListAsync(ct)).ToHashSet();
+        static bool Near(DateOnly deposit, DateOnly payDate) => deposit >= payDate.AddDays(-2) && deposit <= payDate.AddDays(3);
+        var payers = deposits.Where(d => linked.Contains(d.Id) || c.Stubs.Any(s => s.Stub.NetCents == -d.AmountCents && Near(d.Date, s.Stub.PayDate)))
+            .Select(d => d.Merchant).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return deposits
+            .Where(d => d.Date >= start && !linked.Contains(d.Id) && !payers.Contains(d.Merchant)
+                        && !checks.Any(p => Near(d.Date, p.PayDate) && Math.Abs(-d.AmountCents - p.Cents) <= Math.Max(p.Cents / 2, 100_00)))
+            .Sum(d => -d.AmountCents);
     }
 
     /// <summary>The next check, for Home (no history writes).</summary>
@@ -377,14 +411,27 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && t.Date >= since && !t.IsTransfer && t.Kind != TransactionKind.CardPayment)
             .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
         DateOnly PaydayBefore(DateOnly pay) => PaydayService.PaydayBefore(pay, c.Rules);
+        // A friend's fixed contribution that has already arrived is sitting in the account, waiting for its bill
+        // (DECISIONS.md 253): by budget month, what each contribution has received.
+        var arrivedByMonth = new Dictionary<DateOnly, Dictionary<Guid, long>>();
+        if (arrangements.Count > 0)
+            foreach (var day in checks.SelectMany(x => new[] { x.Period.PayDate, PayCalendar.PeriodContaining(x.Period.End.AddDays(1), c.Rules).PayDate.AddDays(-1) }).Append(c.Today))
+            {
+                var m = c.Calendar.MonthContaining(day);
+                if (!arrivedByMonth.ContainsKey(m.Start))
+                    arrivedByMonth[m.Start] = (await months.ContributionsAsync(householdId, m, ct)).ToDictionary(s => s.ArrangementId, s => s.ReceivedCents);
+            }
+        long Arrived(Guid arrangementId, DateOnly due) =>
+            arrivedByMonth.TryGetValue(c.Calendar.MonthContaining(due).Start, out var got) && got.TryGetValue(arrangementId, out var cents) ? cents : 0;
 
-        var result = new List<PlanDto?>();
-        for (var i = 0; i < checks.Count; i++)
+        // One check's plan before anything is carried between checks. It reads nothing from the database, so the loop
+        // below can ask for the checks either side of the one it's on (DECISIONS.md 253).
+        (PaydayPlanResult Plan, long NetCents, bool Current, DateOnly Pay, DateOnly Next)? Draft(int i)
         {
             var f = checks[i];
             var pay = f.Period.PayDate;
             var landedNet = landed.TryGetValue(pay, out var l) ? l : (long?)null;
-            if (!f.HasSchedule && landedNet is null) { result.Add(null); continue; }
+            if (!f.HasSchedule && landedNet is null) return null;
             var current = pay <= c.Today;
             var next = PayCalendar.PeriodContaining(f.Period.End.AddDays(1), c.Rules).PayDate;
             var month = c.Calendar.MonthContaining(pay);
@@ -408,7 +455,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var who = $"{Shared.SharedService.JoinNames(senders) ?? "Your friend"} {(senders.Count > 1 ? "send" : "sends")}";
                 return new PlanBill($"bill:{b.Key}", b.Name, b.AmountCents, b.NextExpected, b.AccountName,
                     covered > 0 ? $"{b.Name} counts in full: {who} {PayEngine.Dollars(covered)} of it to this account, so {PayEngine.Dollars(b.AmountCents - covered)} is yours from this check." : null,
-                    covered);
+                    covered, Math.Min(covered, toward.Sum(a => Math.Min(a.AmountCents, Arrived(a.Id, b.NextExpected)))));
             }).ToList();
             var debtShare = PaydayPlan.Share(debtMonthly, inMonth.Count, index);
             var transfers = new List<PlanTransfer>();
@@ -457,7 +504,36 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             transfers.Add(new("savings", "Savings", PaydayPlan.Share(savingsMonthly, inMonth.Count, index), savingsAccount,
                 inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(savingsMonthly)} savings in your budget." : $"Your budget's {PayEngine.Dollars(savingsMonthly)} savings."));
 
-            var plan = PaydayPlan.Build(landedNet ?? f.NetCents, bills, transfers);
+            var net = landedNet ?? f.NetCents;
+            return (PaydayPlan.Build(net, bills, transfers), net, current, pay, next);
+        }
+        // What a check has to pay from its own money (not a friend's part of a bill, or card charges paid from spending money).
+        static long Own(PaydayPlanResult p) => p.Items.Sum(x => x.Cents - x.FromOthersCents);
+        var firstChecking = accounts.Where(a => a.Type == AccountType.Checking).OrderBy(a => a.CreatedUtc).Select(Label).FirstOrDefault() ?? "checking";
+
+        var result = new List<PlanDto?>();
+        for (var i = 0; i < checks.Count; i++)
+        {
+            if (Draft(i) is not { } draft) { result.Add(null); continue; }
+            var (plan, net, current, pay, next) = draft;
+
+            // Money carried between checks (DECISIONS.md 253). When the next check can't pay for everything planned for it
+            // (a small check with rent due right after it), this one keeps the difference in the account, as far as it has
+            // room after its own plan; and a check an earlier one keeps money for is short by that much less.
+            var after = i + 1 < checks.Count ? Draft(i + 1) : null;
+            var before = i > 0 ? Draft(i - 1) : null;
+            var hold = after is { } later ? Math.Min(later.Plan.ShortCents, Math.Max(0, net - Own(plan))) : 0;
+            var heldEarlier = before is { } earlier ? Math.Min(plan.ShortCents, Math.Max(0, earlier.NetCents - Own(earlier.Plan))) : 0;
+            if (hold > 0 && after is { } nextCheck)
+            {
+                var into = nextCheck.Plan.Items.FirstOrDefault(x => x.Kind == "keep")?.Destination
+                           ?? plan.Items.FirstOrDefault(x => x.Kind == "keep")?.Destination ?? firstChecking;
+                var withHold = plan.Items.ToList();
+                withHold.Insert(withHold.FindLastIndex(x => x.Kind == "keep") + 1, new PlanItem($"hold:{nextCheck.Pay:yyyy-MM-dd}", "hold", $"bills after {nextCheck.Pay:MMM d}", hold, into,
+                    $"Your {nextCheck.Pay:MMM d} check is {(landed.ContainsKey(nextCheck.Pay) ? "" : "about ")}{PayEngine.Dollars(nextCheck.NetCents)}, and {PayEngine.Dollars(Own(nextCheck.Plan))} has to come out of it for its bills, card payments and savings. Leave {PayEngine.Dollars(hold)} of this check in the account to cover the rest."
+                    + (hold < nextCheck.Plan.ShortCents ? $" That check is still {PayEngine.Dollars(nextCheck.Plan.ShortCents - hold)} short after this." : "")));
+                plan = plan with { Items = withHold };
+            }
 
             // What happened since payday, for the check you're on now.
             var moves = current
@@ -525,6 +601,22 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                         return x.Cents <= 0 ? (true, null)
                             : intoSavings >= x.Cents ? (true, $"Moved {PayEngine.Dollars(intoSavings)} to savings since payday.")
                             : (false, intoSavings > 0 ? $"Moved {PayEngine.Dollars(intoSavings)} of {PayEngine.Dollars(x.Cents)} so far." : "No transfer to savings seen since payday yet.");
+                    case "hold":
+                    {
+                        // Done when the account covers this on top of the bills it's already keeping, and any friend's
+                        // money that has arrived early for the later bills (it's in the balance, and spoken for).
+                        var holds = AccountFor(x);
+                        if (holds?.PlaidAccountId is null) return (false, "Check this balance yourself; it isn't bank-synced.");
+                        var billsHere = plan.Items.Where(y => y.Kind == "keep" && y.Destination == x.Destination).Sum(y => y.Cents);
+                        var arrivedForLater = after is { } an
+                            ? an.Plan.Items.Where(y => y.Kind == "keep" && y.Destination == x.Destination).SelectMany(y => y.Bills ?? []).Sum(b => b.ArrivedCents) : 0;
+                        var need = billsHere + x.Cents + arrivedForLater;
+                        var also = (billsHere > 0 ? " and the bills above" : "")
+                                   + (arrivedForLater > 0 ? $", with the {PayEngine.Dollars(arrivedForLater)} already sent toward the later bills" : "");
+                        return holds.CurrentBalanceCents >= need
+                            ? (true, $"{holds.Name} has {PayEngine.Dollars(holds.CurrentBalanceCents)}, enough for this{also}.")
+                            : (false, $"{holds.Name} has {PayEngine.Dollars(holds.CurrentBalanceCents)}: {PayEngine.Dollars(need - holds.CurrentBalanceCents)} short of this{also}.");
+                    }
                     case "sweep":
                         var task = sweeps.FirstOrDefault(s => x.Key == $"sweep:{s.Id}");
                         return task?.DoneUtc is not null ? (true, "Marked as sent.") : (false, null);
@@ -533,7 +625,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 }
             }
 
-            result.Add(new PlanDto(MergeSends(plan.Items.Select(x =>
+            var tasks = plan.Items.Select(x =>
             {
                 var (auto, status) = Status(x);
                 // A check's tasks open on its payday (DECISIONS.md 221): one ticked off before then (back when that was
@@ -544,7 +636,24 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var skipped = skippable && !auto && done.Any(d => d.PayDate == pay && d.Key == SkipPrefix + x.Key);
                 return new PlanItemDto(x.Key, x.Kind, x.Label, x.Cents, x.Destination, x.Why, !skipped && (manual || auto), auto, skipped ? "Skipped: these charges stay on the card." : status,
                     x.Bills?.Select(b => new PlanBillDto(b.Name, b.Cents, b.Due)).ToList(), ShortBy(x), skippable, skipped);
-            }).ToList()), plan.ShortCents));
+            }).ToList();
+
+            var shortCents = plan.ShortCents - heldEarlier;
+            // The check you're on has landed, so what matters is whether the accounts cover what's still to go out
+            // (DECISIONS.md 253): the bills being kept (less a friend's part that hasn't arrived yet) and the transfers
+            // not made yet. Money kept from the check before is in that balance. Never more than the plan says.
+            if (current && shortCents > 0)
+            {
+                var keeps = plan.Items.Where(x => x.Kind == "keep").ToList();
+                var paidFrom = (keeps.Count > 0 ? keeps.Select(AccountFor) : accounts.Where(a => a.Type == AccountType.Checking)).Distinct().ToList();
+                if (paidFrom.Count > 0 && paidFrom.All(a => a?.PlaidAccountId is not null))
+                {
+                    var stillOut = keeps.Sum(x => x.Cents - (x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents)))
+                                   + tasks.Where(t => t.Kind is "debt" or "savings" or "sweep" && !t.Done).Sum(t => t.Cents);
+                    shortCents = Math.Min(shortCents, Math.Max(0, stillOut - paidFrom.Sum(a => a!.CurrentBalanceCents)));
+                }
+            }
+            result.Add(new PlanDto(MergeSends(tasks), shortCents, heldEarlier, heldEarlier > 0 ? before!.Value.Pay : null));
         }
         return result;
     }
@@ -552,10 +661,10 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     /// <summary>
     /// Tasks that send money to the same account become one "send" task, with the others as its parts (DECISIONS.md 220):
     /// a card's payment and paying off what you charged to it, or savings and last month's leftover. It sits where its
-    /// first part was. "Keep" tasks leave money where it is, so they're never merged.
+    /// first part was. "Keep" and "hold" tasks leave money where it is, so they're never merged.
     /// </summary>
     public static IReadOnlyList<PlanItemDto> MergeSends(IReadOnlyList<PlanItemDto> items) =>
-        items.GroupBy(i => i.Kind == "keep" ? "keep\n" + i.Key : "send\n" + i.Destination).Select(g =>
+        items.GroupBy(i => i.Kind is "keep" or "hold" ? i.Kind + "\n" + i.Key : "send\n" + i.Destination).Select(g =>
         {
             var parts = g.ToList();
             if (parts.Count == 1) return parts[0];

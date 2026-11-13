@@ -699,6 +699,9 @@ export interface Debt {
   interestCents: number
   /** A bank-linked card: its balance comes from the bank. */
   balanceFromBank: boolean
+  /** A card that isn't bank-linked (DECISIONS.md 253): the balance you typed and the day; what's owed follows from there. */
+  typedBalanceCents: number | null
+  typedOn: string | null
   /** Interest charged on it this year, and the latest charge (DECISIONS.md 232). */
   interestChargedThisYearCents: number
   lastInterestCents: number | null
@@ -1068,7 +1071,8 @@ export interface PayAmount {
 }
 export interface PlanItem {
   key: string
-  kind: 'keep' | 'debt' | 'cardspend' | 'sweep' | 'savings' | 'send'
+  /** "hold": money to leave in the account for the next check's bills (DECISIONS.md 253). */
+  kind: 'keep' | 'hold' | 'debt' | 'cardspend' | 'sweep' | 'savings' | 'send'
   label: string
   cents: number
   destination: string
@@ -1102,7 +1106,8 @@ export interface PayCheck {
   lines: PayLine[]
   taxes: PayAmount[]
   deductions: PayAmount[]
-  plan: { items: PlanItem[]; shortCents: number } | null
+  /** heldEarlierCents: how much of what this check needs is kept from the check paid on heldOn (DECISIONS.md 253). */
+  plan: { items: PlanItem[]; shortCents: number; heldEarlierCents: number; heldOn: string | null } | null
   /** The check you're living on now (paid most recently). */
   isCurrent: boolean
   /** What actually landed for it. */
