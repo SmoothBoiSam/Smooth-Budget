@@ -27,10 +27,15 @@ public static class DebtEndpoints
     {
         var g = app.MapGroup("/api/debt").RequireAuthorization();
 
-        g.MapGet("", async (long? extra, DebtStrategy? strategy, HttpContext ctx, DebtService debts, CancellationToken ct) =>
-            extra is < 0 or > MaxCents
-                ? Results.ValidationProblem(new Dictionary<string, string[]> { ["extra"] = ["Use 0 or more."] })
-                : Results.Ok(await debts.SummaryAsync(ctx.User.HouseholdId(), extra, strategy, ct)));
+        g.MapGet("", async (long? extra, DebtStrategy? strategy, HttpContext ctx, DebtService debts, Budget.AutoBudgetService auto, CancellationToken ct) =>
+        {
+            if (extra is < 0 or > MaxCents)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["extra"] = ["Use 0 or more."] });
+            // The payoff plan uses the budget's card payment and what the month is short (DECISIONS.md 251): refresh it first,
+            // so a debt you just edited doesn't show against the plan from before the edit.
+            await auto.EnsureFreshAsync(ctx.User.HouseholdId(), ct);
+            return Results.Ok(await debts.SummaryAsync(ctx.User.HouseholdId(), extra, strategy, ct));
+        });
 
         // Interest charged (DECISIONS.md 237): the Card interest line's charges, by calendar month for the chart and one by one.
         g.MapGet("/interest", async (HttpContext ctx, AppDbContext db, CardInterestService interest, TimeProvider clock, CancellationToken ct) =>

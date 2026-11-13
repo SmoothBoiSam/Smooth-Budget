@@ -217,11 +217,7 @@ public static class BudgetEndpoints
             var current = calendar.MonthContaining(today);
             var ranges = Enumerable.Range(0, 7).Select(i => current.Label.AddMonths(i - 6)).Select(l => calendar.MonthOf(l.Year, l.Month)).ToList();
             var firstSeen = await db.Transactions.Where(t => t.HouseholdId == householdId).MinAsync(t => (DateOnly?)t.Date, ct);
-            var txns = await db.Transactions.AsNoTracking()
-                .Where(t => t.HouseholdId == householdId && t.Date >= ranges[0].Start && t.Date <= current.End && t.Account.IncludedInBudget)
-                .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind,
-                    t.Account.Type == AccountType.CreditCard))
-                .ToListAsync(ct);
+            var txns = await BudgetMonthService.TransactionsAsync(db, householdId, ranges[0].Start, current.End, ct);
             // Squeezed by the automatic budget (DECISIONS.md 223): where it would be with enough money, next to where it is.
             long? unsqueezed = null;
             if (await db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).SingleAsync(ct))
@@ -398,11 +394,7 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
         }
 
         var from = history.Count > 0 ? history.Min(m => m.Start) : current.StartDate;
-        var transactions = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.Date >= from && t.Date < current.StartDate && t.Account.IncludedInBudget)
-            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind,
-                t.Account.Type == AccountType.CreditCard))
-            .ToListAsync(ct);
+        var transactions = await BudgetMonthService.TransactionsAsync(db, householdId, from, current.StartDate.AddDays(-1), ct);
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && !c.IsHidden)
             .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
             .Select(c => new GeneratorCategory(c.Id, c.Name, c.Type, c.Priority, c.MonthlyLimitCents)).ToListAsync(ct);

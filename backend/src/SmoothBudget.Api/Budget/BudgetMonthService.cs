@@ -118,16 +118,34 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
         }
         categories = categories.OrderBy(c => c.SortOrder).ThenBy(c => c.Name).ToList();
 
-        var transactions = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.Date >= range.Start && t.Date <= range.End && t.Account.IncludedInBudget)
-            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind,
-                t.Account.Type == AccountType.CreditCard))
-            .ToListAsync(ct);
+        var transactions = await TransactionsAsync(db, householdId, range.Start, range.End, ct);
 
         var carried = await CarriedInAsync(householdId, row, ct, depth);
         var contributions = await ContributionsAsync(householdId, range, ct);
         return new MonthData(row, range, categories, transactions, carried, contributions, contributions.Sum(c => c.ShortfallCents));
     }
+
+    /// <summary>
+    /// One household's transactions dated from..to (inclusive) as the budget math sees them. Every screen's numbers load
+    /// them here (DECISIONS.md 251), so no two can disagree about what counts.
+    /// </summary>
+    public static Task<List<BudgetTransaction>> TransactionsAsync(AppDbContext db, Guid householdId, DateOnly from, DateOnly to, CancellationToken ct) =>
+        db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.Date >= from && t.Date <= to && t.Account.IncludedInBudget)
+            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind,
+                t.Account.Type == AccountType.CreditCard))
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// "This month only" limits for the budget month starting on <paramref name="monthStart"/>, by category. Debt, Savings
+    /// and the payday plan read a line's limit through this (DECISIONS.md 251), so a one-month change shows everywhere the
+    /// Budget tab's does.
+    /// </summary>
+    public static Task<Dictionary<Guid, long>> MonthOnlyLimitsAsync(AppDbContext db, Guid householdId, DateOnly monthStart, CancellationToken ct) =>
+        db.BudgetMonthCategories.AsNoTracking()
+            .Where(x => x.LimitOverrideCents != null
+                        && db.BudgetMonths.Any(m => m.Id == x.BudgetMonthId && m.HouseholdId == householdId && m.StartDate == monthStart))
+            .ToDictionaryAsync(x => x.CategoryId, x => x.LimitOverrideCents!.Value, ct);
 
     /// <summary>The deficit carried into <paramref name="row"/>: the previous month's, frozen or provisional.</summary>
     public async Task<long> CarriedInAsync(Guid householdId, BudgetMonth row, CancellationToken ct, int depth = 0)

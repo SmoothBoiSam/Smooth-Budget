@@ -19,7 +19,7 @@ import {
   type Transaction,
   listedType,
 } from './api'
-import { useRemembered } from './offline'
+import { useRemembered, useResume } from './offline'
 import { Caret, ErrorNotice, headerActionCls, Loading, Notice, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import SweepSetting from './SweepSetting'
@@ -103,6 +103,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   useEffect(() => {
     void load()
   }, [load])
+  useResume(load)
 
   function saved(message: string) {
     setSelected(null)

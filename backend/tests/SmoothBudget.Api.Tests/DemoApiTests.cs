@@ -71,4 +71,16 @@ public class DemoApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.False(await db.Users.AnyAsync(u => u.HouseholdId == old.HouseholdId));
         Assert.False(await db.Transactions.AnyAsync(t => t.HouseholdId == old.HouseholdId));
     }
+
+    [Fact]
+    public async Task Screens_that_load_together_all_get_an_answer()
+    {
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
+        var (c, _) = await StartAsync();
+        // Home, the tab badge and Tasks ask for the paychecks at the same moment on a copy nobody has opened yet. Each
+        // keeps the predictions, and two at once used to deadlock in the database (DECISIONS.md 251).
+        var paths = new[] { "/api/home/summary", "/api/payday", "/api/home/summary", "/api/payday", "/api/budget/summary", "/api/payday", "/api/debt", "/api/savings" };
+        var results = await Task.WhenAll(paths.Select(p => c.GetAsync(p)));
+        Assert.All(results, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+    }
 }

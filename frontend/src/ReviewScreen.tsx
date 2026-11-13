@@ -345,6 +345,9 @@ function ReviewCard({
   // Money between your own accounts with no category (a payment arriving on a card, say) isn't counted. Editing one asks
   // first whether it really is a transfer (DECISIONS.md 247); the old checkbox is gone.
   const transferOnly = editing && t.isTransfer && !t.categoryId && !t.isPartnerTransfer
+  // The same for your income (DECISIONS.md 251): a paycheck isn't a purchase to file. Say it's not income and it becomes
+  // money back in the category you pick.
+  const incomeOnly = editing && t.kind === 'Income' && t.amountCents < 0 && !t.isTransfer && !t.categoryId && !t.isPartnerTransfer
   const [keepTransfer, setKeepTransfer] = useState(true)
 
   // A memory aid: how you filed this merchant before (DECISIONS.md 102).
@@ -506,15 +509,17 @@ function ReviewCard({
     </div>
   )
 
-  if (transferOnly && keepTransfer)
+  if ((transferOnly || incomeOnly) && keepTransfer)
     return (
       <article aria-label={`Edit ${titleCase(t.merchant)}`} className={reviewCard}>
         {header}
         <p className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
-          Money moved between your own accounts, like a payment arriving on a card, so it isn’t counted as spending or income.
+          {transferOnly
+            ? 'Money moved between your own accounts, like a payment arriving on a card, so it isn’t counted as spending or income.'
+            : 'Counted as your income: money in for the month, not spending.'}
         </p>
         <button type="button" onClick={() => setKeepTransfer(false)} className={`${reviewSecondary} mt-4 w-full`}>
-          It’s not a transfer
+          {transferOnly ? 'It’s not a transfer' : 'It’s not income'}
         </button>
         <button type="button" onClick={onSkip} className={`${reviewSecondary} mt-3 w-full`}>
           Cancel

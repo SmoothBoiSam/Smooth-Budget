@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, debtApi, payBadge, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type SavingsSummary } from './api'
 import { icons } from './icons'
-import { useRemembered } from './offline'
+import { useRemembered, useResume } from './offline'
 import { Card, Caret, Chevron, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows } from './ui'
 import { formatCents, formatDay } from './format'
 import { finished, weekday } from './paycheck'
@@ -44,6 +44,7 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
   useEffect(() => {
     void load()
   }, [load])
+  useResume(load)
 
   return (
     <Page>

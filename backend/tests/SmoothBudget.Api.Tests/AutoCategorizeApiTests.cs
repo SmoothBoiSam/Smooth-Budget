@@ -692,4 +692,51 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(0, (await Search("q=f")).Total);
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.GetAsync("/api/transactions/search?min=50&max=10")).StatusCode);
     }
+
+    [Fact]
+    public async Task Refiling_a_transaction_leaves_nothing_behind_from_how_it_was_filed_before()
+    {
+        var c = await NewUserAsync();
+        var checking = await AccountAsync(c, "Checking", "1111");
+        var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
+        var groceries = cats.Single(x => x.Name == "Groceries").Id;
+        Guid loanRow, incomeRow, paymentRow, friendRow;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var household = db.Accounts.Single(x => x.Id == checking).HouseholdId;
+            var debtLine = db.Categories.Add(new Category { Id = Guid.NewGuid(), HouseholdId = household, Name = "Loan payments", Type = CategoryType.DebtPayment, SortOrder = 99 }).Entity;
+            var loan = db.DebtAccounts.Add(new DebtAccount { Id = Guid.NewGuid(), HouseholdId = household, Name = "Sample loan", BalanceCents = 900_00 }).Entity;
+            Transaction Row(string merchant, long cents, SmoothBudget.Core.Transactions.TransactionKind kind) => db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, AccountId = checking, Date = new DateOnly(2026, 11, 12), AmountCents = cents,
+                Merchant = merchant, Description = merchant, Kind = kind, CreatedUtc = DateTime.UtcNow,
+            }).Entity;
+            var filedTowardLoan = Row("MISFILED STORE", 40_00, SmoothBudget.Core.Transactions.TransactionKind.Purchase);
+            (filedTowardLoan.CategoryId, filedTowardLoan.DebtAccountId, filedTowardLoan.CategorySource) = (debtLine.Id, loan.Id, SmoothBudget.Core.Transactions.CategorySource.User);
+            var income = Row("STORE REFUND DEPOSIT", -25_00, SmoothBudget.Core.Transactions.TransactionKind.Income);
+            var payment = Row("NOT REALLY A CARD PAYMENT", 30_00, SmoothBudget.Core.Transactions.TransactionKind.CardPayment);
+            var friend = Row("ZELLE FROM A FRIEND", -10_00, SmoothBudget.Core.Transactions.TransactionKind.PartnerContribution);
+            await db.SaveChangesAsync();
+            (loanRow, incomeRow, paymentRow, friendRow) = (filedTowardLoan.Id, income.Id, payment.Id, friend.Id);
+        }
+        var before = (await c.GetFromJsonAsync<BudgetSummaryDto>("/api/budget/summary", Json))!;
+        Assert.Equal((25_00L, 10_00L), (before.IncomeReceivedCents, before.PartnerReceivedCents));
+
+        foreach (var id in new[] { loanRow, incomeRow, paymentRow, friendRow })
+            Assert.True((await c.PatchAsJsonAsync($"/api/transactions/{id}", new UpdateTransactionRequest(groceries, false, null), Json)).IsSuccessStatusCode);
+
+        // Each is what it's filed as now: a purchase, or money back to Groceries. Not also a loan payment, income or a friend's money.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Null(db.Transactions.Single(x => x.Id == loanRow).DebtAccountId);
+        }
+        var rows = await All(c);
+        Assert.Equal(("Purchase", "Refund", "Purchase", "Refund"),
+            (rows.Single(t => t.Id == loanRow).Kind, rows.Single(t => t.Id == incomeRow).Kind, rows.Single(t => t.Id == paymentRow).Kind, rows.Single(t => t.Id == friendRow).Kind));
+        var after = (await c.GetFromJsonAsync<BudgetSummaryDto>("/api/budget/summary", Json))!;
+        Assert.Equal((0L, 0L), (after.IncomeReceivedCents, after.PartnerReceivedCents)); // counted once, in Groceries
+        Assert.Equal(40_00 + 30_00 - 25_00 - 10_00, after.Groups.SelectMany(g => g.Categories).Single(x => x.Name == "Groceries").SpentCents);
+    }
 }

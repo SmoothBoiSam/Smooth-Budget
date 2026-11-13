@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, payBadge, paydayApi, type Me } from './api'
+import { ApiError, api, budgetApi, onDataChanged, payBadge, paydayApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
@@ -17,7 +17,7 @@ import PaydayScreen from './PaydayScreen'
 import PaySetupScreen from './PaySetupScreen'
 import SavingsScreen from './SavingsScreen'
 import { inViewTransition, reducedMotion } from './motion'
-import { saved, useOnline } from './offline'
+import { saved, useOnline, useResume } from './offline'
 import { ConfirmHost, DemoBar, OfflineBar } from './ui'
 
 // Back from a bank's own sign-in (Plaid OAuth, DECISIONS.md 185): open More, where Bank connections picks Plaid up again.
@@ -89,13 +89,43 @@ export default function App() {
   // Payday steps still to do on the check you're on count on the Tasks badge (DECISIONS.md 188, 206). Checked as you move
   // around, since a sync can tick steps off on its own; the screens that show the plan report their own count.
   const [planCount, setPlanCount] = useState(0)
-  useEffect(() => {
-    if (!me || route === 'payday' || route === 'tasks' || route === 'paytasks') return
+  const refreshPlan = useCallback(() => {
     paydayApi
       .summary()
       .then((s) => setPlanCount(payBadge(s)))
       .catch(() => undefined)
-  }, [me, route])
+  }, [])
+  const reportsPlan = route === 'payday' || route === 'tasks' || route === 'paytasks'
+  useEffect(() => {
+    if (me && !reportsPlan) refreshPlan()
+  }, [me, route, reportsPlan, refreshPlan])
+
+  // The badges follow every save, whichever screen made it (DECISIONS.md 251): the count to review right away, the
+  // payday steps once you pause (they take a budget refresh on the server, and reviewing saves every few seconds).
+  useEffect(() => {
+    if (!me) return
+    let soon: number | undefined
+    let later: number | undefined
+    const stop = onDataChanged(() => {
+      window.clearTimeout(soon)
+      window.clearTimeout(later)
+      soon = window.setTimeout(refreshInbox, 300)
+      if (!reportsPlan) later = window.setTimeout(refreshPlan, 2500)
+    })
+    return () => {
+      stop()
+      window.clearTimeout(soon)
+      window.clearTimeout(later)
+    }
+  }, [me, reportsPlan, refreshInbox, refreshPlan])
+  // And every return to the app after a while away: a sync may have brought new purchases in.
+  useResume(
+    useCallback(() => {
+      if (!me) return
+      refreshInbox()
+      if (!reportsPlan) refreshPlan()
+    }, [me, reportsPlan, refreshInbox, refreshPlan]),
+  )
 
   // Review passes the count it already has, so the badge doesn't ask the server again.
   const reviewChanged = useCallback((known?: number) => (typeof known === 'number' ? setInboxCount(known) : refreshInbox()), [refreshInbox])

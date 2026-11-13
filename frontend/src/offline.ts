@@ -58,6 +58,34 @@ export function useOnline() {
   return online
 }
 
+// How long the app was last out of sight. One listener, set up before any screen's, so screens can read it when it returns.
+let hiddenAt: number | null = null
+let awayMs = 0
+if (typeof document !== 'undefined')
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') hiddenAt = Date.now()
+    else {
+      awayMs = hiddenAt === null ? 0 : Date.now() - hiddenAt
+      hiddenAt = null
+    }
+  })
+
+const RESUME_AFTER_MS = 60_000
+
+/**
+ * Runs `reload` when the app comes back to the front after a minute or more away (DECISIONS.md 251). A phone keeps the
+ * app open for days; without this it shows the numbers from whenever that screen was last opened.
+ */
+export function useResume(reload: () => void) {
+  useEffect(() => {
+    const onChange = () => {
+      if (document.visibilityState === 'visible' && awayMs >= RESUME_AFTER_MS) reload()
+    }
+    document.addEventListener('visibilitychange', onChange)
+    return () => document.removeEventListener('visibilitychange', onChange)
+  }, [reload])
+}
+
 /** Open/closed state of a collapsible section, remembered on this device (DECISIONS.md 132). */
 export function useRemembered(key: string, initial: boolean) {
   const [open, setOpen] = useState(() => {

@@ -96,4 +96,18 @@ public class SavingsApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/savings/priority", new PriorityRequest([PriorityStep.Debt, PriorityStep.Debt, PriorityStep.Savings]), Json)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/savings/goals", new GoalRequest("X", 0, null, null, null), Json)).StatusCode);
     }
+
+    [Fact]
+    public async Task Planned_this_month_follows_a_this_month_only_change_to_the_savings_line()
+    {
+        var c = await NewUserAsync();
+        var id = (await (await c.PostAsJsonAsync("/api/budget/categories", new SmoothBudget.Api.Budget.CategoryRequest("Savings", CategoryType.SavingsTransfer, 100_00), Json))
+            .Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>(Json))!["id"]!.GetValue<Guid>();
+        Assert.Equal(100_00, (await Summary(c)).PlannedCents);
+
+        // "This month only": the Budget tab shows 75, so Savings does too (DECISIONS.md 251).
+        await c.PutAsJsonAsync($"/api/budget/categories/{id}",
+            new SmoothBudget.Api.Budget.UpdateCategoryRequest("Savings", CategoryType.SavingsTransfer, 75_00, null, false, "month"), Json);
+        Assert.Equal(75_00, (await Summary(c)).PlannedCents);
+    }
 }

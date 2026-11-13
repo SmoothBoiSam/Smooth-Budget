@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ApiError, budgetApi, openPlanItems, payBadge, paydayApi, type PaydaySummary } from './api'
 import { icons } from './icons'
+import { useResume } from './offline'
 import { weekday } from './paycheck'
 import { Card, Page, PageHeader, Row, Rows } from './ui'
 
@@ -21,6 +22,9 @@ export default function TasksScreen({
   onSignedOut: () => void
 }) {
   const [payday, setPayday] = useState<PaydaySummary | null>(null)
+  // Counted again when you come back to the app after a while (DECISIONS.md 251).
+  const [again, setAgain] = useState(0)
+  useResume(useCallback(() => setAgain((n) => n + 1), []))
 
   // Fresh counts each visit: a sync may have filed purchases or ticked steps off since the badge was last worked out.
   useEffect(() => {
@@ -38,7 +42,7 @@ export default function TasksScreen({
         onPlanCount(payBadge(p))
       })
       .catch(signedOut)
-  }, [onInboxCount, onPlanCount, onSignedOut])
+  }, [onInboxCount, onPlanCount, onSignedOut, again])
 
   const current = payday?.checks.find((c) => c.isCurrent && c.plan && c.plan.items.length > 0)
   const hasPayTasks = !!payday?.checks.some((c) => c.plan && c.plan.items.length > 0)

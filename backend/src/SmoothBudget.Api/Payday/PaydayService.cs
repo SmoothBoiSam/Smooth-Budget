@@ -189,32 +189,51 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         return new PickUpDto((int)Math.Ceiling((decimal)cents / perHour), rate, perHour);
     }
 
+    /// <summary>One request per household keeps the predictions at a time (the app runs as a single container).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> Gates = new();
+
     public async Task<PaydayDto> GetAsync(Guid householdId, CancellationToken ct)
     {
         var c = await ContextAsync(householdId, ct);
-        await MatchActualsAsync(householdId, c, ct);
-        var miss = await TypicalMissAsync(householdId, ct);
-        // The check you're living on now (the latest one paid) and the next few.
-        var current = PayCalendar.From(c.Today.AddDays(-45), c.Rules).TakeWhile(p => p.PayDate <= c.Today).LastOrDefault();
-        var periods = PayCalendar.From(c.Today.AddDays(1), c.Rules).Take(ChecksShown).ToList();
-        if (current is not null) periods.Insert(0, current);
-        var forecasts = periods.Select(p => Forecast(c, p, miss)).ToList();
-
-        // Keep each prediction as it stands until payday; after that it's frozen for predicted vs actual.
-        var rows = await db.PayPeriodForecasts.Where(f => f.HouseholdId == householdId).ToListAsync(ct);
-        foreach (var f in forecasts.Where(f => f.HasSchedule && f.Period.PayDate >= c.Today))
+        // Home, the tab badge and Tasks all ask for this, often at the same moment. Matching deposits and keeping the
+        // predictions write rows, and two requests writing the same ones deadlocked in the database (DECISIONS.md 251):
+        // so one at a time per household, and a row is only written when its numbers changed.
+        List<ForecastCheck> forecasts;
+        List<PayPeriodForecast> rows;
+        var gate = Gates.GetOrAdd(householdId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
         {
-            var row = rows.FirstOrDefault(r => r.PayDate == f.Period.PayDate);
-            if (row is null)
+            await MatchActualsAsync(householdId, c, ct);
+            var miss = await TypicalMissAsync(householdId, ct);
+            // The check you're living on now (the latest one paid) and the next few.
+            var current = PayCalendar.From(c.Today.AddDays(-45), c.Rules).TakeWhile(p => p.PayDate <= c.Today).LastOrDefault();
+            var periods = PayCalendar.From(c.Today.AddDays(1), c.Rules).Take(ChecksShown).ToList();
+            if (current is not null) periods.Insert(0, current);
+            forecasts = periods.Select(p => Forecast(c, p, miss)).ToList();
+
+            // Keep each prediction as it stands until payday; after that it's frozen for predicted vs actual.
+            rows = await db.PayPeriodForecasts.Where(f => f.HouseholdId == householdId).ToListAsync(ct);
+            foreach (var f in forecasts.Where(f => f.HasSchedule && f.Period.PayDate >= c.Today))
             {
-                row = new PayPeriodForecast { Id = Guid.NewGuid(), HouseholdId = householdId, PayDate = f.Period.PayDate };
-                db.PayPeriodForecasts.Add(row);
-                rows.Add(row);
+                var row = rows.FirstOrDefault(r => r.PayDate == f.Period.PayDate);
+                if (row is null)
+                {
+                    row = new PayPeriodForecast { Id = Guid.NewGuid(), HouseholdId = householdId, PayDate = f.Period.PayDate };
+                    db.PayPeriodForecasts.Add(row);
+                    rows.Add(row);
+                }
+                var now = (f.Period.Start, f.Period.End, f.GrossCents, f.NetCents, f.LowNetCents, f.HighNetCents);
+                if ((row.PeriodStart, row.PeriodEnd, row.PredictedGrossCents, row.PredictedNetCents, row.LowNetCents, row.HighNetCents) == now) continue;
+                (row.PeriodStart, row.PeriodEnd, row.PredictedGrossCents, row.PredictedNetCents, row.LowNetCents, row.HighNetCents) = now;
+                row.UpdatedUtc = clock.GetUtcNow().UtcDateTime;
             }
-            (row.PeriodStart, row.PeriodEnd, row.PredictedGrossCents, row.PredictedNetCents, row.LowNetCents, row.HighNetCents, row.UpdatedUtc) =
-                (f.Period.Start, f.Period.End, f.GrossCents, f.NetCents, f.LowNetCents, f.HighNetCents, clock.GetUtcNow().UtcDateTime);
+            await db.SaveChangesAsync(ct);
         }
-        await db.SaveChangesAsync(ct);
+        finally
+        {
+            gate.Release();
+        }
 
         var landed = rows.Where(r => r.ActualNetCents is not null).ToDictionary(r => r.PayDate, r => r.ActualNetCents!.Value);
         foreach (var (_, stub) in c.Stubs) landed[stub.PayDate] = stub.NetCents;
@@ -325,9 +344,13 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var debts = await db.DebtAccounts.AsNoTracking().Include(d => d.Account).Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0).ToListAsync(ct);
         // The card payment is the debt-payment line plus the Card interest bill: the interest is charged on the cards and the
         // minimums include it, so the budget keeps it on its own line rather than counting it twice (DECISIONS.md 172).
-        var debtMonthly = categories.Where(x => x.Type == CategoryType.DebtPayment).Sum(x => x.MonthlyLimitCents)
-                          + (debts.Count > 0 ? categories.Where(x => CardInterest.IsInterestCategory(x.Name, x.Type)).Sum(x => x.MonthlyLimitCents) : 0);
-        var savingsMonthly = categories.Where(x => x.Type == CategoryType.SavingsTransfer).Sum(x => x.MonthlyLimitCents);
+        // A "this month only" limit applies to the checks paid in this budget month (DECISIONS.md 251); later ones use the usual.
+        var thisMonth = c.Calendar.MonthContaining(c.Today).Start;
+        var monthOnly = await BudgetMonthService.MonthOnlyLimitsAsync(db, householdId, thisMonth, ct);
+        long Limit(Category x, DateOnly monthStart) => monthStart == thisMonth && monthOnly.TryGetValue(x.Id, out var o) ? o : x.MonthlyLimitCents;
+        long DebtMonthly(DateOnly monthStart) => categories.Where(x => x.Type == CategoryType.DebtPayment).Sum(x => Limit(x, monthStart))
+                          + (debts.Count > 0 ? categories.Where(x => CardInterest.IsInterestCategory(x.Name, x.Type)).Sum(x => Limit(x, monthStart)) : 0);
+        long SavingsMonthly(DateOnly monthStart) => categories.Where(x => x.Type == CategoryType.SavingsTransfer).Sum(x => Limit(x, monthStart));
         var savingsCategories = categories.Where(x => x.Type == CategoryType.SavingsTransfer).Select(x => x.Id).ToHashSet();
         var snowball = c.Household.DebtStrategy == DebtStrategy.Snowball;
         var targetDebt = (snowball
@@ -368,6 +391,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             var inMonth = PayCalendar.From(month.Start, c.Rules).TakeWhile(p => p.PayDate <= month.End).Select(p => p.PayDate).ToList();
             var index = Math.Max(0, inMonth.IndexOf(pay));
             var share = $"{(inMonth.Count == 2 ? "Half" : $"1/{inMonth.Count}")} of the month's";
+            var (debtMonthly, savingsMonthly) = (DebtMonthly(month.Start), SavingsMonthly(month.Start));
 
             // Bills still to come before the next payday (for the current check: from today, since paid ones are done).
             // A bill your partner's fixed contribution goes toward (rent) still needs all of it in the account when it's

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ApiError, payBadge, paydayApi, type PayCheck, type PaydaySummary, type PlanItem } from './api'
 import { Caret, ErrorNotice, Loading, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay } from './format'
+import { useResume } from './offline'
 import { finished, weekday } from './paycheck'
 
 const hasPlan = (c: PayCheck) => !!c.plan && c.plan.items.length > 0
@@ -41,6 +42,7 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
       })
       .catch(fail)
   }, [fail, onOpenItems])
+  useResume(load)
 
   async function toggle(check: PayCheck, item: PlanItem, skip?: boolean) {
     try {

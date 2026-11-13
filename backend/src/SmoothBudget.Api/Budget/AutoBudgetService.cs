@@ -77,10 +77,7 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
 
         // What's already spent this month: no limit goes below it.
         var range = new BudgetMonthRange(current.StartDate, current.EndDate, new DateOnly(current.StartDate.Year, current.StartDate.Month, 1));
-        var txns = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && t.Date >= current.StartDate && t.Date <= current.EndDate && t.Account.IncludedInBudget)
-            .Select(t => new BudgetTransaction(t.CategoryId, t.Date, t.AmountCents, t.IsTransfer, t.Pending, t.SplitFactor, t.Kind, t.Account.Type == AccountType.CreditCard))
-            .ToListAsync(ct);
+        var txns = await BudgetMonthService.TransactionsAsync(db, householdId, current.StartDate, current.EndDate, ct);
         var spent = CategoryBreakdownCalculator.Calculate(range, categories.Select(c => new BudgetCategory(c.Id, c.Type, 0)).ToList(), txns)
             .ToDictionary(l => l.CategoryId, l => l.SpentCents);
 

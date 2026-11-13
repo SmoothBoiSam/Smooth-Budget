@@ -281,6 +281,18 @@ public static partial class TransactionEndpoints
                     t.Kind = t.AmountCents > 0 ? TransactionKind.Purchase : TransactionKind.Income;
             }
 
+            // Nothing is left behind from how it was filed before (DECISIONS.md 251). The debt it was tied to goes unless it's
+            // still on a debt line or Card interest. Filed under spending or a bill, it is what it's filed as: a purchase, or
+            // (money in) a refund to that category; never also a card payment, your income or a friend's money in, which
+            // would count it twice.
+            var filedAs = req.CategoryId is { } filedId
+                ? await db.Categories.Where(c => c.Id == filedId).Select(c => new { c.Name, c.Type }).SingleAsync(ct) : null;
+            if (filedAs is null || (filedAs.Type != CategoryType.DebtPayment && !CardInterest.IsInterestCategory(filedAs.Name, filedAs.Type)))
+                t.DebtAccountId = null;
+            if (!t.IsTransfer && filedAs is { Type: CategoryType.Variable or CategoryType.FixedBill }
+                && t.Kind is TransactionKind.CardPayment or TransactionKind.Transfer or TransactionKind.Income or TransactionKind.PartnerContribution)
+                t.Kind = t.AmountCents > 0 ? TransactionKind.Purchase : TransactionKind.Refund;
+
             var applied = 0;
             var pattern = NormalizePattern(req.RulePattern);
             if (pattern is not null)

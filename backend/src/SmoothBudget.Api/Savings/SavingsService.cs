@@ -90,7 +90,10 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
                 .OrderByDescending(t => t.Date).Take(60)
                 .Select(t => new SavingsTransferDto(t.Date, t.AmountCents, t.Account.Name, "Moved to savings")).ToListAsync(ct);
         var thisMonth = moves.Where(m => current.Contains(m.Date)).Sum(m => m.Cents);
-        var planned = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer && !c.IsHidden).SumAsync(c => c.MonthlyLimitCents, ct);
+        // The savings lines as the budget has them this month, a "this month only" change included (DECISIONS.md 251).
+        var monthOnly = await BudgetMonthService.MonthOnlyLimitsAsync(db, householdId, current.Start, ct);
+        var planned = (await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer && !c.IsHidden)
+            .Select(c => new { c.Id, c.MonthlyLimitCents }).ToListAsync(ct)).Sum(c => monthOnly.TryGetValue(c.Id, out var o) ? o : c.MonthlyLimitCents);
 
         return new SavingsSummaryDto(
             accounts.Sum(a => Math.Max(0, balances[a.Id])) + goals.Where(g => g.AccountId is null).Sum(g => g.ManualSavedCents ?? 0),
@@ -153,7 +156,11 @@ public static class SavingsEndpoints
     {
         var g = app.MapGroup("/api/savings").RequireAuthorization();
 
-        g.MapGet("", async (HttpContext ctx, SavingsService svc, CancellationToken ct) => await svc.SummaryAsync(ctx.User.HouseholdId(), ct));
+        g.MapGet("", async (HttpContext ctx, SavingsService svc, Budget.AutoBudgetService auto, CancellationToken ct) =>
+        {
+            await auto.EnsureFreshAsync(ctx.User.HouseholdId(), ct); // "planned this month" is the budget's savings lines (DECISIONS.md 251)
+            return await svc.SummaryAsync(ctx.User.HouseholdId(), ct);
+        });
 
         // Every past savings transaction, newest first (DECISIONS.md 239): money into and out of your savings accounts, or,
         // with none linked, what you filed as savings (with the goal its line is for).

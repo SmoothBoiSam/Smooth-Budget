@@ -246,10 +246,7 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
         if (cat is null) return 0;
         var interest = all.FirstOrDefault(c => Core.Transactions.CardInterest.IsInterestCategory(c.Name, c.Type));
         var current = await months.EnsureCurrentAsync(householdId, ct);
-        var ids = interest is null ? [cat.Id] : new[] { cat.Id, interest.Id };
-        var overrides = await db.BudgetMonthCategories.AsNoTracking()
-            .Where(x => x.BudgetMonthId == current.Id && ids.Contains(x.CategoryId) && x.LimitOverrideCents != null)
-            .ToDictionaryAsync(x => x.CategoryId, x => x.LimitOverrideCents!.Value, ct);
+        var overrides = await BudgetMonthService.MonthOnlyLimitsAsync(db, householdId, current.StartDate, ct);
         long Limit(Category c) => overrides.TryGetValue(c.Id, out var o) ? o : c.MonthlyLimitCents;
         return Limit(cat) + (interest is null ? 0 : Limit(interest));
     }

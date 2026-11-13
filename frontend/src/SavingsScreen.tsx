@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
+import { useResume } from './offline'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
 import { centsToInput, formatCents, parseDollars } from './format'
 
@@ -41,6 +42,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
   useEffect(() => {
     void load()
   }, [load])
+  useResume(load)
 
   async function act(action: () => Promise<unknown>, message: string) {
     try {

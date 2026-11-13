@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ask } from './confirm'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
+import { useResume } from './offline'
 import { InterestCard } from './DebtInterest'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
@@ -51,6 +52,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
   useEffect(() => {
     void load()
   }, [load])
+  useResume(load)
 
   /** What-if: ask the server for the plan with this extra and strategy, a moment after the slider stops. */
   function whatIf(nextExtra: number, nextStrategy: DebtStrategy) {

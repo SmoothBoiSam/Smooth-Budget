@@ -4,7 +4,7 @@ import { TransactionList } from './BudgetScreen'
 import { TransactionEditSheet } from './ReviewScreen'
 import { formatCents, formatDay, formatTime } from './format'
 import { useArrivals, useTween } from './motion'
-import { saved, useOnline } from './offline'
+import { saved, useOnline, useResume } from './offline'
 import { Card, Chevron, Loading, Notice, Pill, Row, Rows } from './ui'
 
 /**
@@ -76,6 +76,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
   useEffect(() => {
     void load()
   }, [load])
+  useResume(load)
 
   // Pull to refresh (SPEC section 4.2) and the Refresh link both sync connected banks, then reload.
   async function refresh() {

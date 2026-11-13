@@ -85,6 +85,24 @@ async function send(input: string, init: RequestInit): Promise<Response> {
   }
 }
 
+const changeListeners = new Set<() => void>()
+
+/**
+ * Runs `listener` after anything is saved through the API (DECISIONS.md 251), whichever screen saved it. Each screen
+ * reloads its own data after its own saves; this is for what's shared across screens, like the tab badges.
+ * Returns how to stop listening.
+ */
+export function onDataChanged(listener: () => void) {
+  changeListeners.add(listener)
+  return () => {
+    changeListeners.delete(listener)
+  }
+}
+
+function changed(path: string) {
+  if (!path.startsWith('/auth')) changeListeners.forEach((l) => l())
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await send(`/api${path}`, {
     method,
@@ -104,6 +122,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
     throw new ApiError(res.status, message)
   }
+  if (method !== 'GET') changed(path)
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T)
 }
 
@@ -222,6 +241,7 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
     }
     throw new ApiError(res.status, message)
   }
+  changed(path)
   return (await res.json()) as T
 }
 
