@@ -442,9 +442,11 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                     .Select(t => new { t.AmountCents, t.Kind, Type = t.Account.Type, t.CategoryId, t.AccountId }).ToListAsync(ct)
                 : [];
             var cardPaid = moves.Where(m => m.Kind == TransactionKind.CardPayment && m.Type == AccountType.Checking && m.AmountCents > 0).Sum(m => m.AmountCents);
-            // Per card: the payment as the card's own account shows it (a credit). Without those, the checking side for all.
-            long PaidTo(Guid? accountId) => moves.Where(m => m.Type == AccountType.CreditCard && m.AccountId == accountId && m.AmountCents < 0).Sum(m => -m.AmountCents);
-            var cardSideSeen = moves.Any(m => m.Type == AccountType.CreditCard && m.AmountCents < 0);
+            // Per card (DECISIONS.md 244): the payment as the card's own account shows it, or as it left checking when the card
+            // isn't synced (or its statement isn't uploaded yet). With none tied to a card, the checking side for all cards.
+            var toCards = current ? await Debt.CardPayments.LoadAsync(db, householdId, pay, next.AddDays(-1), ct) : [];
+            long PaidTo(Guid? accountId) => toCards.Where(p => p.CardAccountId == accountId).Sum(p => p.Cents);
+            var cardSideSeen = toCards.Count > 0;
             var allDebtLines = plan.Items.Where(x => x.Kind == "debt").Sum(x => x.Cents);
             var intoSavings = accounts.Any(a => a.Type == AccountType.Savings)
                 ? moves.Where(m => m.Type == AccountType.Savings && m.AmountCents < 0).Sum(m => -m.AmountCents)

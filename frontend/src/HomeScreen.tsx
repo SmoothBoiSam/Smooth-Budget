@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, budgetApi, plaidApi, type BankUpdate, type CashCheck, type Category, type HomeSummary, type Me, type PickUp, type Transaction } from './api'
 import { TransactionList } from './BudgetScreen'
-import TransactionSheet from './TransactionSheet'
+import { TransactionEditSheet } from './ReviewScreen'
 import { formatCents, formatDay, formatTime } from './format'
 import { useArrivals, useTween } from './motion'
 import { saved, useOnline } from './offline'
@@ -593,7 +593,7 @@ function RecentTransactions({ summary, onChanged }: { summary: HomeSummary; onCh
         <TransactionList items={items} empty="No transactions yet." onSelect={setSelected} className="" />
       )}
       {selected && (
-        <TransactionSheet
+        <TransactionEditSheet
           transaction={selected}
           categories={categories}
           onClose={() => setSelected(null)}

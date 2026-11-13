@@ -65,19 +65,13 @@ export default function TasksScreen({
       <PageHeader title="Tasks" />
       <Card>
         <Rows>
+          {/* Transactions and the bills that need a look are one review (DECISIONS.md 245). */}
           <Row
             icon={icons.transactions}
             label={<span className="font-semibold">Review transactions</span>}
-            hint={inboxCount > 0 ? `${inboxCount} ${inboxCount === 1 ? 'purchase' : 'purchases'} to confirm` : 'All caught up'}
-            badge={inboxCount}
+            hint={reviewHint(inboxCount, billsCount)}
+            badge={inboxCount + billsCount}
             href="#/tasks/transactions"
-          />
-          <Row
-            icon={icons.bills}
-            label={<span className="font-semibold">Review bills</span>}
-            hint={billsCount > 0 ? `${billsCount} ${billsCount === 1 ? 'bill needs' : 'bills need'} a look` : 'Nothing new'}
-            badge={billsCount}
-            href="#/tasks/bills"
           />
           {hasPayTasks && (
             <Row
@@ -106,4 +100,13 @@ export default function TasksScreen({
       </Card>
     </Page>
   )
+}
+
+/** "3 purchases to confirm and 1 bill to look at", or "All caught up". */
+function reviewHint(purchases: number, bills: number) {
+  const parts = [
+    purchases > 0 ? `${purchases} ${purchases === 1 ? 'purchase' : 'purchases'} to confirm` : null,
+    bills > 0 ? `${bills} ${bills === 1 ? 'bill' : 'bills'} to look at` : null,
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' and ') : 'All caught up'
 }

@@ -226,7 +226,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
             };
             foreach (var d in new[] { new DateOnly(2026, 11, 25), new DateOnly(2026, 12, 25), new DateOnly(2027, 1, 25) })
                 db.Transactions.Add(T(checking, d, 90_00, TransactionKind.Purchase, power.Id)); // a monthly bill, next due Feb 25
-            db.Transactions.Add(T(checking, new DateOnly(2027, 2, 23), 120_00, TransactionKind.CardPayment, cards.Id, transfer: true, merchant: "PAYMENT TO TEST CARD"));
+            db.Transactions.Add(T(checking, new DateOnly(2027, 2, 23), 120_00, TransactionKind.CardPayment, cards.Id, transfer: true, merchant: "ONLINE CARD PAYMENT"));
             db.Transactions.Add(T(savings, new DateOnly(2027, 2, 23), -50_00, TransactionKind.Transfer, transfer: true, merchant: "TRANSFER FROM CHECKING"));
             await db.SaveChangesAsync();
         }
@@ -266,7 +266,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var card = new Account { Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = "Test Card", Mask = "3333", Type = AccountType.CreditCard, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+            var card = new Account { Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = "Sample Card", Mask = "3333", Type = AccountType.CreditCard, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
             cardId = card.Id;
             db.Accounts.Add(card);
             Transaction OnCard(DateOnly d, long cents, TransactionKind kind = TransactionKind.Purchase, bool transfer = false) => new()
@@ -284,7 +284,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         }
         var withCard = await Payday(c);
         var spend = withCard.Checks[0].Plan!.AllParts().Single(i => i.Kind == "cardspend");
-        Assert.Equal(("Pay off what you charged", 70_00L, "Test Card ••3333", false), (spend.Label, spend.Cents, spend.Destination, spend.Done));
+        Assert.Equal(("Pay off what you charged", 70_00L, "Sample Card ••3333", false), (spend.Label, spend.Cents, spend.Destination, spend.Done));
         Assert.Equal(shortBefore, withCard.Checks[0].Plan!.ShortCents); // it comes from spending money already in checking, not this check
         var soFar = withCard.Checks[1].Plan!.AllParts().Single(i => i.Kind == "cardspend");
         Assert.Equal(("Charged so far", 25_00L), (soFar.Label, soFar.Cents));

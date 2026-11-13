@@ -281,6 +281,11 @@ function ContributionSheet({
             {err}
           </p>
         )}
+        {onRemove && (
+          <button type="button" onClick={onRemove} className="mt-3 w-full py-2 text-sm font-medium text-danger">
+            Remove
+          </button>
+        )}
         <div className="mt-5 flex gap-3">
           <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
             Cancel
@@ -289,11 +294,6 @@ function ContributionSheet({
             Save
           </button>
         </div>
-        {onRemove && (
-          <button type="button" onClick={onRemove} className="mt-3 w-full py-2 text-sm font-medium text-danger">
-            Remove
-          </button>
-        )}
       </form>
     </div>
   )

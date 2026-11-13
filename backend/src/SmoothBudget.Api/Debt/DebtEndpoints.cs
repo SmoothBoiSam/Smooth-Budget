@@ -59,20 +59,17 @@ public static class DebtEndpoints
                 months.Sum(m => m.Cents)));
         });
 
-        // Past payments (DECISIONS.md 240): payments a card received (from its own account), and payments you filed toward
-        // a loan or a debt without a linked account. Newest first.
+        // Past payments (DECISIONS.md 240, 244): payments each card received (its own account's side, or the payment leaving
+        // checking when the card's side isn't in yet), and payments you filed toward a loan or a debt without a linked account.
         g.MapGet("/payments", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             var debts = await db.DebtAccounts.AsNoTracking().Where(d => d.HouseholdId == householdId)
                 .Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null }).ToListAsync(ct);
             var byAccount = debts.Where(d => d.AccountId is not null).GroupBy(d => d.AccountId!.Value).ToDictionary(g => g.Key, g => g.First().Id);
-            var cardIds = byAccount.Keys.ToList();
             var unlinked = debts.Where(d => d.AccountId is null).Select(d => d.Id).ToList();
-            var onCards = await db.Transactions.AsNoTracking()
-                .Where(t => t.HouseholdId == householdId && cardIds.Contains(t.AccountId) && t.Kind == Core.Transactions.TransactionKind.CardPayment && t.AmountCents < 0)
-                .OrderByDescending(t => t.Date).Take(500)
-                .Select(t => new { t.Id, t.Date, t.Merchant, Cents = -t.AmountCents, t.AccountId, Debt = (Guid?)null }).ToListAsync(ct);
+            var onCards = (await CardPayments.LoadAsync(db, householdId, null, null, ct)).Take(500)
+                .Select(p => new { p.Id, p.Date, p.Merchant, p.Cents, AccountId = p.CardAccountId, Debt = (Guid?)null }).ToList();
             var toward = await db.Transactions.AsNoTracking()
                 .Where(t => t.HouseholdId == householdId && t.DebtAccountId != null && unlinked.Contains(t.DebtAccountId.Value) && t.AmountCents > 0
                             && t.Category != null && t.Category.Type == Core.Budgeting.CategoryType.DebtPayment)

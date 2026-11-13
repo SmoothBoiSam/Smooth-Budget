@@ -12,10 +12,15 @@ import {
   type ReviewSummary,
   type Transaction,
   type TransactionContext,
+  type RecurringItem,
+  type RecurringUpdate,
   listedType,
+  needsLook,
 } from './api'
-import BillsSection from './BillsSection'
-import { CountBubble, ErrorNotice, Loading, Page, PageHeader, reviewCard, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
+import BillsSection, { Alert, BillCard, BillOnCard } from './BillsSection'
+import { useBills } from './useBills'
+import type { SheetPart } from './bills'
+import { CardLink, ErrorNotice, Loading, Page, PageHeader, reviewCard, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
@@ -38,12 +43,10 @@ function rank(t: Transaction) {
 export default function ReviewScreen({
   onChanged,
   onSignedOut,
-  billsCount,
   onBillsCount,
 }: {
   onChanged: (count?: number) => void
   onSignedOut: () => void
-  billsCount: number
   onBillsCount: (n: number) => void
 }) {
   const [part, setPart] = useState<'transactions' | 'bills'>(partFromHash)
@@ -55,6 +58,9 @@ export default function ReviewScreen({
   const [categories, setCategories] = useState<Category[]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Bills that need a look, in the same review (DECISIONS.md 245); skipped ones wait until you ask for them again.
+  const bills = useBills(onSignedOut, onBillsCount, () => setNotice(null))
+  const [skippedBills, setSkippedBills] = useState<string[]>([])
 
   const fail = useCallback(
     (e: unknown) => {
@@ -124,6 +130,7 @@ export default function ReviewScreen({
   const likely = counts?.likely ?? 0
   const reviewScope: ReviewScope = scope === 'todo' ? 'month' : scope
   const current = queue?.[0]
+  const billsWaiting = scope === 'todo' ? (bills.s?.items.filter(needsLook).filter((i) => !skippedBills.includes(i.key)) ?? []) : []
   // Earlier and Older only show up when something there is waiting (DECISIONS.md 149).
   const scopes = (['todo', 'earlier', 'older'] as const).filter(
     (x) => x === 'todo' || x === scope || (x === 'earlier' ? summary?.earlier.total : summary?.older.total),
@@ -131,14 +138,13 @@ export default function ReviewScreen({
 
   return (
     <Page>
-      {/* Two pages under Tasks (DECISIONS.md 206): transactions to confirm, and bills the app found or that changed. */}
+      {/* One review for transactions and the bills that need a look (DECISIONS.md 245); All bills is its own page under it. */}
       <PageHeader
-        title={part === 'bills' ? 'Review bills' : 'Review transactions'}
-        back={{ href: '#/tasks', label: 'Tasks' }}
-        // Review transactions has no count here (DECISIONS.md 231): Tasks and the This month filter already show it.
-        action={part === 'bills' && billsCount > 0 ? <CountBubble n={billsCount} /> : undefined}
+        title={part === 'bills' ? 'All bills' : 'Review transactions'}
+        back={part === 'bills' ? { href: '#/tasks/transactions', label: 'Review' } : { href: '#/tasks', label: 'Tasks' }}
       />
       {/* The view switch sits on a row of its own under the title (DECISIONS.md 201), on the left like the filters below it (212). */}
+      {part === 'transactions' && (
       <div className="mt-3 flex">
         <div role="tablist" aria-label="View" className="flex rounded-full neu-inset p-1 text-xs font-medium">
           {(['cards', 'list'] as const).map((m) => (
@@ -155,9 +161,10 @@ export default function ReviewScreen({
           ))}
         </div>
       </div>
+      )}
 
       {part === 'bills' ? (
-        <BillsSection onSignedOut={onSignedOut} onCount={onBillsCount} mode={mode} />
+        <BillsSection onSignedOut={onSignedOut} onCount={onBillsCount} />
       ) : (
       <>
       {/* Compact so a whole review card fits on a phone screen without scrolling (DECISIONS.md 161). */}
@@ -186,12 +193,12 @@ export default function ReviewScreen({
           </div>
       )}
 
-      {notice && (
+      {(notice ?? bills.notice) && (
         <p role="status" className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
-          {notice}
+          {notice ?? bills.notice}
         </p>
       )}
-      {error && <ErrorNotice message={error} onRetry={() => window.location.reload()} />}
+      {(error ?? bills.error) && <ErrorNotice message={(error ?? bills.error)!} onRetry={() => window.location.reload()} />}
 
       {scope !== 'todo' && summary && (
         <div className="mt-3 rounded-2xl neu-inset px-4 py-3 text-xs">
@@ -225,7 +232,7 @@ export default function ReviewScreen({
 
       {queue === null ? (
         <Loading />
-      ) : queue.length === 0 ? (
+      ) : queue.length === 0 && billsWaiting.length === 0 ? (
         <div className="mt-3 rounded-3xl neu px-5 py-8 text-center">
           <p className="text-lg font-semibold">All caught up</p>
           <p className="mt-1 text-sm text-ink-soft">
@@ -236,12 +243,23 @@ export default function ReviewScreen({
               Review {summary!.earlier.total} from earlier months
             </button>
           )}
+          {scope === 'todo' && skippedBills.length > 0 && (
+            <button type="button" onClick={() => setSkippedBills([])} className={`${smallBtn} mt-4 ml-2 text-accent`}>
+              Show {skippedBills.length} skipped {skippedBills.length === 1 ? 'bill' : 'bills'}
+            </button>
+          )}
         </div>
       ) : (
         <>
           <div className="mt-3 flex min-h-8 items-center justify-between gap-3">
             <p className="text-xs text-ink-soft">
-              <span className="font-semibold">{queue.length}</span> to go
+              <span className="font-semibold">{queue.length + billsWaiting.length}</span> to go
+              {billsWaiting.length > 0 && (
+                <span className="text-ink-faint">
+                  {' '}
+                  · {billsWaiting.length} {billsWaiting.length === 1 ? 'bill' : 'bills'}
+                </span>
+              )}
               {counts && counts.unsure > 0 && <span className="text-ink-faint"> · {counts.unsure} the app wasn’t sure about</span>}
             </p>
             {likely > 1 && (
@@ -255,10 +273,50 @@ export default function ReviewScreen({
             )}
           </div>
 
-          {mode === 'cards' && current && (
+          {/* Bills that need a look come first (DECISIONS.md 245), each as the bill review card it was. */}
+          {mode === 'cards' && billsWaiting[0] && (
+            <BillCard
+              key={billsWaiting[0].key}
+              item={billsWaiting[0]}
+              onUpdate={(u, m) => void bills.update(u, m)}
+              onOpen={(part = 'edit') => bills.openSheet(billsWaiting[0], part)}
+              onTrackAsBill={(i) => void bills.trackAsBill(i)}
+              onSkip={() => {
+                setNotice(null)
+                bills.setNotice(null)
+                setSkippedBills((k) => [...k, billsWaiting[0].key])
+              }}
+            />
+          )}
+          {mode === 'list' && billsWaiting.length > 0 && (
+            <section aria-labelledby="bills-h" className="mt-3">
+              <h2 id="bills-h" className="px-1 text-xs font-semibold text-ink-soft">
+                Bills that need a look
+              </h2>
+              <ul className="mt-2 space-y-2">
+                {billsWaiting.map((i) => (
+                  <li key={i.key}>
+                    <Alert
+                      item={i}
+                      onUpdate={(u, m) => void bills.update(u, m)}
+                      onOpen={() => bills.openSheet(i, 'edit')}
+                      onTrackAsBill={(x) => void bills.trackAsBill(x)}
+                      onNotABill={() => bills.openSheet(i, 'notBill')}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {mode === 'cards' && !billsWaiting[0] && current && (
             <ReviewCard
               key={current.id}
               t={current}
+              billItems={bills.s?.items ?? []}
+              onBillUpdate={(u, m) => void bills.update(u, m)}
+              onBillOpen={(i, part) => bills.openSheet(i, part)}
+              onTrackAsBill={(i) => void bills.trackAsBill(i)}
               categories={categories}
               onDone={(message, reload) => void done(current.id, message, reload)}
               older={!!summary && current.date < summary.windowStart}
@@ -268,7 +326,7 @@ export default function ReviewScreen({
             />
           )}
 
-          {mode === 'list' && (
+          {mode === 'list' && queue.length > 0 && (
             <ul className="mt-3 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {queue.slice(0, 200).map((t) => (
                 <ListRow
@@ -295,6 +353,9 @@ export default function ReviewScreen({
           )}
         </>
       )}
+      {/* Every bill, with what each costs (DECISIONS.md 245). */}
+      <CardLink href="#/tasks/bills">All bills</CardLink>
+      {bills.sheet}
       </>
       )}
     </Page>
@@ -309,7 +370,12 @@ export default function ReviewScreen({
 function ReviewCard({
   t,
   categories,
+  billItems,
+  onBillUpdate,
+  onBillOpen,
+  onTrackAsBill,
   older,
+  editing = false,
   onDone,
   onSkip,
   onCategoryCreated,
@@ -317,8 +383,15 @@ function ReviewCard({
 }: {
   t: Transaction
   categories: Category[]
+  /** Your bills, to show the one this charge is filed to like the bill review card does (DECISIONS.md 245). */
+  billItems: RecurringItem[]
+  onBillUpdate: (u: RecurringUpdate, message: string) => void
+  onBillOpen: (item: RecurringItem, part: SheetPart) => void
+  onTrackAsBill: (item: RecurringItem) => void
   /** Before the months the budget is built from. */
   older?: boolean
+  /** In a transaction's edit pop-up (DECISIONS.md 247): Cancel instead of "I don't remember" and "Skip for now" (onSkip cancels). */
+  editing?: boolean
   onDone: (message: string, reload?: boolean) => void
   onSkip: () => void
   onCategoryCreated: () => Promise<void>
@@ -349,6 +422,10 @@ function ReviewCard({
   const [towardPick, setTowardPick] = useState('')
   // Debt money is a payment toward a card or loan, or interest charged on one (DECISIONS.md 232).
   const [debtWhat, setDebtWhat] = useState<'payment' | 'interest' | null>(null)
+  // Money between your own accounts with no category (a payment arriving on a card, say) isn't counted. Editing one asks
+  // first whether it really is a transfer (DECISIONS.md 247); the old checkbox is gone.
+  const transferOnly = editing && t.isTransfer && !t.categoryId && !t.isPartnerTransfer
+  const [keepTransfer, setKeepTransfer] = useState(true)
 
   // A memory aid: how you filed this merchant before (DECISIONS.md 102).
   useEffect(() => {
@@ -430,6 +507,8 @@ function ReviewCard({
 
   const pickedBill = choices?.bills.find((b) => `bill:${b.key}` === billPick)
   const billReady = billPick === NEW ? billName.trim().length > 0 : !!pickedBill
+  // The bill picked, or (a new bill) the repeating charge it's part of.
+  const billShown = billItems.find((i) => i.key === (pickedBill ? pickedBill.key : billPick === NEW ? choices?.detected : null))
   // Every category in the chosen group at once, in your budget's order (DECISIONS.md 145).
   const inGroup = useMemo(() => categories.filter((c) => listedType(c) === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
 
@@ -465,7 +544,9 @@ function ReviewCard({
         return onDone(interest ? `Interest on ${r.towardName}, in ${r.categoryName}.` : `Toward ${r.towardName}.`)
       }
       if (!categoryId) return
-      const r = await budgetApi.updateTransaction(t.id, categoryId, false, rule && !t.isPartnerTransfer ? t.merchant : null)
+      // A card payment or a move to savings stays a transfer (never spending) when it's filed as debt or savings.
+      const stillTransfer = t.isTransfer && !!selected && (selected.type === 'DebtPayment' || selected.type === 'SavingsTransfer')
+      const r = await budgetApi.updateTransaction(t.id, categoryId, stillTransfer, rule && !t.isPartnerTransfer && !stillTransfer ? t.merchant : null)
       const moved = r.billChargesMoved > 0 ? ` ${r.billChargesMoved} earlier ${r.billChargesMoved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
       const others = r.ruleAppliedTo > 0 ? ` ${r.ruleAppliedTo} more from ${titleCase(t.merchant)} ${r.ruleAppliedTo === 1 ? 'is' : 'are'} filed there too.` : ''
       onDone(
@@ -493,18 +574,38 @@ function ReviewCard({
     older ? 'Too old to affect your budget.' : null,
   ].filter((x): x is string => !!x)
 
-  return (
-    <article aria-label={`Review ${titleCase(t.merchant)}`} className={reviewCard}>
-      {/* What it is, then one quiet line of why (DECISIONS.md 214). The guess shows as the picked category below. */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">{titleCase(t.merchant)}</h2>
-          <p className="mt-0.5 truncate text-xs text-ink-soft">
-            {formatDay(t.date)} · {t.accountName}
-          </p>
-        </div>
-        <p className={`shrink-0 text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>{formatSigned(t.amountCents)}</p>
+  const header = (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h2 className="truncate text-base font-semibold">{titleCase(t.merchant)}</h2>
+        <p className="mt-0.5 truncate text-xs text-ink-soft">
+          {formatDay(t.date)} · {t.accountName}
+        </p>
       </div>
+      <p className={`shrink-0 text-lg font-semibold tabular-nums ${t.amountCents < 0 ? 'text-good' : ''}`}>{formatSigned(t.amountCents)}</p>
+    </div>
+  )
+
+  if (transferOnly && keepTransfer)
+    return (
+      <article aria-label={`Edit ${titleCase(t.merchant)}`} className={reviewCard}>
+        {header}
+        <p className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
+          Money moved between your own accounts, like a payment arriving on a card, so it isn’t counted as spending or income.
+        </p>
+        <button type="button" onClick={() => setKeepTransfer(false)} className={`${reviewSecondary} mt-4 w-full`}>
+          It’s not a transfer
+        </button>
+        <button type="button" onClick={onSkip} className={`${reviewSecondary} mt-3 w-full`}>
+          Cancel
+        </button>
+      </article>
+    )
+
+  return (
+    <article aria-label={`${editing ? 'Edit' : 'Review'} ${titleCase(t.merchant)}`} className={reviewCard}>
+      {/* What it is, then one quiet line of why (DECISIONS.md 214). The guess shows as the picked category below. */}
+      {header}
       {(notes.length > 0 || (context && context.history.length > 0)) && (
         <p className="mt-2 break-words text-xs text-ink-soft">
           {context && context.history.length > 0 && (
@@ -624,6 +725,15 @@ function ReviewCard({
                     </div>
                   ) : (
                     pickedBill && <p className="mt-2 px-1 text-xs text-ink-faint">Its charges stay together on that bill.</p>
+                  )}
+                  {/* The bill it's going to, as the bill review card shows it: price, what needs a look, charges, more options. */}
+                  {billShown && (
+                    <BillOnCard
+                      item={billShown}
+                      onUpdate={onBillUpdate}
+                      onOpen={(part = 'edit') => onBillOpen(billShown, part)}
+                      onTrackAsBill={onTrackAsBill}
+                    />
                   )}
                 </>
               )}
@@ -763,15 +873,81 @@ function ReviewCard({
                 ? `✓ ${selected.name}${categoryId === t.categoryId && !t.isPartnerTransfer ? ' is right' : ''}`
                 : 'Pick a category'}
       </button>
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <button type="button" onClick={() => void dontRemember()} disabled={busy} className={reviewSecondary}>
-          I don’t remember
+      {editing ? (
+        <button type="button" onClick={onSkip} className={`${reviewSecondary} mt-3 w-full`}>
+          Cancel
         </button>
-        <button type="button" onClick={onSkip} className={reviewSecondary}>
-          Skip for now
-        </button>
-      </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <button type="button" onClick={() => void dontRemember()} disabled={busy} className={reviewSecondary}>
+            I don’t remember
+          </button>
+          <button type="button" onClick={onSkip} className={reviewSecondary}>
+            Skip for now
+          </button>
+        </div>
+      )}
     </article>
+  )
+}
+
+const noop = () => {}
+
+/**
+ * A transaction's edit pop-up (from Home and Budget) is its Review card (DECISIONS.md 247): the same kinds, categories,
+ * bills, debts and savings, with Cancel at the bottom. It replaced the old sheet and its "Transfer or card payment" box.
+ */
+export function TransactionEditSheet({
+  transaction: t,
+  categories: initial,
+  onClose,
+  onSaved,
+}: {
+  transaction: Transaction
+  categories: Category[]
+  onClose: () => void
+  onSaved: (message: string) => void
+}) {
+  const [categories, setCategories] = useState(initial)
+  const [error, setError] = useState<string | null>(null)
+  const bills = useBills(noop, noop)
+  return (
+    <>
+      <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/40" onClick={onClose}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Edit ${titleCase(t.merchant)}`}
+          onClick={(e) => e.stopPropagation()}
+          className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        >
+          {bills.notice && (
+            <p role="status" className="mb-3 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
+              {bills.notice}
+            </p>
+          )}
+          {(error ?? bills.error) && (
+            <p role="alert" className="mb-3 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
+              {error ?? bills.error}
+            </p>
+          )}
+          <ReviewCard
+            t={t}
+            categories={categories}
+            billItems={bills.s?.items ?? []}
+            onBillUpdate={(u, m) => void bills.update(u, m)}
+            onBillOpen={(i, part) => bills.openSheet(i, part)}
+            onTrackAsBill={(i) => void bills.trackAsBill(i)}
+            editing
+            onDone={(message) => onSaved(message)}
+            onSkip={onClose}
+            onCategoryCreated={async () => setCategories(await budgetApi.categories())}
+            onError={(e) => setError(e instanceof Error ? e.message : 'Could not save.')}
+          />
+        </div>
+      </div>
+      {bills.sheet}
+    </>
   )
 }
 

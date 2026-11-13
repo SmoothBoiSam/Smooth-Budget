@@ -242,17 +242,19 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
     {
         // DECISIONS.md 232: interest you filed under "Fees & interest" moves to Card interest, whatever its wording; in
         // review, Debt → "Interest charged" files it there too; each is tied to its card, and the Debt tab adds it up.
-        var (c, household, _, card) = await NewHouseholdAsync();
+        var (c, household, checking, card) = await NewHouseholdAsync();
         var fees = Guid.NewGuid();
         var filedAsFee = T(household, card, new DateOnly(2027, 1, 20), fees, 30_00, "INTEREST ON CARD BALANCE");
         var lateFee = T(household, card, new DateOnly(2027, 1, 21), fees, 29_00, "LATE FEE");
         var inReview = T(household, card, new DateOnly(2027, 2, 9), null, 32_50, "MONTHLY CHARGE");
         var payment = T(household, card, new DateOnly(2027, 1, 25), null, -200_00, "PAYMENT THANK YOU", TransactionKind.CardPayment);
+        var paymentSent = T(household, checking, new DateOnly(2027, 1, 24), null, 200_00, "PAYMENT TO TEST VISA", TransactionKind.CardPayment);
+        var notInYet = T(household, checking, new DateOnly(2027, 2, 1), null, 150_00, "TEST VISA ONLINE PMT", TransactionKind.CardPayment);
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Categories.Add(new Category { Id = fees, HouseholdId = household, Name = "Fees & interest", Type = CategoryType.Variable, SortOrder = 3 });
-            db.Transactions.AddRange(filedAsFee, lateFee, inReview, payment);
+            db.Transactions.AddRange(filedAsFee, lateFee, inReview, payment, paymentSent, notInYet);
             await db.SaveChangesAsync();
         }
         await c.GetAsync("/api/debt"); // the card becomes a debt
@@ -286,9 +288,10 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal([inReview.Id, filedAsFee.Id], h.Charges.Select(x => x.Id));
         Assert.All(h.Charges, x => Assert.Equal("Test Visa", x.DebtName));
 
-        // DECISIONS.md 240: past payments, the card's payments received, as positive amounts, tied to the card.
+        // DECISIONS.md 240, 244: past payments as positive amounts, tied to the card. The card's own side of a payment counts
+        // once (not its checking side too); a payment that has left checking but isn't on the card yet counts as well.
         var paid = (await c.GetFromJsonAsync<List<SmoothBudget.Api.Debt.DebtPaymentDto>>("/api/debt/payments", Json))!;
-        Assert.Equal([(payment.Id, 200_00L, "Test Visa")], paid.Select(x => (x.Id, x.AmountCents, x.DebtName)));
+        Assert.Equal([(notInYet.Id, 150_00L, "Test Visa"), (payment.Id, 200_00L, "Test Visa")], paid.Select(x => (x.Id, x.AmountCents, x.DebtName)));
     }
 
     [Fact]

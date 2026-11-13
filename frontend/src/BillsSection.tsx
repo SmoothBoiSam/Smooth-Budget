@@ -1,90 +1,36 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ApiError, budgetApi, isNewFind, needsLook, recurringApi, type Category, type RecurringItem, type RecurringSummary, type RecurringUpdate } from './api'
-import BillSheet, { ChargeHistory } from './BillSheet'
+import { useEffect, useState } from 'react'
+import { isNewFind, needsLook, type RecurringItem, type RecurringUpdate } from './api'
+import { ChargeHistory } from './BillSheet'
+import { useBills } from './useBills'
 import { every, keepLookingMessage, price, type SheetPart } from './bills'
 import { Chevron, ErrorNotice, Loading, reviewCard, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay } from './format'
 
 
 /**
- * Review → Bills (SPEC 4.7, DECISIONS.md 152), found from your transactions: what needs a look first (newly found
- * charges filed as spending, price changes, charges that stopped, possible duplicates), then monthly and annual totals
+ * All bills (SPEC 4.7, DECISIONS.md 152, 245), found from your transactions: monthly and annual totals, what needs a look,
  * and every bill with its next expected date. Nothing here is entered by hand; you confirm, rename, move, or dismiss.
+ * Review transactions goes through the ones that need a look one at a time.
  */
-export default function BillsSection({
-  onSignedOut,
-  onCount,
-  mode,
-}: {
-  onSignedOut: () => void
-  onCount: (needsLook: number) => void
-  /** "cards": what needs a look, one at a time with its charges (DECISIONS.md 167); "list": everything at once. */
-  mode: 'cards' | 'list'
-}) {
-  const [s, setS] = useState<RecurringSummary | null>(null)
-  const [skipped, setSkipped] = useState<string[]>([])
-  /** The bill sheet (DECISIONS.md 197): one bill's every option, opened on a part of it. */
-  const [open, setOpen] = useState<{ item: RecurringItem; part: SheetPart } | null>(null)
+export default function BillsSection({ onSignedOut, onCount }: { onSignedOut: () => void; onCount: (needsLook: number) => void }) {
   /** A bill tapped in the list (or linked from Budget): shown as its own card, with its charges and what to do. */
   const [focus, setFocus] = useState<string | null>(null)
-  const [categories, setCategories] = useState<Category[]>([])
-  const [notice, setNotice] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { s, notice, setNotice, error, load, update: save, trackAsBill: track, openSheet, sheet } = useBills(onSignedOut, onCount, () => setFocus(null))
+  const mode = 'list' as 'cards' | 'list'
+  const [skipped, setSkipped] = useState<string[]>([])
+  const update = (u: RecurringUpdate, m: string) => void save(u, m)
+  const trackAsBill = (i: RecurringItem) => void track(i)
+  const setOpen = (o: { item: RecurringItem; part: SheetPart }) => openSheet(o.item, o.part)
 
-  const fail = useCallback(
-    (e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) return onSignedOut()
-      setError(e instanceof Error ? e.message : 'Something went wrong.')
-    },
-    [onSignedOut],
-  )
-
-  const load = useCallback(async () => {
-    try {
-      const [summary, cats] = await Promise.all([recurringApi.summary(), budgetApi.categories()])
-      setS(summary)
-      setCategories(cats)
-      setError(null)
-      onCount(summary.items.filter(needsLook).length)
-      // A link to one bill (#/tasks/bills/<key>, from the Budget tab) opens it.
-      const key = decodeURIComponent(window.location.hash.replace(/^#\/?tasks\/bills\/?/, ''))
-      if (key) {
-        setFocus(summary.items.some((i) => i.key === key) ? key : null)
-        window.history.replaceState(null, '', '#/tasks/bills')
-      }
-    } catch (e) {
-      fail(e)
-    }
-  }, [fail, onCount])
-
+  // A link to one bill (#/tasks/bills/<key>, from the Budget tab) opens it.
   useEffect(() => {
-    void load()
-  }, [load])
-
-  async function update(u: RecurringUpdate, message: string, moveTo?: string) {
-    try {
-      if (moveTo) await recurringApi.moveToCategory(u.key, moveTo)
-      await recurringApi.update(u)
-      setNotice(message)
-      setOpen(null)
-      setFocus(null)
-      await load()
-    } catch (e) {
-      fail(e)
-    }
-  }
-
-  async function trackAsBill(i: RecurringItem) {
-    try {
-      const r = await recurringApi.trackAsBill(i.key)
-      setNotice(`${r.name} is its own bill category now, and its charges moved there. Future charges follow it.`)
-      setOpen(null)
-      setFocus(null)
-      await load()
-    } catch (e) {
-      fail(e)
-    }
-  }
+    if (!s) return
+    const key = decodeURIComponent(window.location.hash.replace(/^#\/?tasks\/bills\/?/, ''))
+    if (!key) return
+    window.history.replaceState(null, '', '#/tasks/bills')
+    const found = s.items.some((i) => i.key === key)
+    Promise.resolve().then(() => setFocus(found ? key : null))
+  }, [s])
 
   const alerts = s?.items.filter(needsLook) ?? []
   const counted = (i: RecurringItem) => i.status !== 'possiblyCanceled' && i.status !== 'canceled'
@@ -228,27 +174,12 @@ export default function BillsSection({
         </>
       )}
 
-      {open && (
-        <BillSheet
-          item={open.item}
-          start={open.part}
-          items={bills}
-          categories={categories}
-          onClose={() => setOpen(null)}
-          onDone={(message) => {
-            setNotice(message)
-            setOpen(null)
-            setFocus(null)
-            void load()
-          }}
-          onError={fail}
-        />
-      )}
+      {sheet}
     </div>
   )
 }
 
-function Alert({
+export function Alert({
   item: i,
   onUpdate,
   onOpen,
@@ -374,9 +305,55 @@ function Alert({
   )
 }
 
-/** What "Still going" does (DECISIONS.md 200), said when you tap it. */
-/** One bill that needs a look, with its charges, in Review's one-by-one view (DECISIONS.md 167). */
-function BillCard({
+/**
+ * A bill on a transaction's Review card once you say it's a bill (DECISIONS.md 245): what the bill review card shows, its
+ * price, what needs a look, its charges, and More options, under the transaction's own buttons.
+ */
+export function BillOnCard({
+  item: i,
+  onUpdate,
+  onOpen,
+  onTrackAsBill,
+}: {
+  item: RecurringItem
+  onUpdate: (u: RecurringUpdate, m: string) => void
+  onOpen: (part?: SheetPart) => void
+  onTrackAsBill: (i: RecurringItem) => void
+}) {
+  return (
+    <div className="mt-3 rounded-2xl neu-inset px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate font-medium">{i.name}</span>
+        <span className="shrink-0 tabular-nums">
+          {price(i)} <span className="text-xs text-ink-soft">{every[i.frequency]}</span>
+        </span>
+      </div>
+      <p className="truncate text-xs text-ink-soft">
+        {[i.categoryName ?? 'No category', i.status === 'canceled' ? 'Canceled' : `Next ${formatDay(i.nextExpected)}`].join(' · ')}
+      </p>
+      {/* A new find is what this card makes into a bill, so only the other needs-a-look questions show here. */}
+      {needsLook(i) && !isNewFind(i) && (
+        <div className="mt-3">
+          <Alert item={i} inCard onUpdate={onUpdate} onOpen={() => onOpen()} onTrackAsBill={onTrackAsBill} onNotABill={() => onOpen('notBill')} />
+        </div>
+      )}
+      <ChargeHistory item={i} />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={() => onOpen('edit')} className={`${smallBtn} text-accent`}>
+          More options
+        </button>
+        {!isNewFind(i) && (
+          <button type="button" onClick={() => onOpen('notBill')} className={`${smallBtn} text-danger`}>
+            Not a bill
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** One bill that needs a look, with its charges, in Review's one-by-one view (DECISIONS.md 167, 245). */
+export function BillCard({
   item: i,
   onUpdate,
   onOpen,

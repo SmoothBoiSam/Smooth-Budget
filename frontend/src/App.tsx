@@ -167,7 +167,7 @@ export default function App() {
         />
       )}
       {route === 'paytasks' && <PayTasksScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
-      {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} billsCount={billsCount} onBillsCount={setBillsCount} />}
+      {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} onBillsCount={setBillsCount} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'debtinterest' && <InterestScreen onSignedOut={signedOut} />}
       {route === 'debtpayments' && <PaymentsScreen onSignedOut={signedOut} />}

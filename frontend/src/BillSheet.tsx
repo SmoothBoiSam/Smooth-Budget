@@ -305,14 +305,6 @@ function ItemSheet({
                 {err}
               </p>
             )}
-            <div className="mt-5 flex gap-3">
-              <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
-                Cancel
-              </button>
-              <button type="submit" className="flex-1 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-ink shadow-neu-sm">
-                Save
-              </button>
-            </div>
 
             <p className="mt-6 px-1 text-sm font-semibold text-ink-soft">Options</p>
             <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
@@ -422,6 +414,14 @@ function ItemSheet({
                 </button>
               </li>
             </ul>
+            <div className="mt-5 flex gap-3">
+              <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
+                Cancel
+              </button>
+              <button type="submit" className="flex-1 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-ink shadow-neu-sm">
+                Save
+              </button>
+            </div>
           </>
         )}
       </form>

@@ -609,14 +609,6 @@ function DebtSheet({
             {err}
           </p>
         )}
-        <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
-            Cancel
-          </button>
-          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm">
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
         {!isNew && !debt.isCard && (
           <button
             type="button"
@@ -634,6 +626,14 @@ function DebtSheet({
             Remove this debt
           </button>
         )}
+        <div className="mt-5 flex gap-3">
+          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
+            Cancel
+          </button>
+          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm">
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
       </form>
     </div>
   )

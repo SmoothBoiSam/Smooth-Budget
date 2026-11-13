@@ -285,14 +285,6 @@ export default function CategoryEditSheet({
               </p>
             )}
 
-            <div className="mt-5 flex gap-3">
-              <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
-                Cancel
-              </button>
-              <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-ink shadow-neu-sm disabled:opacity-50">
-                {busy ? 'Saving…' : isNew ? 'Add' : 'Save'}
-              </button>
-            </div>
 
             {!isNew && (
               <>
@@ -345,6 +337,14 @@ export default function CategoryEditSheet({
                 </ul>
               </>
             )}
+            <div className="mt-5 flex gap-3">
+              <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
+                Cancel
+              </button>
+              <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-ink shadow-neu-sm disabled:opacity-50">
+                {busy ? 'Saving…' : isNew ? 'Add' : 'Save'}
+              </button>
+            </div>
           </>
         )}
       </form>

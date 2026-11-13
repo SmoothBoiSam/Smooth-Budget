@@ -27,7 +27,7 @@ import CategoryEditSheet from './CategoryEditSheet'
 import { ArchivedCategories, ResetCategories, UnusedCategories } from './CategoryTools'
 import BillSheet from './BillSheet'
 import { centsToInput, formatCents, formatDay, formatSigned, formatTime, parseDollars, titleCase } from './format'
-import TransactionSheet from './TransactionSheet'
+import { TransactionEditSheet } from './ReviewScreen'
 
 // Sub-views of the Budget tab, from the URL hash:
 //   #/budget            categories overview
@@ -224,7 +224,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       )}
 
       {selected && (
-        <TransactionSheet transaction={selected} categories={categories} onClose={() => setSelected(null)} onSaved={saved} />
+        <TransactionEditSheet transaction={selected} categories={categories} onClose={() => setSelected(null)} onSaved={saved} />
       )}
 
 
