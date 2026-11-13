@@ -931,8 +931,8 @@ function LastMonthCard({ last }: { last: LastMonth }) {
           {pending.length > 0 && (
             <>
               {' '}
-              <a href="#/payday" className={`${smallBtn} py-1! text-accent`}>
-                Where to send it: your Plan
+              <a href="#/tasks/payday" className={`${smallBtn} py-1! text-accent`}>
+                Where to send it: Pay period tasks
               </a>
             </>
           )}

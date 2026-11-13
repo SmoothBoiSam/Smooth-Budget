@@ -431,7 +431,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
     notices.push({
       key: `cash-${w.account}`,
       tone: 'danger',
-      href: '#/payday',
+      href: '#/payday/setup',
       text: (
         <>
           {w.account} is <b className="tabular-nums">{formatCents(w.shortCents)}</b> short for {w.billCount === 1 ? 'a bill' : `${w.billCount} bills`} due
@@ -470,7 +470,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
     notices.push({
       key: `sweep-${p.id}`,
       tone: 'good',
-      href: '#/payday',
+      href: '#/tasks/payday',
       text: (
         <>
           Send <b className="tabular-nums">{formatCents(p.amountCents)}</b> of {p.fromMonth.split(' ')[0]}’s leftover to {p.destination}
@@ -539,7 +539,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
                   : 'Import your schedule to forecast it'
               }
               value={s.nextPayday.hasSchedule ? `≈ ${formatCents(s.nextPayday.netCents)}` : undefined}
-              href="#/payday"
+              href="#/payday/setup"
             />
           )}
         </Rows>

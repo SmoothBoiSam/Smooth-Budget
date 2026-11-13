@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, needsLook, payBadge, paydayApi, recurringApi, type Me } from './api'
+import { ApiError, api, budgetApi, payBadge, paydayApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
@@ -29,8 +29,8 @@ function currentRoute(): Route {
   // Old links land where their page lives now: Bills moved into Review (DECISIONS.md 152), the inbox became Review, and
   // Review became Tasks (DECISIONS.md 206), whose plain #/review meant transactions.
   const moved =
-    hash === 'bills' || hash.startsWith('bills/')
-      ? 'tasks/' + hash
+    hash === 'bills' || hash.startsWith('bills/') || hash === 'tasks/bills' || hash.startsWith('tasks/bills/')
+      ? 'budget' // All bills is gone (DECISIONS.md 250): bills are edited from their category on Budget
       : hash === 'budget/inbox' || hash === 'review'
         ? 'tasks/transactions'
         : hash.startsWith('review/')
@@ -47,7 +47,7 @@ function currentRoute(): Route {
   if (hash === 'transactions') return 'transactions' // all transactions and search, from Home (DECISIONS.md 171)
   if (hash === 'tasks') return 'tasks'
   if (hash === 'tasks/payday') return 'paytasks'
-  if (hash.startsWith('tasks/')) return 'review' // tasks/transactions, tasks/bills[/<key>]
+  if (hash.startsWith('tasks/')) return 'review' // tasks/transactions
   return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'debt/interest' ? 'debtinterest' : hash === 'debt/payments' ? 'debtpayments' : hash === 'savings' ? 'savings' : hash === 'savings/history' ? 'savingshistory' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
@@ -85,16 +85,6 @@ export default function App() {
   useEffect(() => {
     if (me) refreshInbox()
   }, [me, route, refreshInbox])
-
-  // Bills that need a look count on the Tasks badge too; worked out once per sign-in, then kept current by Tasks and Bills.
-  const [billsCount, setBillsCount] = useState(0)
-  useEffect(() => {
-    if (!me) return
-    recurringApi
-      .summary()
-      .then((s) => setBillsCount(s.items.filter(needsLook).length))
-      .catch(() => undefined)
-  }, [me])
 
   // Payday steps still to do on the check you're on count on the Tasks badge (DECISIONS.md 188, 206). Checked as you move
   // around, since a sync can tick steps off on its own; the screens that show the plan report their own count.
@@ -159,15 +149,13 @@ export default function App() {
       {route === 'tasks' && (
         <TasksScreen
           inboxCount={inboxCount}
-          billsCount={billsCount}
           onInboxCount={setInboxCount}
-          onBillsCount={setBillsCount}
           onPlanCount={setPlanCount}
           onSignedOut={signedOut}
         />
       )}
       {route === 'paytasks' && <PayTasksScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
-      {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} onBillsCount={setBillsCount} />}
+      {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
       {route === 'debtinterest' && <InterestScreen onSignedOut={signedOut} />}
       {route === 'debtpayments' && <PaymentsScreen onSignedOut={signedOut} />}
@@ -179,7 +167,7 @@ export default function App() {
       {route === 'friend' && <FriendScreen key={window.location.hash} id={window.location.hash.slice('#/friends/'.length)} onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
       </div>
-      <BottomNav route={route} badges={{ tasks: inboxCount + billsCount + planCount }} />
+      <BottomNav route={route} badges={{ tasks: inboxCount + planCount }} />
     </>
   )
 }

@@ -141,7 +141,7 @@ public class NotificationService(
             if (!sent.Contains(n.Key) && !household.NotificationsOff.Contains(n.Type)) news.Add((n.Key, n.Message));
         // Several over-budget categories (or price rises) at once arrive as one notification.
         Merge(news, "over:", "Over budget", "#/budget", "over");
-        Merge(news, "price:", "Bill prices went up", "#/tasks/bills", "price");
+        Merge(news, "price:", "Bill prices went up", "#/budget", "price");
 
         foreach (var (key, message) in news)
         {
@@ -182,7 +182,7 @@ public class NotificationService(
         var due = (await recurring.UpcomingAsync(householdId, 20, ct)).Where(b => b.Date == tomorrow).ToList();
         if (due.Count > 0)
             list.Add(("bills", $"bills:{tomorrow:yyyy-MM-dd}", new PushMessage(due.Count == 1 ? "Bill due tomorrow" : "Bills due tomorrow",
-                string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/tasks/bills", "bills")));
+                string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/budget", "bills")));
 
         var b = await budget.GetAsync(householdId, ct);
         foreach (var line in b.Groups.Where(g => g.CountsTowardLeftToSpend).SelectMany(g => g.Categories).Where(c => c.RemainingCents < 0 && c.LimitCents > 0))
@@ -205,7 +205,7 @@ public class NotificationService(
         // A price rise you haven't said "Got it" to, once per new price.
         foreach (var i in (await recurring.SummaryAsync(householdId, ct)).Items.Where(i => i.Status == "priceUp"))
             list.Add(("price", $"price:{i.Key}:{i.AmountCents}", new PushMessage("Bill price went up",
-                $"{i.Name} went up{(i.PreviousAmountCents is { } was ? $" from {PayEngine.Dollars(was)}" : "")} to {PayEngine.Dollars(i.AmountCents)}.", "#/tasks/bills", "price")));
+                $"{i.Name} went up{(i.PreviousAmountCents is { } was ? $" from {PayEngine.Dollars(was)}" : "")} to {PayEngine.Dollars(i.AmountCents)}.", "#/budget", "price")));
 
         // Each friend's own, opening their page (DECISIONS.md 211).
         foreach (var c in (h.Contributions ?? []).Where(c => c.State == "late"))

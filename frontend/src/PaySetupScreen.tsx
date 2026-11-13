@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } fr
 import {
   ApiError,
   paydayApi,
+  type PaydaySummary,
   type PayProfile,
   type ScheduleMonth,
   type StubListItem,
   type StubReview,
 } from './api'
 import { useRemembered } from './offline'
+import { Paychecks } from './PaydayScreen'
 import { Caret, ErrorNotice, Page, PageHeader, Row, Rows } from './ui'
 import { formatCents, formatDay } from './format'
 
@@ -20,6 +22,7 @@ const monthLabel = (y: number, m: number) => new Date(y, m - 1, 1).toLocaleDateS
  * pay rules work on their own, so they aren't shown.
  */
 export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => void }) {
+  const [summary, setSummary] = useState<PaydaySummary | null>(null)
   const [profile, setProfile] = useState<PayProfile | null>(null)
   const [months, setMonths] = useState<ScheduleMonth[]>([])
   const [stubs, setStubs] = useState<StubListItem[]>([])
@@ -48,6 +51,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
   const load = useCallback(async () => {
     try {
       const [summary, m, st] = await Promise.all([paydayApi.summary(), paydayApi.schedule(), paydayApi.stubs()])
+      setSummary(summary)
       setProfile(summary.profile)
       setMonths(m)
       setStubs(st)
@@ -192,6 +196,13 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
   return (
     <Page>
       {header('#/payday', 'Plan', 'Schedule & pay stubs')}
+
+      {/* Your paychecks sit here, above what they're forecast from (DECISIONS.md 249). */}
+      {summary && (
+        <Section title="Paychecks">
+          <Paychecks s={summary} />
+        </Section>
+      )}
 
       <Section title="Monthly schedule" hint="SkedPlus+ text export (.txt) or CSV. Re-importing a month replaces it.">
         <FileButton label="Import a schedule" accept=".txt,.csv,text/plain,text/csv" onChange={pickSchedule} />

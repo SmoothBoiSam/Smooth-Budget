@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ApiError, budgetApi, needsLook, openPlanItems, payBadge, paydayApi, recurringApi, type PaydaySummary } from './api'
+import { ApiError, budgetApi, openPlanItems, payBadge, paydayApi, type PaydaySummary } from './api'
 import { icons } from './icons'
 import { weekday } from './paycheck'
 import { Card, Page, PageHeader, Row, Rows } from './ui'
@@ -11,16 +11,12 @@ import { Card, Page, PageHeader, Row, Rows } from './ui'
  */
 export default function TasksScreen({
   inboxCount,
-  billsCount,
   onInboxCount,
-  onBillsCount,
   onPlanCount,
   onSignedOut,
 }: {
   inboxCount: number
-  billsCount: number
   onInboxCount: (n: number) => void
-  onBillsCount: (n: number) => void
   onPlanCount: (n: number) => void
   onSignedOut: () => void
 }) {
@@ -35,10 +31,6 @@ export default function TasksScreen({
       .inboxCount()
       .then((r) => onInboxCount(r.count + r.review))
       .catch(signedOut)
-    recurringApi
-      .summary()
-      .then((s) => onBillsCount(s.items.filter(needsLook).length))
-      .catch(signedOut)
     paydayApi
       .summary()
       .then((p) => {
@@ -46,7 +38,7 @@ export default function TasksScreen({
         onPlanCount(payBadge(p))
       })
       .catch(signedOut)
-  }, [onInboxCount, onBillsCount, onPlanCount, onSignedOut])
+  }, [onInboxCount, onPlanCount, onSignedOut])
 
   const current = payday?.checks.find((c) => c.isCurrent && c.plan && c.plan.items.length > 0)
   const hasPayTasks = !!payday?.checks.some((c) => c.plan && c.plan.items.length > 0)
@@ -65,12 +57,12 @@ export default function TasksScreen({
       <PageHeader title="Tasks" />
       <Card>
         <Rows>
-          {/* Transactions and the bills that need a look are one review (DECISIONS.md 245). */}
+          {/* No separate bill review (DECISIONS.md 248): a bill's charge is reviewed as a transaction. */}
           <Row
             icon={icons.transactions}
             label={<span className="font-semibold">Review transactions</span>}
-            hint={reviewHint(inboxCount, billsCount)}
-            badge={inboxCount + billsCount}
+            hint={inboxCount > 0 ? `${inboxCount} ${inboxCount === 1 ? 'purchase' : 'purchases'} to confirm` : 'All caught up'}
+            badge={inboxCount}
             href="#/tasks/transactions"
           />
           {hasPayTasks && (
@@ -100,13 +92,4 @@ export default function TasksScreen({
       </Card>
     </Page>
   )
-}
-
-/** "3 purchases to confirm and 1 bill to look at", or "All caught up". */
-function reviewHint(purchases: number, bills: number) {
-  const parts = [
-    purchases > 0 ? `${purchases} ${purchases === 1 ? 'purchase' : 'purchases'} to confirm` : null,
-    bills > 0 ? `${bills} ${bills === 1 ? 'bill' : 'bills'} to look at` : null,
-  ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' and ') : 'All caught up'
 }

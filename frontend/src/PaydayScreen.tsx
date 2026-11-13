@@ -12,8 +12,8 @@ const monthName = (iso: string) => {
 }
 
 /**
- * The Plan tab (SPEC 4.6; DECISIONS.md 147), with links to Debt and Savings: the next checks with a low/likely/high range, and predicted vs
- * actual once a deposit lands. The payday plan for each check is checked off under Tasks (DECISIONS.md 206). Setup is on its own screen.
+ * The Plan tab (SPEC 4.6; DECISIONS.md 147, 249): one menu for Debt, Savings, and Schedule & pay stubs, which holds your
+ * paychecks. The payday plan for each check is checked off under Tasks (DECISIONS.md 206).
  */
 export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut: () => void; onOpenItems: (n: number) => void }) {
   const [s, setS] = useState<PaydaySummary | null>(null)
@@ -45,30 +45,35 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
     void load()
   }, [load])
 
-  const empty = s && s.scheduleMonths.length === 0 && s.stubCount === 0
-  const [historyOpen, setHistoryOpen] = useRemembered('payday.history', true)
-  const [doneOpen, setDoneOpen] = useState(false)
-
   return (
     <Page>
       <PageHeader title="Plan" />
-      <DebtSavingsLinks debt={debt} savings={savings} />
+      <DebtSavingsLinks debt={debt} savings={savings} payday={s} />
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
       {!s && !error && <Loading />}
+    </Page>
+  )
+}
 
-      {empty && (
-        <section className="mt-6 rounded-3xl neu p-5">
-          <h2 className="font-semibold">Forecast your paychecks</h2>
-          <p className="mt-1 text-sm text-ink-soft">Import your SkedPlus+ schedule and 2 or more pay stubs.</p>
-          <a href="#/payday/setup" className="mt-4 block rounded-2xl bg-primary shadow-neu-sm py-3 text-center text-sm font-semibold text-primary-ink">
-            Import a schedule or pay stub
-          </a>
-        </section>
-      )}
+/**
+ * Your paychecks (DECISIONS.md 249), on the Schedule & pay stubs page they're forecast from: the next checks with a
+ * low/likely/high range, finished ones put away, and predicted vs actual once a deposit lands.
+ */
+export function Paychecks({ s }: { s: PaydaySummary }) {
+  const empty = s.scheduleMonths.length === 0 && s.stubCount === 0
+  const [historyOpen, setHistoryOpen] = useRemembered('payday.history', true)
+  const [doneOpen, setDoneOpen] = useState(false)
 
-      {s && !empty && (
+  if (empty)
+    return (
+      <p className="rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
+        Import your SkedPlus+ schedule and 2 or more pay stubs below, and your paychecks show up here.
+      </p>
+    )
+
+  return (
         <>
-          <ul className="mt-6 space-y-4">
+          <ul className="space-y-4">
             {s.checks
               .filter((c) => !finished(c))
               .map((c) => (
@@ -142,13 +147,20 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
             {s.modelEdited ? ' (with your edits)' : ''}. Irregular payouts are left out.
           </p>
         </>
-      )}
-    </Page>
   )
 }
 
 /** Debt, Savings, and Schedule & pay stubs, one tap away under the plan (they used to be tabs of their own). */
-function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings: SavingsSummary | null }) {
+function DebtSavingsLinks({ debt, savings, payday }: { debt: DebtSummary | null; savings: SavingsSummary | null; payday: PaydaySummary | null }) {
+  // The check you're on, or the next one: what the paychecks row leads with (DECISIONS.md 249).
+  const next = payday?.checks.find((c) => !finished(c) && (c.hasSchedule || c.landedNetCents !== null))
+  const payLine = !payday
+    ? 'Your paychecks, schedule and pay stubs'
+    : payday.scheduleMonths.length === 0 && payday.stubCount === 0
+      ? 'Import a schedule and pay stubs to forecast your pay'
+      : next
+        ? `${next.isCurrent ? 'Paid' : 'Next check'} ${weekday(next.payDate)} · ${next.landedNetCents === null ? 'about ' : ''}${formatCents(next.landedNetCents ?? next.netCents)}`
+        : 'Your paychecks, schedule and pay stubs'
   const debtLine = !debt
     ? 'Cards, loans and your payoff plan'
     : debt.debts.length === 0
@@ -163,7 +175,7 @@ function DebtSavingsLinks({ debt, savings }: { debt: DebtSummary | null; savings
       <Rows>
         <MenuRow icon={icons.debt} label={<span className="font-semibold">Debt</span>} hint={debtLine} href="#/debt" />
         <MenuRow icon={icons.savings} label={<span className="font-semibold">Savings</span>} hint={savingsLine} href="#/savings" />
-        <MenuRow icon={icons.payday} label={<span className="font-semibold">Schedule & pay stubs</span>} hint="What the forecast learns from" href="#/payday/setup" />
+        <MenuRow icon={icons.payday} label={<span className="font-semibold">Schedule & pay stubs</span>} hint={payLine} href="#/payday/setup" />
       </Rows>
     </Card>
   )

@@ -67,9 +67,9 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
 
       {s && checks.length === 0 && (
         <p className="mt-6 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
-          Nothing to do yet. Once Plan forecasts your next check, the steps for it show up here.{' '}
-          <a href="#/payday" className="font-medium text-accent">
-            Open Plan
+          Nothing to do yet. Once your next check is forecast, the steps for it show up here.{' '}
+          <a href="#/payday/setup" className="font-medium text-accent">
+            Schedule & pay stubs
           </a>
         </p>
       )}

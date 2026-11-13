@@ -15,17 +15,15 @@ import {
   type RecurringItem,
   type RecurringUpdate,
   listedType,
-  needsLook,
 } from './api'
-import BillsSection, { Alert, BillCard, BillOnCard } from './BillsSection'
+import { BillOnCard } from './BillsSection'
 import { useBills } from './useBills'
 import type { SheetPart } from './bills'
-import { CardLink, ErrorNotice, Loading, Page, PageHeader, reviewCard, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
+import { ErrorNotice, Loading, Page, PageHeader, reviewCard, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
 import { formatCents, formatDay, formatSigned, titleCase } from './format'
 
 type Scope = 'todo' | 'earlier' | 'older'
 
-const partFromHash = () => (window.location.hash.startsWith('#/tasks/bills') ? 'bills' : 'transactions')
 
 
 /** Partner money first, then purchases with no category, then the app's least certain guesses, then likely ones. */
@@ -40,16 +38,7 @@ function rank(t: Transaction) {
  * Cards go one at a time with the app's guess up front; the list is for confirming the likely ones in bulk.
  * Nothing here is settled until the user says so (DECISIONS.md 80).
  */
-export default function ReviewScreen({
-  onChanged,
-  onSignedOut,
-  onBillsCount,
-}: {
-  onChanged: (count?: number) => void
-  onSignedOut: () => void
-  onBillsCount: (n: number) => void
-}) {
-  const [part, setPart] = useState<'transactions' | 'bills'>(partFromHash)
+export default function ReviewScreen({ onChanged, onSignedOut }: { onChanged: (count?: number) => void; onSignedOut: () => void }) {
   const [scope, setScope] = useState<Scope>('todo')
   const [mode, setMode] = useState<'cards' | 'list'>('cards')
   const [queue, setQueue] = useState<Transaction[] | null>(null)
@@ -58,9 +47,9 @@ export default function ReviewScreen({
   const [categories, setCategories] = useState<Category[]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Bills that need a look, in the same review (DECISIONS.md 245); skipped ones wait until you ask for them again.
-  const bills = useBills(onSignedOut, onBillsCount, () => setNotice(null))
-  const [skippedBills, setSkippedBills] = useState<string[]>([])
+  // Your bills, for a charge you mark as a bill. There's no separate bill review (DECISIONS.md 248): every bill's
+  // charge comes through here as a transaction first.
+  const bills = useBills(onSignedOut, noop, () => setNotice(null))
 
   const fail = useCallback(
     (e: unknown) => {
@@ -91,13 +80,6 @@ export default function ReviewScreen({
     Promise.all([loadQueue(scope), loadSide(), loadCategories()]).catch(fail)
   }, [scope, loadQueue, loadSide, loadCategories, fail])
 
-
-  // A link to #/tasks/bills (a bill line on the Budget tab, a notification) switches pages even while one is open.
-  useEffect(() => {
-    const onHash = () => setPart(partFromHash())
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [])
 
   /**
    * After one card: drop it locally (no jumpy reload), refresh the counts and the badge. A new merchant rule may have
@@ -130,7 +112,6 @@ export default function ReviewScreen({
   const likely = counts?.likely ?? 0
   const reviewScope: ReviewScope = scope === 'todo' ? 'month' : scope
   const current = queue?.[0]
-  const billsWaiting = scope === 'todo' ? (bills.s?.items.filter(needsLook).filter((i) => !skippedBills.includes(i.key)) ?? []) : []
   // Earlier and Older only show up when something there is waiting (DECISIONS.md 149).
   const scopes = (['todo', 'earlier', 'older'] as const).filter(
     (x) => x === 'todo' || x === scope || (x === 'earlier' ? summary?.earlier.total : summary?.older.total),
@@ -138,13 +119,8 @@ export default function ReviewScreen({
 
   return (
     <Page>
-      {/* One review for transactions and the bills that need a look (DECISIONS.md 245); All bills is its own page under it. */}
-      <PageHeader
-        title={part === 'bills' ? 'All bills' : 'Review transactions'}
-        back={part === 'bills' ? { href: '#/tasks/transactions', label: 'Review' } : { href: '#/tasks', label: 'Tasks' }}
-      />
+      <PageHeader title="Review transactions" back={{ href: '#/tasks', label: 'Tasks' }} />
       {/* The view switch sits on a row of its own under the title (DECISIONS.md 201), on the left like the filters below it (212). */}
-      {part === 'transactions' && (
       <div className="mt-3 flex">
         <div role="tablist" aria-label="View" className="flex rounded-full neu-inset p-1 text-xs font-medium">
           {(['cards', 'list'] as const).map((m) => (
@@ -161,12 +137,7 @@ export default function ReviewScreen({
           ))}
         </div>
       </div>
-      )}
 
-      {part === 'bills' ? (
-        <BillsSection onSignedOut={onSignedOut} onCount={onBillsCount} />
-      ) : (
-      <>
       {/* Compact so a whole review card fits on a phone screen without scrolling (DECISIONS.md 161). */}
       {scopes.length > 1 && (
           <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Which transactions">
@@ -232,7 +203,7 @@ export default function ReviewScreen({
 
       {queue === null ? (
         <Loading />
-      ) : queue.length === 0 && billsWaiting.length === 0 ? (
+      ) : queue.length === 0 ? (
         <div className="mt-3 rounded-3xl neu px-5 py-8 text-center">
           <p className="text-lg font-semibold">All caught up</p>
           <p className="mt-1 text-sm text-ink-soft">
@@ -243,23 +214,12 @@ export default function ReviewScreen({
               Review {summary!.earlier.total} from earlier months
             </button>
           )}
-          {scope === 'todo' && skippedBills.length > 0 && (
-            <button type="button" onClick={() => setSkippedBills([])} className={`${smallBtn} mt-4 ml-2 text-accent`}>
-              Show {skippedBills.length} skipped {skippedBills.length === 1 ? 'bill' : 'bills'}
-            </button>
-          )}
         </div>
       ) : (
         <>
           <div className="mt-3 flex min-h-8 items-center justify-between gap-3">
             <p className="text-xs text-ink-soft">
-              <span className="font-semibold">{queue.length + billsWaiting.length}</span> to go
-              {billsWaiting.length > 0 && (
-                <span className="text-ink-faint">
-                  {' '}
-                  · {billsWaiting.length} {billsWaiting.length === 1 ? 'bill' : 'bills'}
-                </span>
-              )}
+              <span className="font-semibold">{queue.length}</span> to go
               {counts && counts.unsure > 0 && <span className="text-ink-faint"> · {counts.unsure} the app wasn’t sure about</span>}
             </p>
             {likely > 1 && (
@@ -273,43 +233,7 @@ export default function ReviewScreen({
             )}
           </div>
 
-          {/* Bills that need a look come first (DECISIONS.md 245), each as the bill review card it was. */}
-          {mode === 'cards' && billsWaiting[0] && (
-            <BillCard
-              key={billsWaiting[0].key}
-              item={billsWaiting[0]}
-              onUpdate={(u, m) => void bills.update(u, m)}
-              onOpen={(part = 'edit') => bills.openSheet(billsWaiting[0], part)}
-              onTrackAsBill={(i) => void bills.trackAsBill(i)}
-              onSkip={() => {
-                setNotice(null)
-                bills.setNotice(null)
-                setSkippedBills((k) => [...k, billsWaiting[0].key])
-              }}
-            />
-          )}
-          {mode === 'list' && billsWaiting.length > 0 && (
-            <section aria-labelledby="bills-h" className="mt-3">
-              <h2 id="bills-h" className="px-1 text-xs font-semibold text-ink-soft">
-                Bills that need a look
-              </h2>
-              <ul className="mt-2 space-y-2">
-                {billsWaiting.map((i) => (
-                  <li key={i.key}>
-                    <Alert
-                      item={i}
-                      onUpdate={(u, m) => void bills.update(u, m)}
-                      onOpen={() => bills.openSheet(i, 'edit')}
-                      onTrackAsBill={(x) => void bills.trackAsBill(x)}
-                      onNotABill={() => bills.openSheet(i, 'notBill')}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {mode === 'cards' && !billsWaiting[0] && current && (
+          {mode === 'cards' && current && (
             <ReviewCard
               key={current.id}
               t={current}
@@ -326,7 +250,7 @@ export default function ReviewScreen({
             />
           )}
 
-          {mode === 'list' && queue.length > 0 && (
+          {mode === 'list' && (
             <ul className="mt-3 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
               {queue.slice(0, 200).map((t) => (
                 <ListRow
@@ -353,11 +277,7 @@ export default function ReviewScreen({
           )}
         </>
       )}
-      {/* Every bill, with what each costs (DECISIONS.md 245). */}
-      <CardLink href="#/tasks/bills">All bills</CardLink>
       {bills.sheet}
-      </>
-      )}
     </Page>
   )
 }
