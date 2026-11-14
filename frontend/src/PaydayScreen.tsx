@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ApiError, debtApi, payBadge, paydayApi, savingsApi, type DebtSummary, type PayCheck, type PaydaySummary, type SavingsSummary } from './api'
 import { icons } from './icons'
 import { useRemembered, useResume } from './offline'
-import { Card, Caret, Chevron, ErrorNotice, Loading, Page, PageHeader, Row as MenuRow, Rows } from './ui'
+import { Card, Caret, Chevron, ErrorNotice, Page, PageHeader, Row as MenuRow, Rows } from './ui'
 import { formatCents, formatDay } from './format'
 import { finished, weekday } from './paycheck'
 
@@ -12,8 +12,8 @@ const monthName = (iso: string) => {
 }
 
 /**
- * The Plan tab (SPEC 4.6; DECISIONS.md 147, 249): one menu for Debt, Savings, and Schedule & pay stubs, which holds your
- * paychecks. The payday plan for each check is checked off under Tasks (DECISIONS.md 206).
+ * The Plan tab (SPEC 4.6; DECISIONS.md 147, 249, 254): one menu for Debt, Savings, and Income, which holds your
+ * paychecks, schedule and pay stubs. The payday plan for each check is checked off under Tasks (DECISIONS.md 206).
  */
 export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut: () => void; onOpenItems: (n: number) => void }) {
   const [s, setS] = useState<PaydaySummary | null>(null)
@@ -49,15 +49,16 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
   return (
     <Page>
       <PageHeader title="Plan" />
+      {/* The menu shows straight away; its lines fill in as they load. Plan has no cards below it any more, so no
+          placeholder cards either (DECISIONS.md 254). */}
       <DebtSavingsLinks debt={debt} savings={savings} payday={s} />
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
-      {!s && !error && <Loading />}
     </Page>
   )
 }
 
 /**
- * Your paychecks (DECISIONS.md 249), on the Schedule & pay stubs page they're forecast from: the next checks with a
+ * Your paychecks (DECISIONS.md 249), on the Income page they're forecast from: the next checks with a
  * low/likely/high range, finished ones put away, and predicted vs actual once a deposit lands.
  */
 export function Paychecks({ s }: { s: PaydaySummary }) {
@@ -151,17 +152,17 @@ export function Paychecks({ s }: { s: PaydaySummary }) {
   )
 }
 
-/** Debt, Savings, and Schedule & pay stubs, one tap away under the plan (they used to be tabs of their own). */
+/** Debt, Savings, and Income, one tap away under the plan (they used to be tabs of their own). */
 function DebtSavingsLinks({ debt, savings, payday }: { debt: DebtSummary | null; savings: SavingsSummary | null; payday: PaydaySummary | null }) {
   // The check you're on, or the next one: what the paychecks row leads with (DECISIONS.md 249).
   const next = payday?.checks.find((c) => !finished(c) && (c.hasSchedule || c.landedNetCents !== null))
   const payLine = !payday
-    ? 'Your paychecks, schedule and pay stubs'
+    ? 'Your pay, schedule and pay stubs'
     : payday.scheduleMonths.length === 0 && payday.stubCount === 0
       ? 'Import a schedule and pay stubs to forecast your pay'
       : next
         ? `${next.isCurrent ? 'Paid' : 'Next check'} ${weekday(next.payDate)} · ${next.landedNetCents === null ? 'about ' : ''}${formatCents(next.landedNetCents ?? next.netCents)}`
-        : 'Your paychecks, schedule and pay stubs'
+        : 'Your pay, schedule and pay stubs'
   const debtLine = !debt
     ? 'Cards, loans and your payoff plan'
     : debt.debts.length === 0
@@ -176,7 +177,7 @@ function DebtSavingsLinks({ debt, savings, payday }: { debt: DebtSummary | null;
       <Rows>
         <MenuRow icon={icons.debt} label={<span className="font-semibold">Debt</span>} hint={debtLine} href="#/debt" />
         <MenuRow icon={icons.savings} label={<span className="font-semibold">Savings</span>} hint={savingsLine} href="#/savings" />
-        <MenuRow icon={icons.payday} label={<span className="font-semibold">Schedule & pay stubs</span>} hint={payLine} href="#/payday/setup" />
+        <MenuRow icon={icons.payday} label={<span className="font-semibold">Income</span>} hint={payLine} href="#/income" />
       </Rows>
     </Card>
   )
@@ -233,7 +234,7 @@ function CheckCard({ c }: { c: PayCheck }) {
       {!c.hasSchedule && c.landedNetCents === null ? (
         <p className="mt-2 text-sm text-ink-soft">
           Import your {monthName(c.periodStart)} schedule to forecast this check.{' '}
-          <a href="#/payday/setup" className="font-medium text-accent">
+          <a href="#/income" className="font-medium text-accent">
             Import
           </a>
         </p>

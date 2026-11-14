@@ -285,6 +285,54 @@ function daysBetween(from: string, to: string) {
   return Math.round(day(to) - day(from))
 }
 
+/** Whole dollars, rounded toward zero, for the small tiles: "$84", "−$12". */
+const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${Math.floor(Math.abs(cents) / 100).toLocaleString('en-US')}`
+
+/**
+ * Every spending category as a small tile under Left to Spend (DECISIONS.md 254): its name, a thin bar of what's left of
+ * its limit, and the amount left. Small on purpose, three to a row; past nine, the rest are a tap away on Budget.
+ */
+function SpendingTiles({ items }: { items: NonNullable<HomeSummary['spending']> }) {
+  const MAX = 9
+  const shown = items.length > MAX ? items.slice(0, MAX - 1) : items
+  return (
+    <ul aria-label="Left in each spending category" className="mt-3 grid grid-cols-3 gap-2">
+      {shown.map((c) => {
+        const share = c.limitCents > 0 ? Math.max(0, Math.min(1, c.leftCents / c.limitCents)) : 0
+        const over = c.leftCents < 0
+        const low = !over && share < 0.15
+        return (
+          <li key={c.id}>
+            <a
+              href={`#/budget/c/${c.id}`}
+              aria-label={`${c.name}: ${over ? `${formatCents(-c.leftCents)} over` : `${formatCents(c.leftCents)} left of ${formatCents(c.limitCents)}`}`}
+              className="block rounded-xl neu-inset px-2.5 py-2"
+            >
+              <span className="block truncate text-[11px] font-medium text-ink-soft">{c.name}</span>
+              <span aria-hidden className="mt-1 block h-1 overflow-hidden rounded-full bg-ink/10">
+                <span
+                  className={`block h-full rounded-full transition-[width] duration-500 ${over ? 'bg-danger' : low ? 'bg-gold' : 'bg-good'}`}
+                  style={{ width: `${(over ? 1 : share) * 100}%` }}
+                />
+              </span>
+              <span aria-hidden className={`mt-1 block text-xs font-semibold tabular-nums ${over ? 'text-danger' : ''}`}>
+                {over ? `${dollars(-c.leftCents)} over` : dollars(c.leftCents)}
+              </span>
+            </a>
+          </li>
+        )
+      })}
+      {items.length > MAX && (
+        <li>
+          <a href="#/budget" className="flex h-full items-center justify-center rounded-xl neu-inset px-2.5 py-2 text-xs font-semibold text-accent">
+            +{items.length - shown.length} more
+          </a>
+        </li>
+      )}
+    </ul>
+  )
+}
+
 /** Left to Spend in a pressed-in well, with a ring for the share of the variable budget still left. */
 function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShownLeft> }) {
   const style = levels[shown.level]
@@ -432,7 +480,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
     notices.push({
       key: `cash-${w.account}`,
       tone: 'danger',
-      href: '#/payday/setup',
+      href: '#/income',
       text: (
         <>
           {w.account} is <b className="tabular-nums">{formatCents(w.shortCents)}</b> short for {w.billCount === 1 ? 'a bill' : `${w.billCount} bills`} due
@@ -501,6 +549,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
             <dd className="text-lg font-semibold tabular-nums">{untilPayday ? <Cents cents={untilPayday.cents} countUp={shown.intro} /> : s.daysRemaining}</dd>
           </div>
         </dl>
+        {s.spending && s.spending.length > 0 && <SpendingTiles items={s.spending} />}
       </section>
 
       {notices.length > 0 && (
@@ -540,7 +589,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
                   : 'Import your schedule to forecast it'
               }
               value={s.nextPayday.hasSchedule ? `≈ ${formatCents(s.nextPayday.netCents)}` : undefined}
-              href="#/payday/setup"
+              href="#/income"
             />
           )}
         </Rows>

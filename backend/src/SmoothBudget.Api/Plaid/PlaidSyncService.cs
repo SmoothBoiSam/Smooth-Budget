@@ -26,7 +26,8 @@ public class PlaidItemLocks
 /// </summary>
 public class PlaidSyncService(CategorizationService categorization,
     AppDbContext db, PlaidClient plaid, SecretBox secrets, TransferDetectionService transfers,
-    PlaidItemLocks locks, TimeProvider clock, ILogger<PlaidSyncService> log, Budget.BudgetRefreshTracker budgetTracker)
+    PlaidItemLocks locks, TimeProvider clock, ILogger<PlaidSyncService> log, Budget.BudgetRefreshTracker budgetTracker,
+    Payday.PaydayService payday)
 {
     public async Task<SyncResultDto> SyncAsync(Guid itemId, CancellationToken ct = default)
     {
@@ -191,6 +192,12 @@ public class PlaidSyncService(CategorizationService categorization,
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
         }
+        // A paycheck leaves Review once it's matched to its pay date (DECISIONS.md 254). Never fails the sync.
+        if (touchedDates.Count > 0)
+        {
+            try { await payday.MatchDepositsAsync(item.HouseholdId, ct); }
+            catch (Exception e) when (e is not OperationCanceledException) { log.LogWarning(e, "Matching paychecks after a sync failed"); }
+        }
 
         log.LogInformation("Plaid sync for item {ItemId}: {Inserted} new, {Updated} updated ({Posted} posted), {Deleted} removed, {Adopted} matched to CSV, {Skipped} skipped",
             item.Id, inserted, plan.Updates.Count, posted, plan.Deletes.Count, adopted, skipped);
@@ -219,6 +226,7 @@ public class PlaidSyncService(CategorizationService categorization,
             Source = DataSource.Plaid, CreatedUtc = now,
         };
         Apply(row, account, t, categorize);
+        CategorizationContext.AskAboutIncome(row);
         return row;
     }
 

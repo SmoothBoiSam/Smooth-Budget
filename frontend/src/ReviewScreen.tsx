@@ -5,6 +5,9 @@ import {
   budgetApi,
   budgetEditApi,
   recurringApi,
+  sharedApi,
+  type Friend,
+  type IncomeKind,
   type Category,
   type ChargeBillChoices,
   type TowardChoices,
@@ -326,7 +329,14 @@ function ReviewCard({
   )
   const [categoryId, setCategoryId] = useState<string | null>(pick)
   // The kind you tapped, or else the picked category's kind (categories can arrive after the card does).
-  const [pickedGroup, setGroup] = useState<Category['type'] | null>(null)
+  const [pickedGroup, setGroup] = useState<Group | null>(null)
+  // Money in can be your income (DECISIONS.md 254): a paycheck, a friend's contribution, or other income.
+  const moneyIn = t.amountCents < 0 && !t.isPartnerTransfer
+  const [incomeAs, setIncomeAs] = useState<IncomeKind | null>(
+    t.kind === 'PartnerContribution' ? 'friend' : t.incomeType === 'friend' ? null : t.incomeType,
+  )
+  const [friends, setFriends] = useState<Friend[] | null>(null)
+  const [friendPick, setFriendPick] = useState<string | null>(t.friendId)
   const [rule, setRule] = useState(false)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -345,9 +355,6 @@ function ReviewCard({
   // Money between your own accounts with no category (a payment arriving on a card, say) isn't counted. Editing one asks
   // first whether it really is a transfer (DECISIONS.md 247); the old checkbox is gone.
   const transferOnly = editing && t.isTransfer && !t.categoryId && !t.isPartnerTransfer
-  // The same for your income (DECISIONS.md 251): a paycheck isn't a purchase to file. Say it's not income and it becomes
-  // money back in the category you pick.
-  const incomeOnly = editing && t.kind === 'Income' && t.amountCents < 0 && !t.isTransfer && !t.categoryId && !t.isPartnerTransfer
   const [keepTransfer, setKeepTransfer] = useState(true)
 
   // A memory aid: how you filed this merchant before (DECISIONS.md 102).
@@ -378,7 +385,27 @@ function ReviewCard({
   }
 
   const selected = categories.find((c) => c.id === categoryId) ?? null
-  const group = pickedGroup ?? (selected ? listedType(selected) : 'Variable')
+  const group: Group =
+    pickedGroup ?? (selected ? listedType(selected) : moneyIn && (t.kind === 'Income' || t.kind === 'PartnerContribution') ? 'Income' : 'Variable')
+  const asIncome = moneyIn && group === 'Income'
+  const shownGroups = moneyIn ? [...groups, incomeGroup] : groups
+  // Your friends, once you say a friend sent it; with one friend, it's them.
+  useEffect(() => {
+    if (!asIncome || incomeAs !== 'friend' || friends) return
+    let live = true
+    sharedApi
+      .overview()
+      .then((o) => {
+        if (!live) return
+        setFriends(o.friends)
+        if (o.friends.length === 1) setFriendPick((p) => p ?? o.friends[0].id)
+      })
+      .catch(() => live && setFriends([]))
+    return () => {
+      live = false
+    }
+  }, [asIncome, incomeAs, friends])
+  const pickedFriend = friends?.find((f) => f.id === friendPick)
   const needsCategory = partnerIn ? mode === 'payback' : true
   // Money between friends keeps the plain category picker: it's paying back or a share of something, not a bill.
   const asBill = needsCategory && group === 'FixedBill' && !t.isPartnerTransfer
@@ -435,9 +462,10 @@ function ReviewCard({
   // Every category in the chosen group at once, in your budget's order (DECISIONS.md 145).
   const inGroup = useMemo(() => categories.filter((c) => listedType(c) === group).sort((a, b) => a.sortOrder - b.sortOrder), [categories, group])
 
-  function chooseGroup(g: Category['type']) {
+  function chooseGroup(g: Group) {
     setGroup(g)
     setAdding(false)
+    if (g === 'Income') return
     const list = categories.filter((c) => listedType(c) === g)
     // Most people have one card payment or one savings line: pick it for them.
     // Card interest listed with the debt lines doesn't count: picking Debt still lands on your one card payment line.
@@ -452,14 +480,28 @@ function ReviewCard({
         await budgetApi.updateTransaction(t.id, null, false, null, { partnerPurpose: 'contribution' })
         return onDone(`Counted as money from ${first}.`)
       }
+      if (asIncome) {
+        if (!incomeAs || (incomeAs === 'friend' && !pickedFriend)) return
+        await budgetApi.markIncome(t.id, incomeAs, pickedFriend?.id)
+        return onDone(
+          incomeAs === 'paycheck'
+            ? 'Counted as your paycheck, for the payday it landed on.'
+            : incomeAs === 'friend'
+              ? `Counted as ${pickedFriend!.name}’s contribution.`
+              : 'Counted as other income: it adds to this month’s money.',
+          true,
+        )
+      }
       if (asBill) {
         const r = await recurringApi.fileAsBill({
           transactionId: t.id,
           ...(pickedBill ? { billKey: pickedBill.key } : { name: billName.trim(), ...(billCat !== OWN ? { categoryId: billCat } : {}) }),
+          always: rule,
         })
         const moved = r.moved > 0 ? ` ${r.moved} other ${r.moved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
+        const always = rule ? ` Future ${titleCase(t.merchant)} charges go there too, for you to confirm.` : ''
         if (billPick === NEW) await onCategoryCreated()
-        return onDone(`${pickedBill ? pickedBill.name : `New bill: ${billName.trim()}, in ${r.categoryName}`}.${moved}`, true)
+        return onDone(`${pickedBill ? pickedBill.name : `New bill: ${billName.trim()}, in ${r.categoryName}`}.${always}${moved}`, true)
       }
       if (towardKind && towardList && towardList.length > 0) {
         if (!pickedToward) return
@@ -509,17 +551,15 @@ function ReviewCard({
     </div>
   )
 
-  if ((transferOnly || incomeOnly) && keepTransfer)
+  if (transferOnly && keepTransfer)
     return (
       <article aria-label={`Edit ${titleCase(t.merchant)}`} className={reviewCard}>
         {header}
         <p className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
-          {transferOnly
-            ? 'Money moved between your own accounts, like a payment arriving on a card, so it isn’t counted as spending or income.'
-            : 'Counted as your income: money in for the month, not spending.'}
+          Money moved between your own accounts, like a payment arriving on a card, so it isn’t counted as spending or income.
         </p>
         <button type="button" onClick={() => setKeepTransfer(false)} className={`${reviewSecondary} mt-4 w-full`}>
-          {transferOnly ? 'It’s not a transfer' : 'It’s not income'}
+          It’s not a transfer
         </button>
         <button type="button" onClick={onSkip} className={`${reviewSecondary} mt-3 w-full`}>
           Cancel
@@ -582,7 +622,7 @@ function ReviewCard({
               {partnerIn ? 'It paid you back for' : partnerOut ? `Your share of what ${first} paid for` : 'What was it?'}
             </legend>
             <div className="flex rounded-full neu-inset p-1">
-              {groups.map((g) => (
+              {shownGroups.map((g) => (
                 <button
                   key={g.type}
                   type="button"
@@ -596,6 +636,57 @@ function ReviewCard({
               ))}
             </div>
           </fieldset>
+
+          {/* Income (DECISIONS.md 254): what it is decides where it counts. */}
+          {asIncome && (
+            <fieldset className="mt-3">
+              <legend className="sr-only">What kind of income</legend>
+              <div className="grid gap-2">
+                {(
+                  [
+                    ['paycheck', 'Paycheck', 'Your pay from work. It counts as the check for the payday it landed on.'],
+                    ['friend', 'Friend’s contribution', 'Money a friend sends toward what you share. It counts toward what they send.'],
+                    ['other', 'Other income', 'A bonus, a rebate, a gift. It adds to this month’s money to spend.'],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <label
+                    key={value}
+                    className={`flex cursor-pointer gap-3 rounded-xl px-4 py-3 ${incomeAs === value ? 'bg-accent shadow-neu-sm text-accent-ink' : 'neu'}`}
+                  >
+                    <input type="radio" name={`income-${t.id}`} checked={incomeAs === value} onChange={() => setIncomeAs(value)} className="sr-only" />
+                    <span>
+                      <span className="block text-sm font-semibold">{label}</span>
+                      <span className={`block text-xs ${incomeAs === value ? 'text-accent-ink/85' : 'text-ink-soft'}`}>{hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {incomeAs === 'friend' &&
+                (!friends ? (
+                  <p className="mt-3 px-1 text-sm text-ink-soft">Finding your friends…</p>
+                ) : friends.length === 0 ? (
+                  <p className="mt-3 rounded-2xl neu-inset px-4 py-3 text-sm text-ink-soft">
+                    Add the friend first under More → Friends, then come back to this one.
+                  </p>
+                ) : (
+                  <select
+                    aria-label="Which friend sent it"
+                    value={friendPick ?? ''}
+                    onChange={(e) => setFriendPick(e.target.value)}
+                    className={`mt-3 block w-full rounded-2xl neu-inset px-4 py-3 text-base ${pickedFriend ? 'font-medium' : 'text-ink-soft'}`}
+                  >
+                    <option value="" disabled>
+                      Which friend sent it?
+                    </option>
+                    {friends.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                ))}
+            </fieldset>
+          )}
 
           {/* A bill: one of your bills, or a new bill with its name and bill category (DECISIONS.md 225, 230). Its other charges follow it. */}
           {asBill && (
@@ -650,6 +741,16 @@ function ReviewCard({
                     </div>
                   ) : (
                     pickedBill && <p className="mt-2 px-1 text-xs text-ink-faint">Its charges stay together on that bill.</p>
+                  )}
+                  {/* Always this bill for the merchant (DECISIONS.md 254), like "Always" for a category. */}
+                  {billReady && (
+                    <label className="mt-3 flex cursor-pointer items-start gap-3">
+                      <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="mt-0.5 size-4 shrink-0" />
+                      <span className="text-sm">
+                        Always {pickedBill ? pickedBill.name : billName.trim() || 'this bill'} for {titleCase(t.merchant)}
+                        <span className="block text-xs text-ink-faint">Leave off if this store bills you for more than one thing.</span>
+                      </span>
+                    </label>
                   )}
                   {/* The bill it's going to, as the bill review card shows it: price, what needs a look, charges, more options. */}
                   {billShown && (
@@ -716,7 +817,7 @@ function ReviewCard({
           )}
 
           {/* One dropdown for the kind's categories, with "New category…" at the end (DECISIONS.md 214). */}
-          {!asBill && !towardPicker && (
+          {!asBill && !towardPicker && !asIncome && (
           <div className="mt-3">
             <select
               aria-label={groups.find((g) => g.type === group)!.pick}
@@ -742,7 +843,7 @@ function ReviewCard({
             </select>
             {adding && (
               <NewCategory
-                type={group}
+                type={group as Category['type']}
                 suggestion={titleCase(t.merchant)}
                 onCancel={() => setAdding(false)}
                 onCreated={async (id) => {
@@ -758,7 +859,7 @@ function ReviewCard({
         </>
       )}
 
-      {needsCategory && selected && !t.isPartnerTransfer && !asBill && !towardKind && (
+      {needsCategory && selected && !t.isPartnerTransfer && !asBill && !towardKind && !asIncome && (
         <label className="mt-4 flex cursor-pointer items-start gap-3">
           <input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} className="mt-0.5 size-4 shrink-0" />
           <span className="text-sm">
@@ -770,7 +871,11 @@ function ReviewCard({
 
       <button
         type="button"
-        disabled={busy || (partnerIn && !mode) || (asBill ? !billReady : towardPicker ? !pickedToward : needsCategory && !categoryId)}
+        disabled={
+          busy ||
+          (partnerIn && !mode) ||
+          (asIncome ? !incomeAs || (incomeAs === 'friend' && !pickedFriend) : asBill ? !billReady : towardPicker ? !pickedToward : needsCategory && !categoryId)
+        }
         onClick={() => void save()}
         className={`${reviewPrimary} mt-4`}
       >
@@ -780,6 +885,16 @@ function ReviewCard({
             ? 'Say what it was for'
             : !needsCategory
               ? '✓ Confirm'
+              : asIncome
+                ? incomeAs === 'paycheck'
+                  ? '✓ Paycheck'
+                  : incomeAs === 'other'
+                    ? '✓ Other income'
+                    : incomeAs === 'friend'
+                      ? pickedFriend
+                        ? `✓ From ${pickedFriend.name}`
+                        : 'Pick a friend'
+                      : 'Say what it is'
               : towardPicker
                 ? pickedToward
                   ? interest
@@ -876,8 +991,12 @@ export function TransactionEditSheet({
   )
 }
 
+/** A kind on the card's switch: a category type, or (money in) your income (DECISIONS.md 254). */
+type Group = Category['type'] | 'Income'
+const incomeGroup: { type: Group; label: string; short: string; pick: string } = { type: 'Income', label: 'Income', short: 'Income', pick: 'Say what it is' }
+
 /** The four kinds of transaction (DECISIONS.md 145); each one's categories show when you pick it. */
-const groups: { type: Category['type']; label: string; short: string; pick: string }[] = [
+const groups: { type: Group; label: string; short: string; pick: string }[] = [
   { type: 'Variable', label: 'Spending', short: 'Spending', pick: 'Pick a spending category' },
   { type: 'FixedBill', label: 'Bill', short: 'Bill', pick: 'Pick a bill' },
   { type: 'DebtPayment', label: 'Debt payment', short: 'Debt', pick: 'Pick a debt' },
@@ -890,7 +1009,7 @@ const OWN = '__own'
 
 /** "No category" in red, or the app's guess as a question in orange: "Groceries?" */
 function StatusTag({ t }: { t: Transaction }) {
-  const name = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Money from your partner' : null)
+  const name = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Money from your partner' : t.kind === 'Income' ? 'Income' : null)
   return name ? (
     <span className="inline-block rounded-full bg-ink/[0.06] px-2.5 py-0.5 text-xs font-semibold text-gold-ink">{name}?</span>
   ) : (
@@ -955,7 +1074,7 @@ function NewCategory({
 }
 
 function ListRow({ t, onOpen, onConfirm }: { t: Transaction; onOpen: () => void; onConfirm: () => void }) {
-  const label = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Contribution' : null)
+  const label = t.categoryName ?? (t.kind === 'PartnerContribution' ? 'Contribution' : t.kind === 'Income' ? 'Income' : null)
   return (
     <li className="flex items-center gap-2 pr-2">
       <button type="button" onClick={onOpen} className="min-w-0 flex-1 px-4 py-3 text-left">

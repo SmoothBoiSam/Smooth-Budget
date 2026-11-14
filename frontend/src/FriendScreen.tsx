@@ -95,7 +95,7 @@ export default function FriendScreen({ id, onSignedOut }: { id: string; onSigned
     <Page>
       <PageHeader title={f?.name ?? 'Friend'} sub={f ? friendStatus(f) : undefined} back={{ href: '#/friends', label: 'Friends' }} />
       {error && <ErrorNotice message={error} />}
-      {!o && !error && <Loading />}
+      {!o && !error && <Loading shape="list" />}
 
       {f && o && (
         <>

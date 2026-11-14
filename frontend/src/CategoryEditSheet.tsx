@@ -31,7 +31,8 @@ export default function CategoryEditSheet({
   auto?: { on: boolean; setByYou: boolean }
   onClose: () => void
   onSaved: (message: string) => void
-  onMove?: (direction: -1 | 1) => Promise<void>
+  /** Reorder: resolves to where it is now, said in the pop-up. */
+  onMove?: (direction: -1 | 1) => Promise<string>
 }) {
   const isNew = line === null
   const [part, setPart] = useState<Part>('edit')
@@ -43,6 +44,19 @@ export default function CategoryEditSheet({
   const [into, setInto] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [moved, setMoved] = useState<string | null>(null)
+  async function reorder(direction: -1 | 1) {
+    if (!onMove) return
+    setBusy(true)
+    setError(null)
+    try {
+      setMoved(await onMove(direction))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not move it.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const limitCents = parseDollars(limit)
   const limitChanged = !isNew && limitCents !== null && limitCents !== line.limitCents
@@ -291,16 +305,23 @@ export default function CategoryEditSheet({
                 <p className="mt-6 px-1 text-sm font-semibold text-ink-soft">Options</p>
                 <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
                   {onMove && (
-                    <li className="flex items-center justify-between gap-3 px-4 py-2">
-                      <span className="text-sm font-medium">Order in your budget</span>
-                      <span className="flex gap-1">
-                        <button type="button" disabled={busy} onClick={() => void onMove(-1)} className={`${smallBtn} py-1!`} aria-label="Move up">
-                          ↑ Up
-                        </button>
-                        <button type="button" disabled={busy} onClick={() => void onMove(1)} className={`${smallBtn} py-1!`} aria-label="Move down">
-                          ↓ Down
-                        </button>
-                      </span>
+                    <li className="px-4 py-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium">Reorder</span>
+                        <span className="flex gap-1">
+                          <button type="button" disabled={busy} onClick={() => void reorder(-1)} className={`${smallBtn} py-1!`} aria-label="Move up">
+                            ↑ Up
+                          </button>
+                          <button type="button" disabled={busy} onClick={() => void reorder(1)} className={`${smallBtn} py-1!`} aria-label="Move down">
+                            ↓ Down
+                          </button>
+                        </span>
+                      </div>
+                      {moved && (
+                        <p key={moved} role="status" className="mt-1 text-xs text-good">
+                          ✓ {moved}
+                        </p>
+                      )}
                     </li>
                   )}
                   {self && (

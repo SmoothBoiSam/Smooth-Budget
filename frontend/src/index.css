@@ -22,6 +22,7 @@
   --color-accent-ink: #ffffff;
   --color-gold: #f2b53a;
   --color-gold-ink: #94630a; /* gold as text: dark enough to read on the light surface */
+  --color-chart-other: #b06f08; /* the Income chart's third series: checked for colorblind and contrast (DECISIONS.md 254) */
   --color-good: #23885a;
   --color-danger: #dc2626;
   --color-neu-dark: #c2c7d2;
@@ -87,6 +88,7 @@ body {
   --color-accent: #4a8af4;
   --color-gold: #f4bd4a;
   --color-gold-ink: #f4bd4a;
+  --color-chart-other: #c2841f;
   --color-good: #4cc38a;
   --color-danger: #ef4444;
   --color-neu-dark: #171717;

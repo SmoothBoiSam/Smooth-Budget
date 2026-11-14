@@ -89,7 +89,7 @@ export default function TasksScreen({
               }
               hint={uploads.length === 1 ? uploads[0].label : `${uploads[0].label}, and ${uploads.length - 1} more`}
               badge={uploads.length}
-              href="#/payday/setup"
+              href="#/income"
             />
           )}
         </Rows>

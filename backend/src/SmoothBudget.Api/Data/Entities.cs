@@ -70,6 +70,10 @@ public enum AccountType { Checking = 0, Savings = 1, CreditCard = 2 }
 /// <summary>Where an account's data comes from. CSV and Plaid accounts must behave identically everywhere.</summary>
 public enum DataSource { Manual = 0, Csv = 1, Plaid = 2, Seed = 3 }
 
+/// <summary>What money in is, when you said so in Review (DECISIONS.md 254): a paycheck, other income (a bonus, a rebate), or a
+/// friend's contribution. Unset: the app decides.</summary>
+public enum IncomeType { Paycheck = 1, Other = 2, Friend = 3 }
+
 public class Account
 {
     public Guid Id { get; set; }
@@ -238,6 +242,8 @@ public class Transaction
     public Guid? SuggestedCategoryId { get; set; }
     /// <summary>Her contribution sent early: it counts for the budget month starting on this date, not the one it landed in (DECISIONS.md 166).</summary>
     public DateOnly? CountsForMonthStart { get; set; }
+    /// <summary>Income you marked in Review as a paycheck or other income (DECISIONS.md 254). Null: the app decides from your pay dates.</summary>
+    public IncomeType? IncomeType { get; set; }
 
     public long PartnerOffsetCents { get; set; }
     public DataSource Source { get; set; }

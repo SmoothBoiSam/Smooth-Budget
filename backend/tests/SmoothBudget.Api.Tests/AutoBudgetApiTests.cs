@@ -11,6 +11,7 @@ using SmoothBudget.Api.Payday;
 using SmoothBudget.Core.Budgeting;
 using SmoothBudget.Core.Tests;
 using SmoothBudget.Core.Transactions;
+using SmoothBudget.Api.Transactions;
 
 namespace SmoothBudget.Api.Tests;
 
@@ -157,21 +158,25 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         var firstCheck = (long)(decimal.Parse(System.Text.RegularExpressions.Regex.Match(plan.IncomeExplanation, @"Feb 8 \$([\d,]+\.\d\d)").Groups[1].Value,
             System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture) * 100);
 
-        async Task DepositAsync(DateOnly date, long cents, string merchant)
+        async Task<Guid> DepositAsync(DateOnly date, long cents, string merchant)
         {
+            var id = Guid.NewGuid();
             using (var scope = app.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var household = db.Categories.Single(x => x.Id == rent).HouseholdId;
                 db.Transactions.Add(new Transaction
                 {
-                    Id = Guid.NewGuid(), HouseholdId = household, AccountId = db.Accounts.Single(a => a.HouseholdId == household).Id, Date = date, AmountCents = -cents,
+                    Id = id, HouseholdId = household, AccountId = db.Accounts.Single(a => a.HouseholdId == household).Id, Date = date, AmountCents = -cents,
                     Merchant = merchant, Description = merchant, Kind = TransactionKind.Income, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
                 });
                 await db.SaveChangesAsync();
             }
-            await c.PutAsJsonAsync("/api/settings/budget", new BudgetSettingsDto(SweepTarget.Debt, 50, AutoBudget: true), Json); // any save: the budget refreshes
+            await Refresh();
+            return id;
         }
+        async Task Refresh() =>
+            await c.PutAsJsonAsync("/api/settings/budget", new BudgetSettingsDto(SweepTarget.Debt, 50, AutoBudget: true), Json); // any save: the budget refreshes
 
         // The Feb 8 paycheck lands, a few dollars off its estimate: it's that check, not extra money.
         await DepositAsync(new DateOnly(2027, 2, 8), firstCheck - 12_00, "EMPLOYER PAYROLL");
@@ -182,5 +187,21 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         var after = await Summary(c);
         Assert.Equal(before.IncomeExpectedCents + 37_50, after.IncomeExpectedCents);
         Assert.Contains("$37.50 of other income", (await c.GetFromJsonAsync<GeneratorDto>("/api/budget/generator", Json))!.IncomeExplanation);
+
+        // A bonus from work around payday, about a check's size (DECISIONS.md 254): it looks like pay, so the app leaves
+        // it out, until you say in Review it's other income. Called a paycheck, it's the check again, not extra.
+        var bonus = await DepositAsync(new DateOnly(2027, 2, 10), firstCheck - 50_00, "EMPLOYER PAYROLL");
+        Assert.Equal(after.IncomeExpectedCents, (await Summary(c)).IncomeExpectedCents);
+        (await c.PostAsJsonAsync($"/api/transactions/{bonus}/income", new MarkIncomeRequest("other"), Json)).EnsureSuccessStatusCode();
+        await Refresh();
+        Assert.Equal(after.IncomeExpectedCents + firstCheck - 50_00, (await Summary(c)).IncomeExpectedCents);
+        (await c.PostAsJsonAsync($"/api/transactions/{bonus}/income", new MarkIncomeRequest("paycheck"), Json)).EnsureSuccessStatusCode();
+        await Refresh();
+        Assert.Equal(after.IncomeExpectedCents, (await Summary(c)).IncomeExpectedCents);
+
+        // The Income page counts it where you said: a paycheck.
+        var items = (await c.GetFromJsonAsync<List<IncomeItemDto>>("/api/payday/income/transactions", Json))!;
+        Assert.Equal(("paycheck", true), items.Where(i => i.Id == bonus).Select(i => (i.Kind, i.Said)).Single());
+        Assert.Equal("other", items.Single(i => i.Description == "PAYMENT APP CASHOUT").Kind);
     }
 }

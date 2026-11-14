@@ -52,7 +52,7 @@ export default function SavingsHistoryScreen({ onSignedOut }: { onSignedOut: () 
         error ? (
           <ErrorNotice message={error} onRetry={() => void load()} />
         ) : (
-          <Loading />
+          <Loading shape="list" />
         )
       ) : byMonth.length === 0 ? (
         <p className="mt-4 rounded-3xl neu px-5 py-4 text-sm text-ink-soft">No savings transactions yet.</p>

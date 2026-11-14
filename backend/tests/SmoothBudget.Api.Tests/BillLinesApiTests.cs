@@ -153,6 +153,23 @@ public class BillLinesApiTests(TestApp app) : IClassFixture<TestApp>
         var rows = await check.ServiceProvider.GetRequiredService<AppDbContext>().Transactions.Where(t => t.HouseholdId == household && t.Merchant.StartsWith("STREAMFLIX")).ToListAsync();
         Assert.All(rows, t => Assert.Equal((filed.CategoryId, false), (t.CategoryId!.Value, t.NeedsReview)));
 
+        // "Always" (DECISIONS.md 254): the merchant's later charges are filed to the bill, still for you to confirm.
+        var always = T(household, checking, new DateOnly(2027, 2, 10), null, 17_99, "STREAMFLIX PREMIUM");
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.Add(always);
+            await db.SaveChangesAsync();
+        }
+        var withRule = (await (await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(always.Id, BillKey: bill.Key, Always: true), Json))
+            .Content.ReadFromJsonAsync<Bills.FiledAsBillDto>(Json))!;
+        Assert.Equal(filed.CategoryId, withRule.CategoryId);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Contains(await db.CategoryRules.Where(r => r.HouseholdId == household).ToListAsync(), r => r.Pattern == "STREAMFLIX PREMIUM" && r.CategoryId == filed.CategoryId);
+        }
+
         // Neither a bill nor a name, or a bill category without a name: turned away (DECISIONS.md 230).
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/recurring/file-charge", new Bills.FileChargeAsBillRequest(newPrice.Id), Json)).StatusCode);
         Assert.Equal(System.Net.HttpStatusCode.BadRequest,

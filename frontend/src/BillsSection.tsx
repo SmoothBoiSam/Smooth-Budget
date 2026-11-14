@@ -76,9 +76,11 @@ export function Alert({
               Keep it in {i.categoryName}
             </button>
           )}
-          <button type="button" onClick={onNotABill} className={`${smallBtn} text-danger`}>
-            Not a bill
-          </button>
+          {!inCard && (
+            <button type="button" onClick={onNotABill} className={`${smallBtn} text-danger`}>
+              Not a bill
+            </button>
+          )}
         </div>
       </div>
     )
@@ -113,9 +115,11 @@ export function Alert({
           <button type="button" onClick={() => onUpdate({ key: i.key, canceled: true }, `Marked ${i.name} as canceled. Your budget stops expecting it.`)} className={`${smallBtn} text-danger`}>
             Canceled
           </button>
-          <button type="button" onClick={onNotABill} className={`${smallBtn} text-danger`}>
-            Not a bill
-          </button>
+          {!inCard && (
+            <button type="button" onClick={onNotABill} className={`${smallBtn} text-danger`}>
+              Not a bill
+            </button>
+          )}
         </div>
       </div>
     )
@@ -172,11 +176,6 @@ export function BillOnCard({
         <button type="button" onClick={() => onOpen('edit')} className={`${smallBtn} text-accent`}>
           More options
         </button>
-        {!isNewFind(i) && (
-          <button type="button" onClick={() => onOpen('notBill')} className={`${smallBtn} text-danger`}>
-            Not a bill
-          </button>
-        )}
       </div>
     </div>
   )

@@ -3,7 +3,9 @@ using SmoothBudget.Core.Transactions;
 namespace SmoothBudget.Core.Budgeting;
 
 /// <summary>A category as the calculator sees it. Money is integer cents.</summary>
-public sealed record BudgetCategory(Guid Id, CategoryType Type, long MonthlyLimitCents);
+/// <param name="CardInterest">The Card interest bill line (DECISIONS.md 159, 172): its interest is part of the card minimums, so it
+/// and the debt lines are one pot of money (DECISIONS.md 254).</param>
+public sealed record BudgetCategory(Guid Id, CategoryType Type, long MonthlyLimitCents, bool CardInterest = false);
 
 /// <summary>
 /// A transaction as the calculator sees it.
@@ -241,8 +243,14 @@ public static class LeftToSpendCalculator
     {
         if (moneyInCents <= 0)
             return 0;
-        var planned = CategoryBreakdownCalculator.Calculate(month, categories, transactions)
-            .Sum(l => l.Type == CategoryType.Variable ? l.LimitCents : Math.Max(l.LimitCents, l.SpentCents));
+        var lines = CategoryBreakdownCalculator.Calculate(month, categories, transactions);
+        // The debt lines and Card interest are one pot (DECISIONS.md 254): a payment made before the month's interest posts
+        // sits on the payment line, and counting each line at its own "limit or paid" counted that interest twice.
+        var pool = CategoryBreakdownCalculator.CardPool(categories);
+        var cards = lines.Where(l => pool.Contains(l.CategoryId)).ToList();
+        var planned = lines.Where(l => !pool.Contains(l.CategoryId))
+                          .Sum(l => l.Type == CategoryType.Variable ? l.LimitCents : Math.Max(l.LimitCents, l.SpentCents))
+                      + Math.Max(cards.Sum(l => l.LimitCents), cards.Sum(l => l.SpentCents));
         return Math.Max(0, planned - moneyInCents);
     }
 

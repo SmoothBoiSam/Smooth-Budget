@@ -220,6 +220,31 @@ public class LeftToSpendCalculatorTests
     }
 
     [Fact]
+    public void The_card_minimums_count_once_whichever_line_their_interest_lands_on()
+    {
+        // DECISIONS.md 254. Minimums of 274 are planned as 137 on the card line and 137 on Card interest. Both checks pay
+        // their half before the interest posts: all 274 sits on the card line. Counting each line at "limit or paid" made
+        // that 274 + 137; it's one pot, so the plan is still 274.
+        var card = Guid.NewGuid();
+        var interest = Guid.NewGuid();
+        BudgetCategory[] cats = [new BudgetCategory(card, CategoryType.DebtPayment, 137_00), new BudgetCategory(interest, CategoryType.FixedBill, 137_00, CardInterest: true)];
+        BudgetTransaction Paid(int day) => new(card, new DateOnly(2026, 11, day), 137_00, IsTransfer: true, Kind: TransactionKind.CardPayment);
+        BudgetTransaction[] both = [Paid(9), Paid(23)];
+        Assert.Equal(0, LeftToSpendCalculator.Overplanned(Nov, cats, both, 274_00));
+        Assert.Equal(274_00, CategoryBreakdownCalculator.DebtPaid(Nov, cats, both));
+
+        // Once the interest posts on the card, the payment pays it too: still 274 paid toward the minimums, not 137.
+        BudgetTransaction[] posted = [.. both, new BudgetTransaction(interest, new DateOnly(2026, 11, 25), 130_00, OnCreditCard: true, Kind: TransactionKind.Fee)];
+        Assert.Equal(274_00, CategoryBreakdownCalculator.DebtPaid(Nov, cats, posted));
+        Assert.Equal(0, LeftToSpendCalculator.Overplanned(Nov, cats, posted, 274_00));
+        // Groceries on the card are still covered first: a payment for them isn't paying down the card.
+        var groceries = Guid.NewGuid();
+        BudgetCategory[] withFood = [.. cats, new BudgetCategory(groceries, CategoryType.Variable, 400_00)];
+        BudgetTransaction[] food = [.. both, new BudgetTransaction(groceries, new DateOnly(2026, 11, 12), 74_00, OnCreditCard: true)];
+        Assert.Equal(200_00, CategoryBreakdownCalculator.DebtPaid(Nov, withFood, food));
+    }
+
+    [Fact]
     public void A_plan_beyond_the_months_money_comes_off_left_to_spend()
     {
         // DECISIONS.md 178. Limits: spending 760 + bill 1,000 = 1,760, with only 1,700 coming in: 60 short.

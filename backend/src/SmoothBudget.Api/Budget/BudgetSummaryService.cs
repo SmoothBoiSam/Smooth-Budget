@@ -20,7 +20,13 @@ public record BudgetCategoryLineDto(
     string Health,
     int TransactionCount,
     // What the partner's fixed contribution covers of this line (Rent: the $800). Your net share is the limit minus this.
-    long PartnerOffsetCents = 0);
+    long PartnerOffsetCents = 0,
+    // The card payment line holds the full card minimums (DECISIONS.md 254): this much of its limit is the Card interest
+    // line's, which the minimums include.
+    long InterestIncludedCents = 0,
+    // Card interest, listed with the debt payments: its interest is paid by the card payment above it, so the group's
+    // totals leave it out (DECISIONS.md 254). Spent is the interest charged so far.
+    bool PartOfCardPayments = false);
 
 /// <param name="State">"expected", "received", "differentAmount" or "late".</param>
 /// <param name="ShortfallCents">What Left to Spend is missing because of it (late, or short after the window).</param>
@@ -126,15 +132,31 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
                 static CategoryType ListedAs(MonthCategory c) =>
                     c.Type == CategoryType.FixedBill && string.Equals(c.Name.Trim(), Core.Transactions.CardInterest.CategoryName, StringComparison.OrdinalIgnoreCase)
                         ? CategoryType.DebtPayment : c.Type;
-                var items = data.Categories.Where(c => ListedAs(c) == g.Type).Select(c =>
+                var listed = data.Categories.Where(c => ListedAs(c) == g.Type).ToList();
+                // The card minimums are one amount to pay (DECISIONS.md 254). The automatic budget plans them as the card
+                // payment line plus Card interest (172), so the payment line shows both: what the minimums come to, and
+                // what's been paid toward them, counting payments that pay the interest. Card interest stays listed as
+                // what's been charged, part of that payment.
+                var interest = g.Type == CategoryType.DebtPayment ? listed.FirstOrDefault(c => c.Type == CategoryType.FixedBill) : null;
+                var card = interest is null ? null : listed.FirstOrDefault(c => c.Type == CategoryType.DebtPayment);
+                var debtLines = listed.Where(c => c.Type == CategoryType.DebtPayment).ToList();
+                var paidExtra = card is null ? 0
+                    : CategoryBreakdownCalculator.DebtPaid(data.Month, data.CalculatorCategories, data.Transactions) - debtLines.Sum(c => lines[c.Id].SpentCents);
+                var items = listed.Select(c =>
                 {
                     var l = lines[c.Id];
-                    return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.Priority, l.LimitCents, c.HasMonthOverride,
-                        l.SpentCents, l.RemainingCents, HealthName(l.Health), l.TransactionCount,
-                        (data.Contributions ?? []).Where(s => s.CategoryId == c.Id).Sum(s => s.ExpectedCents));
+                    var (limit, spent, included) = c == card
+                        ? (l.LimitCents + lines[interest!.Id].LimitCents, l.SpentCents + Math.Max(0, paidExtra), lines[interest.Id].LimitCents)
+                        : (l.LimitCents, l.SpentCents, 0L);
+                    var status = l with { LimitCents = limit, SpentCents = spent };
+                    return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.Priority, limit, c.HasMonthOverride,
+                        spent, status.RemainingCents, HealthName(status.Health), l.TransactionCount,
+                        (data.Contributions ?? []).Where(s => s.CategoryId == c.Id).Sum(s => s.ExpectedCents),
+                        included, card is not null && c == interest);
                 }).ToList();
+                var counted = items.Where(i => !i.PartOfCardPayments).ToList();
                 return new BudgetGroupDto(g.Type.ToString(), g.Label, g.Type == CategoryType.Variable,
-                    items.Sum(i => i.LimitCents), items.Sum(i => i.SpentCents), items);
+                    counted.Sum(i => i.LimitCents), counted.Sum(i => i.SpentCents), items);
             })
             .Where(g => g.Categories.Count > 0)
             .ToList();

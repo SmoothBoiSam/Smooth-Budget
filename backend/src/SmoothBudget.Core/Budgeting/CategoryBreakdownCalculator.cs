@@ -72,6 +72,33 @@ public static class CategoryBreakdownCalculator
         return cats.Select(c => new CategoryStatus(c.Id, c.Type, c.MonthlyLimitCents, LeftToSpendCalculator.FloorAtZero(spent[c.Id]), count[c.Id])).ToList();
     }
 
+    /// <summary>The debt lines and the Card interest line: one pot of money for the cards (DECISIONS.md 254).</summary>
+    public static HashSet<Guid> CardPool(IEnumerable<BudgetCategory> categories) =>
+        categories.Where(c => c.Type == CategoryType.DebtPayment || c.CardInterest).Select(c => c.Id).ToHashSet();
+
+    /// <summary>
+    /// What's been paid on the debt lines this month (DECISIONS.md 254). Like <see cref="Calculate"/>, a card payment first
+    /// covers this month's card purchases, but not the cards' interest: the minimums include the interest, so a payment
+    /// that pays it is still paying the minimum.
+    /// </summary>
+    public static long DebtPaid(BudgetMonthRange month, IEnumerable<BudgetCategory> categories, IEnumerable<BudgetTransaction> transactions)
+    {
+        var byId = categories.ToDictionary(c => c.Id);
+        long paid = 0, cardPayments = 0, cardPurchases = 0;
+        foreach (var t in transactions)
+        {
+            if (t.CategoryId is not { } id || !byId.TryGetValue(id, out var c) || !CountsToward(month, c.Type, t))
+                continue;
+            if (c.Type == CategoryType.DebtPayment && t.Kind == TransactionKind.CardPayment)
+                cardPayments += t.AmountCents;
+            else if (c.Type == CategoryType.DebtPayment)
+                paid += LeftToSpendCalculator.OwnerShare(t);
+            if (t.OnCreditCard && c.Type is CategoryType.Variable or CategoryType.FixedBill && !c.CardInterest)
+                cardPurchases += LeftToSpendCalculator.OwnerShare(t);
+        }
+        return Math.Max(0, paid + Math.Max(0, cardPayments - Math.Max(0, cardPurchases)));
+    }
+
     /// <summary>
     /// Whether a transaction already filed under a category of this type counts toward it this month. Debt and
     /// savings categories count transfers out (that's how they get paid), but never the receiving side of one,

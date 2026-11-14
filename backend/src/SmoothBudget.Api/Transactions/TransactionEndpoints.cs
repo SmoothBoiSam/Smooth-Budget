@@ -20,7 +20,12 @@ public record TransactionDto(
     // Money to or from a friend; while it waits for a label, the category the app suggests (counted nowhere).
     bool IsPartnerTransfer = false, Guid? SuggestedCategoryId = null,
     // Which friend (DECISIONS.md 211).
-    Guid? FriendId = null, string? FriendName = null);
+    Guid? FriendId = null, string? FriendName = null,
+    // Income you marked "paycheck" or "other" (DECISIONS.md 254); null when the app decides.
+    string? IncomeType = null);
+
+/// <param name="As">"paycheck", "friend" (with <paramref name="FriendId"/>) or "other".</param>
+public record MarkIncomeRequest(string As, Guid? FriendId = null);
 
 public record ConfirmRequest(List<Guid> Ids);
 public record ConfirmLikelyRequest(string Scope);
@@ -191,7 +196,8 @@ public static partial class TransactionEndpoints
         {
             var householdId = ctx.User.HouseholdId();
             var w = await WindowAsync(householdId, months, ct);
-            var q = InScope(Review(db, householdId).Where(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer), req.Scope, w);
+            // New income isn't a guess to confirm in bulk: you say what each one is (DECISIONS.md 254).
+            var q = InScope(Review(db, householdId).Where(t => !t.CategoryUnsure && t.Kind != TransactionKind.PartnerTransfer && t.Kind != TransactionKind.Income), req.Scope, w);
             return Results.Ok(new { confirmed = await Confirm(q, ct) });
         });
 
@@ -248,6 +254,7 @@ public static partial class TransactionEndpoints
             // Money from your partner that's her contribution or just money from her (DECISIONS.md 100): partner money in.
             if (req.PartnerPurpose is not null)
             {
+                t.IncomeType = null;
                 if (req.PartnerPurpose != "contribution" || t.AmountCents >= 0)
                     return Results.ValidationProblem(new Dictionary<string, string[]> { ["partnerPurpose"] = ["That doesn't fit this transaction."] });
                 (t.Kind, t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.IsTransfer) =
@@ -259,6 +266,7 @@ public static partial class TransactionEndpoints
 
             t.CategoryId = req.CategoryId;
             t.SuggestedCategoryId = null;
+            t.IncomeType = null; // filed as something else, it's no longer the income you said (DECISIONS.md 254)
             t.CategorySource = CategorySource.User; // locks this row against rules and transfer detection
             t.NeedsReview = false;
             t.CategoryUnsure = false;
@@ -300,28 +308,7 @@ public static partial class TransactionEndpoints
                 if (req.CategoryId is null || req.IsTransfer)
                     return Results.ValidationProblem(new Dictionary<string, string[]> { ["rulePattern"] = ["A rule needs a category and can't be a transfer."] });
 
-                var rule = await db.CategoryRules.SingleOrDefaultAsync(r => r.HouseholdId == householdId && r.Pattern == pattern, ct);
-                if (rule is null)
-                    db.CategoryRules.Add(rule = new CategoryRule { Id = Guid.NewGuid(), HouseholdId = householdId, Pattern = pattern, CreatedUtc = clock.GetUtcNow().UtcDateTime });
-                rule.CategoryId = req.CategoryId.Value;
-                await db.SaveChangesAsync(ct);
-
-                // Rules outrank bank categories, so apply to matching rows that only had a bank category, a guess, an
-                // older rule or none. Merchants are stored upper case, and so is the pattern. You just said "always",
-                // so the purchases already here are settled and leave review (DECISIONS.md 224); new ones the rule
-                // files later still wait for your check. Money between friends stays yours to label one by one.
-                applied = await db.Transactions
-                    .Where(x => x.HouseholdId == householdId && x.Id != t.Id && !x.IsTransfer
-                                && x.Kind != TransactionKind.PartnerTransfer && x.Kind != TransactionKind.PartnerContribution
-                                && (x.CategorySource == CategorySource.None || x.CategorySource == CategorySource.Bank || x.CategorySource == CategorySource.Learned
-                                    || x.CategorySource == CategorySource.Rule || (x.NeedsReview && x.CategorySource != CategorySource.User))
-                                && x.Merchant.ToUpper().Contains(pattern))
-                    .ExecuteUpdateAsync(s => s
-                        .SetProperty(x => x.CategoryId, req.CategoryId)
-                        .SetProperty(x => x.CategorySource, CategorySource.Rule)
-                        .SetProperty(x => x.NeedsReview, false)
-                        .SetProperty(x => x.CategoryUnsure, false)
-                        .SetProperty(x => x.CategoryReason, "Your rule for \"" + pattern + "\"."), ct);
+                applied = await AlwaysAsync(db, householdId, pattern, req.CategoryId.Value, t.Id, clock, ct);
             }
             await db.SaveChangesAsync(ct);
 
@@ -332,6 +319,48 @@ public static partial class TransactionEndpoints
 
             var dto = await Project(db.Transactions.Where(x => x.Id == t.Id)).SingleAsync(ct);
             return Results.Ok(new UpdateTransactionResult(dto, applied, moved));
+        });
+
+        // Money in is your income (DECISIONS.md 254): a paycheck, a friend's contribution, or other income like a bonus.
+        // A paycheck counts as the check for its pay date; other income adds to the month's money; a friend's
+        // contribution counts toward what they send. Whatever it was filed as before is cleared, so nothing counts twice.
+        group.MapPost("/transactions/{id:guid}/income", async (Guid id, MarkIncomeRequest req, HttpContext ctx, AppDbContext db,
+            CategorizationService categorization, Payday.PaydayService payday, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var t = await db.Transactions.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
+            if (t is null) return Results.NotFound();
+            if (t.AmountCents >= 0)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["as"] = ["Only money in can be income."] });
+            Friend? friend = null;
+            if (req.As == "friend")
+            {
+                friend = req.FriendId is { } fid ? await db.Friends.SingleOrDefaultAsync(f => f.Id == fid && f.HouseholdId == householdId, ct) : null;
+                if (friend is null)
+                    return Results.ValidationProblem(new Dictionary<string, string[]> { ["friendId"] = ["Pick which friend sent it."] });
+            }
+            else if (req.As is not ("paycheck" or "other"))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["as"] = ["Say paycheck, friend or other."] });
+
+            (t.CategoryId, t.SuggestedCategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.DebtAccountId) =
+                (null, null, CategorySource.User, false, false, null);
+            if (t.IsTransfer) (t.IsTransfer, t.TransferGroupId) = (false, null);
+            if (friend is not null)
+            {
+                (t.Kind, t.IncomeType, t.IsPartnerTransfer, t.FriendId) = (TransactionKind.PartnerContribution, IncomeType.Friend, true, friend.Id);
+                t.CategoryReason = $"From {friend.Name}: you said so.";
+            }
+            else
+            {
+                (t.Kind, t.IncomeType, t.IsPartnerTransfer, t.FriendId, t.CountsForMonthStart) =
+                    (TransactionKind.Income, req.As == "paycheck" ? IncomeType.Paycheck : IncomeType.Other, false, null, null);
+                t.CategoryReason = req.As == "paycheck" ? "Your paycheck: you said so." : "Other income: you said so.";
+            }
+            await db.SaveChangesAsync(ct);
+            // Which check or contribution it is, right away.
+            await categorization.MatchContributionsAsync(householdId, ct);
+            await payday.MatchDepositsAsync(householdId, ct);
+            return Results.Ok(await Project(db.Transactions.Where(x => x.Id == t.Id)).SingleAsync(ct));
         });
 
         // Debt and savings money in review goes toward an account, not a category (DECISIONS.md 227).
@@ -440,6 +469,35 @@ public static partial class TransactionEndpoints
                 : Results.NotFound());
     }
 
+    /// <summary>
+    /// "Always" for a merchant: a rule that files its purchases under <paramref name="categoryId"/>. Rules outrank bank
+    /// categories, so it applies to matching rows that only had a bank category, a guess, an older rule or none. Merchants
+    /// are stored upper case, and so is the pattern. You just said "always", so the purchases already here are settled and
+    /// leave review (DECISIONS.md 224); new ones the rule files later still wait for your check. Money between friends
+    /// stays yours to label one by one. Returns how many other rows it filed.
+    /// </summary>
+    public static async Task<int> AlwaysAsync(AppDbContext db, Guid householdId, string pattern, Guid categoryId, Guid exceptId, TimeProvider clock, CancellationToken ct)
+    {
+        var rule = await db.CategoryRules.SingleOrDefaultAsync(r => r.HouseholdId == householdId && r.Pattern == pattern, ct);
+        if (rule is null)
+            db.CategoryRules.Add(rule = new CategoryRule { Id = Guid.NewGuid(), HouseholdId = householdId, Pattern = pattern, CreatedUtc = clock.GetUtcNow().UtcDateTime });
+        rule.CategoryId = categoryId;
+        await db.SaveChangesAsync(ct);
+        return await db.Transactions
+            .Where(x => x.HouseholdId == householdId && x.Id != exceptId && !x.IsTransfer
+                        && x.Kind != TransactionKind.PartnerTransfer && x.Kind != TransactionKind.PartnerContribution
+                        && x.Kind != TransactionKind.Income
+                        && (x.CategorySource == CategorySource.None || x.CategorySource == CategorySource.Bank || x.CategorySource == CategorySource.Learned
+                            || x.CategorySource == CategorySource.Rule || (x.NeedsReview && x.CategorySource != CategorySource.User))
+                        && x.Merchant.ToUpper().Contains(pattern))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.CategoryId, categoryId)
+                .SetProperty(x => x.CategorySource, CategorySource.Rule)
+                .SetProperty(x => x.NeedsReview, false)
+                .SetProperty(x => x.CategoryUnsure, false)
+                .SetProperty(x => x.CategoryReason, "Your rule for \"" + pattern + "\"."), ct);
+    }
+
     /// <summary>Same rule as <see cref="TransactionRules.NeedsCategory"/>, written so the database can run it.</summary>
     public static IQueryable<Transaction> Inbox(AppDbContext db, Guid householdId) =>
         db.Transactions.Where(t => t.HouseholdId == householdId
@@ -476,7 +534,8 @@ public static partial class TransactionEndpoints
     /// <summary>Everything waiting for you: unconfirmed automatic categories and partner transfers, and purchases with no category.</summary>
     public static IQueryable<Transaction> Todo(AppDbContext db, Guid householdId) =>
         db.Transactions.Where(t => t.HouseholdId == householdId && !t.IsTransfer
-            && ((t.NeedsReview && (t.CategoryId != null || t.Kind == TransactionKind.PartnerContribution || t.Kind == TransactionKind.PartnerTransfer))
+            && ((t.NeedsReview && (t.CategoryId != null || t.Kind == TransactionKind.PartnerContribution || t.Kind == TransactionKind.PartnerTransfer
+                                   || t.Kind == TransactionKind.Income))
                 || (t.CategoryId == null && t.Kind != TransactionKind.Income && t.Kind != TransactionKind.PartnerContribution
                     && t.Kind != TransactionKind.CardPayment && t.Kind != TransactionKind.Transfer && t.Kind != TransactionKind.PartnerTransfer
                     && (t.AmountCents > 0 || t.Kind == TransactionKind.Refund))));
@@ -526,6 +585,10 @@ public static partial class TransactionEndpoints
             {
                 (t.Kind, t.CategoryId) = (TransactionKind.Purchase, t.SuggestedCategoryId ?? await OtherAsync());
             }
+            else if (t.Kind == TransactionKind.Income && t.AmountCents < 0)
+            {
+                // Income you don't remember stays income, the app's call (DECISIONS.md 254): never spending in "Other".
+            }
             else if (t.CategoryId is null)
             {
                 t.CategoryId = await OtherAsync();
@@ -536,10 +599,11 @@ public static partial class TransactionEndpoints
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Automatic categories the user hasn't confirmed yet.</summary>
+    /// <summary>Automatic categories the user hasn't confirmed yet, and new income to say what it is (DECISIONS.md 254).</summary>
     public static IQueryable<Transaction> Review(AppDbContext db, Guid householdId) =>
         db.Transactions.Where(t => t.HouseholdId == householdId && t.NeedsReview && !t.IsTransfer
-            && (t.CategoryId != null || t.Kind == TransactionKind.PartnerContribution || t.Kind == TransactionKind.PartnerTransfer));
+            && (t.CategoryId != null || t.Kind == TransactionKind.PartnerContribution || t.Kind == TransactionKind.PartnerTransfer
+                || t.Kind == TransactionKind.Income));
 
     private static IQueryable<TransactionDto> Project(IQueryable<Transaction> q) =>
         q.OrderByDescending(t => t.Date).ThenByDescending(t => t.CreatedUtc).ThenBy(t => t.Id)
@@ -547,7 +611,8 @@ public static partial class TransactionEndpoints
                 t.Id, t.Date, t.AmountCents, t.Merchant, t.Description, t.Kind.ToString(),
                 t.CategoryId, t.Category != null ? t.Category.Name : null, t.CategorySource.ToString(), t.IsTransfer, t.Pending,
                 t.AccountId, t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason, t.CategoryUnsure, t.IsPartnerTransfer, t.SuggestedCategoryId,
-                t.FriendId, t.Friend != null ? t.Friend.Name : null));
+                t.FriendId, t.Friend != null ? t.Friend.Name : null,
+                t.IncomeType == IncomeType.Paycheck ? "paycheck" : t.IncomeType == IncomeType.Other ? "other" : t.IncomeType == IncomeType.Friend ? "friend" : null));
 
     public static string? NormalizePattern(string? pattern)
     {

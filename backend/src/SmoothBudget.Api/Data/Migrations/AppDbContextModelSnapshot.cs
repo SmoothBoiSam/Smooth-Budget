@@ -1325,6 +1325,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<Guid?>("ImportBatchId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("IncomeType")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("IsPartnerTransfer")
                         .HasColumnType("boolean");
 

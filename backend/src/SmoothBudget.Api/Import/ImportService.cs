@@ -30,7 +30,8 @@ public class ImportException(string message) : Exception(message);
 /// CSV import pipeline: parse → skip rows already in the account → categorize (rules, then bank category)
 /// → save → detect card payments and own-account transfers across all of the household's accounts.
 /// </summary>
-public class ImportService(AppDbContext db, TransferDetectionService transfers, CategorizationService categorization, TimeProvider clock)
+public class ImportService(AppDbContext db, TransferDetectionService transfers, CategorizationService categorization, TimeProvider clock,
+    Payday.PaydayService payday)
 {
     public const long MaxFileBytes = 5 * 1024 * 1024;
 
@@ -124,6 +125,7 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
                 Fingerprint = r.Fingerprint, Source = DataSource.Csv, CreatedUtc = now,
             };
             categorize.Apply(t); // rules, your past choices, then the bank's category; tags partner money
+            CategorizationContext.AskAboutIncome(t);
             return t;
         }).ToList();
         db.Transactions.AddRange(created);
@@ -148,6 +150,8 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
                 await categorization.MatchContributionsAsync(householdId, ct); // which transfer was her contribution
             await tx.CommitAsync(ct);
         }
+        if (created.Any(t => t.NeedsReview && t.Kind == TransactionKind.Income))
+            await payday.MatchDepositsAsync(householdId, ct); // a paycheck leaves Review once it's matched to its pay date
 
         return new ImportResultDto(
             batch.Id, Describe(parsed.Format), batch.RowCount, created.Count, duplicates,

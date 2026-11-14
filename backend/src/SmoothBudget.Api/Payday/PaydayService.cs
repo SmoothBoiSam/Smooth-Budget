@@ -181,17 +181,36 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var deposits = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.Kind == TransactionKind.Income && t.AmountCents < 0 && !t.IsTransfer && !t.IsPartnerTransfer
                         && t.Account.Type == AccountType.Checking && t.Account.IncludedInBudget && t.Date >= start.AddDays(-200) && t.Date <= to)
-            .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant }).ToListAsync(ct);
+            .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant, t.IncomeType }).ToListAsync(ct);
         if (!deposits.Any(d => d.Date >= start)) return 0;
         var linked = (await db.PayPeriodForecasts.AsNoTracking().Where(f => f.HouseholdId == householdId && f.DepositTransactionId != null)
             .Select(f => f.DepositTransactionId!.Value).ToListAsync(ct)).ToHashSet();
         static bool Near(DateOnly deposit, DateOnly payDate) => deposit >= payDate.AddDays(-2) && deposit <= payDate.AddDays(3);
         var payers = deposits.Where(d => linked.Contains(d.Id) || c.Stubs.Any(s => s.Stub.NetCents == -d.AmountCents && Near(d.Date, s.Stub.PayDate)))
             .Select(d => d.Merchant).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // What you said in Review comes first (DECISIONS.md 254): other income always counts here, even from your employer
+        // (a bonus); a paycheck counts here only when it's extra pay, away from the month's pay dates.
         return deposits
-            .Where(d => d.Date >= start && !linked.Contains(d.Id) && !payers.Contains(d.Merchant)
-                        && !checks.Any(p => Near(d.Date, p.PayDate) && Math.Abs(-d.AmountCents - p.Cents) <= Math.Max(p.Cents / 2, 100_00)))
+            .Where(d => d.Date >= start && !linked.Contains(d.Id))
+            .Where(d => d.IncomeType switch
+            {
+                Data.IncomeType.Other => true,
+                Data.IncomeType.Paycheck => !checks.Any(p => Near(d.Date, p.PayDate)),
+                _ => !payers.Contains(d.Merchant)
+                     && !checks.Any(p => Near(d.Date, p.PayDate) && Math.Abs(-d.AmountCents - p.Cents) <= Math.Max(p.Cents / 2, 100_00)),
+            })
             .Sum(d => -d.AmountCents);
+    }
+
+    /// <summary>Matches new deposits to their pay dates (after a sync or import), so a paycheck doesn't wait in Review (DECISIONS.md 254).</summary>
+    public async Task MatchDepositsAsync(Guid householdId, CancellationToken ct)
+    {
+        if (!await db.PayPeriodForecasts.AnyAsync(f => f.HouseholdId == householdId, ct)) return;
+        var c = await ContextAsync(householdId, ct);
+        var gate = Gates.GetOrAdd(householdId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try { await MatchActualsAsync(householdId, c, ct); }
+        finally { gate.Release(); }
     }
 
     /// <summary>The next check, for Home (no history writes).</summary>
@@ -328,38 +347,61 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     /// <summary>
     /// Predicted vs actual (SPEC 5.5): a stub for that pay date wins; otherwise a paycheck deposit into checking within a
     /// few days of payday, preferring the payer of earlier matched paychecks, then the amount closest to the prediction.
+    /// What you said in Review comes first (DECISIONS.md 254): a deposit you called a paycheck is that check whatever its
+    /// amount, and one you called other income is never a paycheck (a check it was matched to looks again). The deposit is
+    /// linked under a stub too, and a matched deposit leaves Review: it's your paycheck.
     /// </summary>
     public async Task MatchActualsAsync(Guid householdId, PayContext c, CancellationToken ct)
     {
-        var open = await db.PayPeriodForecasts.Where(f => f.HouseholdId == householdId && f.PayDate <= c.Today.AddDays(3) && f.ActualSource != "stub").ToListAsync(ct);
-        if (open.Count == 0) return;
+        var rows = await db.PayPeriodForecasts.Where(f => f.HouseholdId == householdId && f.PayDate <= c.Today.AddDays(3)).ToListAsync(ct);
+        var linkedIds = rows.Where(f => f.DepositTransactionId != null).Select(f => f.DepositTransactionId!.Value).ToList();
+        var notPay = (await db.Transactions.AsNoTracking()
+            .Where(t => linkedIds.Contains(t.Id) && (t.IncomeType == Data.IncomeType.Other || t.Kind != TransactionKind.Income || t.IsTransfer))
+            .Select(t => t.Id).ToListAsync(ct)).ToHashSet();
+        foreach (var f in rows.Where(f => f.DepositTransactionId is { } d && notPay.Contains(d)))
+        {
+            f.DepositTransactionId = null;
+            if (f.ActualSource == "deposit") (f.ActualNetCents, f.ActualSource) = (null, null);
+        }
+        var open = rows.Where(f => f.DepositTransactionId is null).ToList();
+        if (open.Count == 0)
+        {
+            await db.SaveChangesAsync(ct);
+            return;
+        }
         var stubByDate = c.Stubs.GroupBy(s => s.Stub.PayDate).ToDictionary(g => g.Key, g => g.First().Stub);
         var linked = await db.PayPeriodForecasts.Where(f => f.HouseholdId == householdId && f.DepositTransactionId != null).Select(f => f.DepositTransactionId!.Value).ToListAsync(ct);
+        linked.RemoveAll(notPay.Contains);
         var payers = await db.Transactions.AsNoTracking().Where(t => linked.Contains(t.Id)).Select(t => t.Merchant).Distinct().ToListAsync(ct);
         var from = open.Min(f => f.PayDate).AddDays(-2);
         var to = open.Max(f => f.PayDate).AddDays(3);
         var deposits = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.Kind == TransactionKind.Income && t.AmountCents < 0 && !t.IsTransfer && !t.IsPartnerTransfer
-                        && t.Account.Type == AccountType.Checking && t.Date >= from && t.Date <= to)
-            .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant }).ToListAsync(ct);
+                        && t.IncomeType != Data.IncomeType.Other && t.Account.Type == AccountType.Checking && t.Date >= from && t.Date <= to)
+            .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant, Said = t.IncomeType == Data.IncomeType.Paycheck }).ToListAsync(ct);
+        var matched = new List<Guid>();
 
         foreach (var f in open)
         {
-            if (stubByDate.TryGetValue(f.PayDate, out var stub))
-            {
+            var stub = stubByDate.GetValueOrDefault(f.PayDate);
+            if (stub is not null)
                 (f.ActualGrossCents, f.ActualNetCents, f.ActualSource) = (stub.GrossCents, stub.NetCents, "stub");
-                continue;
-            }
-            if (f.DepositTransactionId is not null) continue;
+            var expected = stub?.NetCents ?? f.PredictedNetCents;
             var match = deposits
                 .Where(d => d.Date >= f.PayDate.AddDays(-2) && d.Date <= f.PayDate.AddDays(3) && !linked.Contains(d.Id)
-                            && Math.Abs(-d.AmountCents - f.PredictedNetCents) <= Math.Max(f.PredictedNetCents / 2, 100_00))
-                .OrderBy(d => payers.Contains(d.Merchant) ? 0 : 1).ThenBy(d => Math.Abs(-d.AmountCents - f.PredictedNetCents)).FirstOrDefault();
+                            && (d.Said || Math.Abs(-d.AmountCents - expected) <= Math.Max(expected / 2, 100_00)))
+                .OrderBy(d => d.Said ? 0 : 1).ThenBy(d => payers.Contains(d.Merchant) ? 0 : 1).ThenBy(d => Math.Abs(-d.AmountCents - expected)).FirstOrDefault();
             if (match is null) continue;
-            (f.ActualNetCents, f.ActualSource, f.DepositTransactionId) = (-match.AmountCents, "deposit", match.Id);
+            f.DepositTransactionId = match.Id;
+            if (stub is null) (f.ActualNetCents, f.ActualSource) = (-match.AmountCents, "deposit");
             linked.Add(match.Id);
+            matched.Add(match.Id);
         }
         await db.SaveChangesAsync(ct);
+        if (matched.Count > 0)
+            await db.Transactions.Where(t => matched.Contains(t.Id) && t.NeedsReview && t.CategorySource != CategorySource.User)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.NeedsReview, false)
+                    .SetProperty(t => t.CategoryReason, "Your paycheck: it landed on payday."), ct);
     }
 
     /// <summary>

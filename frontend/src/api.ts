@@ -44,6 +44,8 @@ export interface HomeSummary {
   cash: CashCheck | null
   /** When the accounts come up short: the flight hours that would make it up (DECISIONS.md 192). */
   pickUp: PickUp | null
+  /** Each spending category in your budget's order, for the tiles under Left to Spend (DECISIONS.md 254). */
+  spending: { id: string; name: string; limitCents: number; spentCents: number; leftCents: number }[] | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */
@@ -187,6 +189,8 @@ export interface Transaction {
   isPartnerTransfer: boolean
   friendId: string | null
   friendName: string | null
+  /** Income you marked a paycheck or other income (DECISIONS.md 254); null when the app decides. */
+  incomeType: 'paycheck' | 'other' | 'friend' | null
   /** While money between you waits for a label: the category the app suggests (counted nowhere). */
   suggestedCategoryId: string | null
   categoryReason: string | null
@@ -276,6 +280,9 @@ export const budgetApi = {
   bestGuessAll: (scope: ReviewScope | 'all') => request<{ settled: number }>('POST', '/transactions/review/best-guess', { scope }),
   context: (id: string) => request<TransactionContext>('GET', `/transactions/${id}/context`),
   confirmGuesses: (ids: string[]) => request<{ confirmed: number }>('POST', '/transactions/review/confirm', { ids }),
+  /** Money in is your income (DECISIONS.md 254): a paycheck, a friend's contribution (which friend), or other income. */
+  markIncome: (id: string, as: IncomeKind, friendId?: string) =>
+    request<Transaction>('POST', `/transactions/${id}/income`, { as, friendId: friendId ?? null }),
   autoCategorize: () => request<AutoCategorizeResult>('POST', '/transactions/auto-categorize'),
   suggestedCategories: () => request<SuggestedCategory[]>('GET', '/transactions/suggested-categories'),
   updateTransaction: (
@@ -318,6 +325,10 @@ export interface BudgetCategoryLine {
   transactionCount: number
   /** What the partner's fixed contribution covers of this line (Rent: the $800). */
   partnerOffsetCents: number
+  /** The card payment line holds the full card minimums (DECISIONS.md 254): this much of its limit is the Card interest line's. */
+  interestIncludedCents: number
+  /** Card interest under Debt: paid by the card payment line, so the group's totals leave it out (DECISIONS.md 254). */
+  partOfCardPayments: boolean
 }
 
 export interface BudgetGroup {
@@ -891,8 +902,9 @@ export const recurringApi = {
   fileToward: (transactionId: string, kind: 'debt' | 'interest' | 'savings', id: string) =>
     request<{ towardName: string; categoryName: string }>('POST', `/transactions/${transactionId}/toward`, { kind, id }),
   billChoices: (transactionId: string) => request<ChargeBillChoices>('GET', `/recurring/for/${transactionId}`),
-  fileAsBill: (body: { transactionId: string; billKey?: string; categoryId?: string; name?: string }) =>
-    request<{ categoryId: string; categoryName: string; moved: number }>('POST', '/recurring/file-charge', body),
+  /** always: a merchant rule, so its charges go to this bill from now on (DECISIONS.md 254). */
+  fileAsBill: (body: { transactionId: string; billKey?: string; categoryId?: string; name?: string; always?: boolean }) =>
+    request<{ categoryId: string; categoryName: string; moved: number; ruleAppliedTo: number }>('POST', '/recurring/file-charge', body),
   update: (u: RecurringUpdate) => request<void>('PUT', '/recurring', u),
   trackAsBill: (key: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/track-as-bill', { key }),
   /** File a bill's charges (past and future) under another category. */
@@ -1293,8 +1305,36 @@ export const openPlanItems = (s: PaydaySummary) =>
 /** What the pay side adds to the Tasks badge: open steps on the check you're on, plus uploads due (DECISIONS.md 238). */
 export const payBadge = (s: PaydaySummary) => openPlanItems(s) + (s.uploadsDue?.length ?? 0)
 
+export type IncomeKind = 'paycheck' | 'friend' | 'other'
+export interface IncomeMonth {
+  month: string
+  paycheckCents: number
+  friendCents: number
+  otherCents: number
+}
+export interface IncomeSummary {
+  months: IncomeMonth[]
+  thisMonthCents: number
+  toReview: number
+}
+export interface IncomeItem {
+  id: string
+  date: string
+  cents: number
+  description: string
+  account: string
+  kind: IncomeKind
+  friendName: string | null
+  /** You said what it is in Review; otherwise the app decided. */
+  said: boolean
+  needsReview: boolean
+}
+
 export const paydayApi = {
   summary: () => request<PaydaySummary>('GET', '/payday'),
+  /** The Income page (DECISIONS.md 254): a year of income by month. */
+  income: () => request<IncomeSummary>('GET', '/payday/income'),
+  incomeTransactions: () => request<IncomeItem[]>('GET', '/payday/income/transactions'),
   setDone: (payDate: string, key: string, done: boolean) =>
     request<void>('PUT', `/payday/plan/${payDate}/${encodeURIComponent(key)}`, { done }),
   setSkipped: (payDate: string, key: string, skipped: boolean) =>

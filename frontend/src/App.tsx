@@ -15,6 +15,7 @@ import TasksScreen from './TasksScreen'
 import PayTasksScreen from './PayTasksScreen'
 import PaydayScreen from './PaydayScreen'
 import PaySetupScreen from './PaySetupScreen'
+import IncomeHistoryScreen from './Income'
 import SavingsScreen from './SavingsScreen'
 import { inViewTransition, reducedMotion } from './motion'
 import { saved, useOnline, useResume } from './offline'
@@ -39,7 +40,9 @@ function currentRoute(): Route {
             ? 'friends' // Shared was renamed Friends (DECISIONS.md 207)
             : hash === 'partner'
               ? 'friends/transfers' // Partner became the friend whose transfers are tracked
-              : null
+              : hash === 'payday/setup' || hash.startsWith('payday/setup/')
+                ? 'income' + hash.slice('payday/setup'.length) // Schedule & pay stubs became Income (DECISIONS.md 254)
+                : null
   if (moved) {
     window.history.replaceState(null, '', '#/' + moved)
     hash = moved
@@ -48,7 +51,9 @@ function currentRoute(): Route {
   if (hash === 'tasks') return 'tasks'
   if (hash === 'tasks/payday') return 'paytasks'
   if (hash.startsWith('tasks/')) return 'review' // tasks/transactions
-  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'debt/interest' ? 'debtinterest' : hash === 'debt/payments' ? 'debtpayments' : hash === 'savings' ? 'savings' : hash === 'savings/history' ? 'savingshistory' : hash === 'payday' ? 'payday' : hash.startsWith('payday/setup') ? 'paysetup' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
+  if (hash === 'income/history') return 'incomehistory'
+  if (hash === 'income' || hash.startsWith('income/')) return 'paysetup' // Income: your pay, schedule and stubs (DECISIONS.md 254)
+  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'debt/interest' ? 'debtinterest' : hash === 'debt/payments' ? 'debtpayments' : hash === 'savings' ? 'savings' : hash === 'savings/history' ? 'savingshistory' : hash === 'payday' ? 'payday' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {
@@ -193,6 +198,7 @@ export default function App() {
       {route === 'savingshistory' && <SavingsHistoryScreen onSignedOut={signedOut} />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
+      {route === 'incomehistory' && <IncomeHistoryScreen onSignedOut={signedOut} />}
       {route === 'friends' && <FriendsScreen onSignedOut={signedOut} />}
       {route === 'friend' && <FriendScreen key={window.location.hash} id={window.location.hash.slice('#/friends/'.length)} onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}

@@ -71,7 +71,7 @@ export default function FriendMoney({ friendId, who, reloadKey, onSignedOut }: {
         </p>
       )}
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
-      {!o && !error && <Loading />}
+      {!o && !error && <Loading shape="list" />}
 
       {o && (
         <>

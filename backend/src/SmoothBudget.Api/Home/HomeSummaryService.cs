@@ -46,7 +46,12 @@ public record HomeSummaryDto(
     long CashShortCents = 0,
     CashCheck? Cash = null,
     // When the accounts come up short: the flight hours that would make it up (DECISIONS.md 192).
-    Payday.PickUpDto? PickUp = null);
+    Payday.PickUpDto? PickUp = null,
+    // Each spending category, in your budget's order, for the small tiles under Left to Spend (DECISIONS.md 254).
+    IReadOnlyList<HomeCategoryDto>? Spending = null);
+
+/// <summary>One spending category on Home: its limit, what's spent, and what's left (negative when over).</summary>
+public record HomeCategoryDto(Guid Id, string Name, long LimitCents, long SpentCents, long LeftCents);
 
 /// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
 public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
@@ -248,7 +253,11 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             IncomeUnknown: MonthData.MoneyIn(data.Row, data.Contributions) <= 0 && data.Categories.Any(c => c.LimitCents > 0),
             CashShortCents: r.CashShortCents,
             Cash: r.Cash,
-            PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct));
+            PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct),
+            Spending: data.Categories.Where(c => c.Type == Core.Budgeting.CategoryType.Variable).OrderBy(c => c.SortOrder)
+                .Select(c => (c, l: r.Categories.FirstOrDefault(x => x.CategoryId == c.Id)))
+                .Where(x => x.l is not null && (x.l.LimitCents > 0 || x.l.SpentCents > 0))
+                .Select(x => new HomeCategoryDto(x.c.Id, x.c.Name, x.l!.LimitCents, x.l.SpentCents, x.l.LimitCents - x.l.SpentCents)).ToList());
     }
 
     /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>

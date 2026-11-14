@@ -345,6 +345,40 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
     // ---- Partner contributions -----------------------------------------------------------------------
 
     [Fact]
+    public async Task New_income_waits_in_review_and_lands_where_you_say()
+    {
+        // DECISIONS.md 254: a deposit is your income, but what kind decides where it counts, so a new one waits in Review.
+        var c = await NewUserAsync();
+        var checking = await AccountAsync(c, "Checking", "1111");
+        await ImportAsync(c, checking, ChaseChecking,
+            "CREDIT,11/12/2026,\"DEMO AIR BONUS PPD ID: 1234567890\",500.00,ACH_CREDIT,2900.86,,",
+            "CREDIT,11/13/2026,\"Zelle payment from SAM SAMPLE 1357\",200.00,PARTNERFI_TO_CHASE,3100.86,,");
+        var waiting = await Review(c);
+        var bonus = waiting.Single(t => t.Description.Contains("BONUS"));
+        var zelle = waiting.Single(t => t.Description.Contains("SAM SAMPLE"));
+        Assert.Equal(("Income", true), (bonus.Kind, bonus.NeedsReview));
+
+        // Other income: settled, out of Review.
+        var marked = (await (await c.PostAsJsonAsync($"/api/transactions/{bonus.Id}/income", new MarkIncomeRequest("other"), Json)).Content.ReadFromJsonAsync<TransactionDto>(Json))!;
+        Assert.Equal(("Income", "other", false), (marked.Kind, marked.IncomeType, marked.NeedsReview));
+
+        // A friend's contribution needs which friend; then it's theirs, and a re-run keeps it so though the transfer
+        // doesn't carry the name on their transfers.
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/transactions/{zelle.Id}/income", new MarkIncomeRequest("friend"), Json)).StatusCode);
+        var friend = (await (await c.PostAsJsonAsync("/api/shared/friends", new Shared.SetNameRequest("Robin"), Json)).Content.ReadFromJsonAsync<Shared.FriendDto>(Json))!;
+        (await c.PostAsJsonAsync($"/api/transactions/{zelle.Id}/income", new MarkIncomeRequest("friend", friend.Id), Json)).EnsureSuccessStatusCode();
+        await c.PostAsync("/api/transactions/auto-categorize", null);
+        var after = (await All(c)).Single(t => t.Id == zelle.Id);
+        Assert.Equal(("PartnerContribution", friend.Id, false), (after.Kind, after.FriendId!.Value, after.NeedsReview));
+        Assert.DoesNotContain(await Review(c), t => t.Id == bonus.Id || t.Id == zelle.Id);
+
+        // Money out isn't income.
+        await ImportAsync(c, checking, ChaseChecking, "DEBIT,11/14/2026,\"CORNER SHOP\",-12.00,DEBIT_CARD,3088.86,,");
+        var shop = (await All(c)).Single(t => t.Description.Contains("CORNER SHOP"));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/transactions/{shop.Id}/income", new MarkIncomeRequest("other"), Json)).StatusCode);
+    }
+
+    [Fact]
     public async Task Partner_transfers_are_kept_apart_from_your_income()
     {
         var c = await NewUserAsync();

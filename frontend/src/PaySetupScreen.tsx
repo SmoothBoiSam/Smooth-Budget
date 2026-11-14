@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } fr
 import {
   ApiError,
   paydayApi,
+  type IncomeSummary,
   type PaydaySummary,
   type PayProfile,
   type ScheduleMonth,
@@ -10,19 +11,22 @@ import {
 } from './api'
 import { useRemembered } from './offline'
 import { Paychecks } from './PaydayScreen'
-import { Caret, ErrorNotice, Page, PageHeader, Row, Rows } from './ui'
+import { IncomeCard } from './Income'
+import { Caret, ErrorNotice, Loading, Page, PageHeader, Row, Rows } from './ui'
 import { formatCents, formatDay } from './format'
 
 const hm = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
 const monthLabel = (y: number, m: number) => new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
 /**
- * Payday setup (SPEC 4.6, 4.9): the monthly schedule import, pay stub upload with a review before saving, and your pay
+ * Income (DECISIONS.md 254), once Schedule & pay stubs: a card of what's come in with a chart and Past income, your
+ * paychecks, then where they're forecast from. Payday setup (SPEC 4.6, 4.9): the monthly schedule import, pay stub upload with a review before saving, and your pay
  * profile. The schedules and stubs already in are each on their own page (DECISIONS.md 184). The withholding model and
  * pay rules work on their own, so they aren't shown.
  */
 export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [summary, setSummary] = useState<PaydaySummary | null>(null)
+  const [income, setIncome] = useState<IncomeSummary | null>(null)
   const [profile, setProfile] = useState<PayProfile | null>(null)
   const [months, setMonths] = useState<ScheduleMonth[]>([])
   const [stubs, setStubs] = useState<StubListItem[]>([])
@@ -50,8 +54,14 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
   )
   const load = useCallback(async () => {
     try {
-      const [summary, m, st] = await Promise.all([paydayApi.summary(), paydayApi.schedule(), paydayApi.stubs()])
+      const [summary, m, st, inc] = await Promise.all([
+        paydayApi.summary(),
+        paydayApi.schedule(),
+        paydayApi.stubs(),
+        paydayApi.income().catch(() => null), // an extra: the page still shows without it
+      ])
       setSummary(summary)
+      setIncome(inc)
       setProfile(summary.profile)
       setMonths(m)
       setStubs(st)
@@ -146,7 +156,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
   if (sub === 'schedules')
     return (
       <Page>
-        {header('#/payday/setup', 'Schedule & pay stubs', 'Schedules')}
+        {header('#/income', 'Income', 'Schedules')}
         <div className="mt-4">
           {previewCard}
           {months.length === 0 ? (
@@ -167,7 +177,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
   if (sub === 'stubs')
     return (
       <Page>
-        {header('#/payday/setup', 'Schedule & pay stubs', 'Pay stubs')}
+        {header('#/income', 'Income', 'Pay stubs')}
         {stubs.length === 0 ? (
           <p className="mt-4 text-sm text-ink-soft">No pay stubs uploaded yet.</p>
         ) : (
@@ -195,7 +205,9 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
 
   return (
     <Page>
-      {header('#/payday', 'Plan', 'Schedule & pay stubs')}
+      {header('#/payday', 'Plan', 'Income')}
+      {!summary && !error && <Loading />}
+      {income && <IncomeCard s={income} />}
 
       {/* Your paychecks sit here, above what they're forecast from (DECISIONS.md 249). */}
       {summary && (
@@ -207,7 +219,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
       <Section title="Monthly schedule" hint="SkedPlus+ text export (.txt) or CSV. Re-importing a month replaces it.">
         <FileButton label="Import a schedule" accept=".txt,.csv,text/plain,text/csv" onChange={pickSchedule} />
         {previewCard}
-        <SubLink href="#/payday/setup/schedules" title="View schedules" detail={months.length === 0 ? 'None imported yet' : `${months.length} ${months.length === 1 ? 'month' : 'months'}: ${months.map((m) => monthLabel(m.year, m.month).split(' ')[0]).join(', ')}`} />
+        <SubLink href="#/income/schedules" title="View schedules" detail={months.length === 0 ? 'None imported yet' : `${months.length} ${months.length === 1 ? 'month' : 'months'}: ${months.map((m) => monthLabel(m.year, m.month).split(' ')[0]).join(', ')}`} />
       </Section>
 
       <Section title="Pay stubs" hint="Pay advice PDFs: 2 at least, 6 is better. You check the numbers first; the file isn’t kept.">
@@ -217,7 +229,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
           setReview(null)
           if (saved.varianceCents !== null) setNotice(`Saved. The app had predicted ${formatCents(saved.predictedNetCents ?? 0)}; it was ${formatCents(saved.actualNetCents)}.`)
         }, 'Saved. Your forecast learned from it.')} />}
-        <SubLink href="#/payday/setup/stubs" title="View pay stubs" detail={stubs.length === 0 ? 'None uploaded yet' : `${stubs.length} ${stubs.length === 1 ? 'stub' : 'stubs'}, latest paid ${formatDay(stubs.reduce((a, b) => (a.payDate > b.payDate ? a : b)).payDate)}`} />
+        <SubLink href="#/income/stubs" title="View pay stubs" detail={stubs.length === 0 ? 'None uploaded yet' : `${stubs.length} ${stubs.length === 1 ? 'stub' : 'stubs'}, latest paid ${formatDay(stubs.reduce((a, b) => (a.payDate > b.payDate ? a : b)).payDate)}`} />
       </Section>
 
       {profile && <ProfileSection p={profile} busy={busy} act={act} />}
@@ -238,7 +250,7 @@ function SubLink({ href, title, detail }: { href: string; title: string; detail:
 
 const subFromHash = () => {
   const h = window.location.hash
-  return h.startsWith('#/payday/setup/stubs') ? 'stubs' : h.startsWith('#/payday/setup/schedules') ? 'schedules' : null
+  return h.startsWith('#/income/stubs') ? 'stubs' : h.startsWith('#/income/schedules') ? 'schedules' : null
 }
 
 type Act = (action: () => Promise<unknown>, message: string) => Promise<void>

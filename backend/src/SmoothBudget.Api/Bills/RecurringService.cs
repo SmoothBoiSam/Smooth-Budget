@@ -62,9 +62,10 @@ public record BillLineDto(Guid Id, string Name);
 public record ChargeBillChoicesDto(IReadOnlyList<BillChoiceDto> Bills, IReadOnlyList<BillLineDto> Lines, string? Current, string? Detected, string? Suggested);
 /// <summary>A charge in review is a bill (DECISIONS.md 225, 230): <paramref name="BillKey"/> (it's that bill), or a new bill
 /// named <paramref name="Name"/>, in the bill category <paramref name="CategoryId"/> or, without one, a new bill category of its own.</summary>
-public record FileChargeAsBillRequest(Guid TransactionId, string? BillKey = null, Guid? CategoryId = null, string? Name = null);
+/// <param name="Always">Always file this merchant's charges under the bill (DECISIONS.md 254): a merchant rule, like "Always" on a category.</param>
+public record FileChargeAsBillRequest(Guid TransactionId, string? BillKey = null, Guid? CategoryId = null, string? Name = null, bool Always = false);
 /// <param name="Moved">Other charges that moved to that line with it.</param>
-public record FiledAsBillDto(Guid CategoryId, string CategoryName, int Moved);
+public record FiledAsBillDto(Guid CategoryId, string CategoryName, int Moved, int RuleAppliedTo = 0);
 public record MoveBillRequest(string Key, Guid CategoryId);
 
 /// <summary>
@@ -306,9 +307,11 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         else if (own is not null)
             await FileUnderAsync(householdId, own, cat.Id, reason, ct);
         await KeepBillsTogetherAsync(householdId, ct, t.Id);
+        var ruled = req.Always && Transactions.TransactionEndpoints.NormalizePattern(t.Merchant) is { } pattern
+            ? await Transactions.TransactionEndpoints.AlwaysAsync(db, householdId, pattern, cat.Id, t.Id, clock, ct) : 0;
 
         var after = await db.Transactions.CountAsync(x => x.HouseholdId == householdId && x.CategoryId == cat.Id && x.Id != t.Id, ct);
-        return new FiledAsBillDto(cat.Id, cat.Name, Math.Max(0, after - before));
+        return new FiledAsBillDto(cat.Id, cat.Name, Math.Max(0, after - before), ruled);
     }
 
     /// <summary>

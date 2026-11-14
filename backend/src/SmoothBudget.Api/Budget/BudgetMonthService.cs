@@ -9,7 +9,7 @@ namespace SmoothBudget.Api.Budget;
 /// <summary>A category with the limit that applies in one particular budget month.</summary>
 public sealed record MonthCategory(Guid Id, string Name, CategoryType Type, long LimitCents, CategoryPriority Priority, int SortOrder, bool HasMonthOverride)
 {
-    public BudgetCategory ForCalculator => new(Id, Type, LimitCents);
+    public BudgetCategory ForCalculator => new(Id, Type, LimitCents, Core.Transactions.CardInterest.IsInterestCategory(Name, Type));
 }
 
 /// <summary>Everything about one budget month that the calculators need.</summary>

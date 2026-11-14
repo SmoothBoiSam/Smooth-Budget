@@ -252,14 +252,27 @@ export function Chevron() {
   )
 }
 
-/** A placeholder in the shape of a screen's cards while it loads. */
-export function Loading({ label = 'Loading' }: { label?: string }) {
+/**
+ * A placeholder in the shape of what's loading (DECISIONS.md 254), so nothing seems to promise cards that never come:
+ * "cards", a big card and two rows (Home, Debt, Savings, Income, a Review card); "list", a heading and one list of rows
+ * (Budget, the history pages, Friends).
+ */
+export function Loading({ label = 'Loading', shape = 'cards' }: { label?: string; shape?: 'cards' | 'list' }) {
   return (
     <div role="status" aria-live="polite" className="mt-6 space-y-4">
       <span className="sr-only">{label}…</span>
-      <div className="neu shimmer h-64 rounded-3xl" />
-      <div className="neu shimmer h-14 rounded-2xl" />
-      <div className="neu shimmer h-14 rounded-2xl" />
+      {shape === 'list' ? (
+        <>
+          <div className="neu-inset shimmer h-4 w-1/3 rounded-full" />
+          <div className="neu shimmer h-44 rounded-2xl" />
+        </>
+      ) : (
+        <>
+          <div className="neu shimmer h-64 rounded-3xl" />
+          <div className="neu shimmer h-14 rounded-2xl" />
+          <div className="neu shimmer h-14 rounded-2xl" />
+        </>
+      )}
     </div>
   )
 }

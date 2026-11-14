@@ -82,7 +82,7 @@ export default function FriendsScreen({ onSignedOut }: { onSignedOut: () => void
     <Page>
       <PageHeader title="Friends" sub="The people you split costs with" back={{ href: '#/more', label: 'More' }} />
       {error && <ErrorNotice message={error} />}
-      {!o && !error && <Loading />}
+      {!o && !error && <Loading shape="list" />}
 
       {joining && (
         <section aria-label="Invite" className="mt-4 rounded-3xl neu p-4 text-sm">

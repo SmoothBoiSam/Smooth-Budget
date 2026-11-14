@@ -95,6 +95,7 @@ builder.Services.AddScoped<SmoothBudget.Api.Debt.CardInterestService>();
 builder.Services.AddScoped<SmoothBudget.Api.Bills.RecurringService>();
 builder.Services.AddScoped<SmoothBudget.Api.Savings.SavingsService>();
 builder.Services.AddScoped<SmoothBudget.Api.Payday.PaydayService>();
+builder.Services.AddScoped<SmoothBudget.Api.Payday.IncomeHistory>();
 builder.Services.AddSingleton<BudgetRefreshTracker>();
 builder.Services.AddScoped<AutoBudgetService>();
 builder.Services.AddScoped<CategoryArchiveService>();

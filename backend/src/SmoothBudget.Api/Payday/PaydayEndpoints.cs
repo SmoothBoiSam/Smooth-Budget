@@ -46,6 +46,12 @@ public static class PaydayEndpoints
             return await svc.GetAsync(ctx.User.HouseholdId(), ct);
         });
 
+        // The Income page (DECISIONS.md 254): a year of income by month, and every income deposit since.
+        g.MapGet("/income", async (HttpContext ctx, IncomeHistory income, CancellationToken ct) =>
+            await income.SummaryAsync(ctx.User.HouseholdId(), ct));
+        g.MapGet("/income/transactions", async (HttpContext ctx, IncomeHistory income, TimeProvider clock, CancellationToken ct) =>
+            await income.ItemsAsync(ctx.User.HouseholdId(), DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime).AddYears(-2), ct));
+
         g.MapPut("/plan/{payDate}/{key}", async (DateOnly payDate, string key, ChecklistRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();

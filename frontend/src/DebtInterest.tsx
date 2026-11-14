@@ -158,7 +158,7 @@ function DebtMoneyList({
         error ? (
           <ErrorNotice message={error} onRetry={() => void load()} />
         ) : (
-          <Loading />
+          <Loading shape="list" />
         )
       ) : (
         <>

@@ -33,6 +33,21 @@ public sealed class CategorizationContext(
     {
         if (t.IsTransfer)
             return;
+        // Income you said what it is (DECISIONS.md 254): a friend's contribution stays theirs even when the transfer doesn't
+        // carry their name, and a paycheck or other income stays yours even when it does.
+        if (!TransactionRules.IsAutomatic(t.CategorySource) && t.AmountCents < 0)
+        {
+            if (t.IncomeType == IncomeType.Friend && t.Kind == TransactionKind.PartnerContribution && t.FriendId is not null)
+            {
+                t.IsPartnerTransfer = true;
+                return;
+            }
+            if (t.IncomeType is not null && t.Kind == TransactionKind.Income)
+            {
+                (t.IsPartnerTransfer, t.FriendId) = (false, null);
+                return;
+            }
+        }
         // Whose it is: the first friend whose transfer name it carries.
         var from = t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerTransfer
             ? friends.FirstOrDefault(f => PartnerDetector.IsFromPartner(t.Description, t.AmountCents, f.TransferName)) : null;
@@ -70,8 +85,11 @@ public sealed class CategorizationContext(
         }
         if (t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerTransfer)
         {
-            (t.Kind, t.CategoryId, t.CategorySource, t.NeedsReview, t.CategoryUnsure, t.CategoryReason) =
-                (TransactionKind.Income, null, CategorySource.None, false, false, null);
+            // Your income. New deposits wait in Review for you to say what they are (DECISIONS.md 254, see AskAboutIncome);
+            // a re-run leaves that as it is, so the income already here doesn't all come back.
+            if (t.Kind != TransactionKind.Income) t.NeedsReview = false;
+            (t.Kind, t.CategoryId, t.CategorySource, t.CategoryUnsure, t.CategoryReason) =
+                (TransactionKind.Income, null, CategorySource.None, false, null);
             return;
         }
 
@@ -99,6 +117,16 @@ public sealed class CategorizationContext(
         t.NeedsReview = guess.CategoryId is not null && !same;
         t.CategoryUnsure = guess.CategoryId is not null && guess.Unsure && !same;
         t.CategoryReason = Clip(guess.Reason);
+    }
+
+    /// <summary>
+    /// A new deposit that's your income waits in Review for you to say what it is: a paycheck, a friend's contribution or
+    /// other income (DECISIONS.md 254). A paycheck the app matches to a pay date leaves Review by itself.
+    /// </summary>
+    public static void AskAboutIncome(Transaction t)
+    {
+        if (!t.IsTransfer && !t.IsPartnerTransfer && t.Kind == TransactionKind.Income && t.AmountCents < 0 && TransactionRules.IsAutomatic(t.CategorySource))
+            t.NeedsReview = true;
     }
 
     /// <summary>Money between you, waiting for a label: no category (so it counts nowhere), the suggestion pre-selected in Review.</summary>

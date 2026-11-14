@@ -26,7 +26,7 @@ import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
 import { ArchivedCategories, ResetCategories, UnusedCategories } from './CategoryTools'
 import BillSheet from './BillSheet'
-import { centsToInput, formatCents, formatDay, formatSigned, formatTime, parseDollars, titleCase } from './format'
+import { centsToInput, formatCents, formatDay, formatSigned, formatTime, ordinal, parseDollars, titleCase } from './format'
 import { TransactionEditSheet } from './ReviewScreen'
 
 // Sub-views of the Budget tab, from the URL hash:
@@ -124,17 +124,21 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
   }
 
   /** Moves a category one place up or down within its group, keeping every other category's order. */
-  async function move(l: BudgetCategoryLine, direction: -1 | 1) {
-    if (!summary) return
+  // Reorder in the edit pop-up: says where it is now, since the list behind the pop-up is hidden (DECISIONS.md 254).
+  async function move(l: BudgetCategoryLine, direction: -1 | 1): Promise<string> {
+    if (!summary) return ''
     const group = summary.groups.find((g) => g.categories.some((c) => c.id === l.id))!
     const ids = group.categories.map((c) => c.id)
     const i = ids.indexOf(l.id)
     const j = i + direction
-    if (j < 0 || j >= ids.length) return
+    const where = (k: number) => `${ordinal(k + 1)} of ${ids.length} in ${groupNames[group.type as Category['type']] ?? group.label}`
+    if (j < 0 || j >= ids.length) return `${l.name} is already ${direction < 0 ? 'first' : 'last'}: ${where(i)}.`
     ;[ids[i], ids[j]] = [ids[j], ids[i]]
     const all = summary.groups.flatMap((g) => (g === group ? ids : g.categories.map((c) => c.id)))
     await budgetEditApi.reorder(all)
     await load()
+    const below = j > 0 ? `, after ${group.categories.find((c) => c.id === ids[j - 1])!.name}` : ''
+    return `Moved ${direction < 0 ? 'up' : 'down'}. ${l.name} is now ${where(j)}${below}.`
   }
 
   const line =
@@ -175,7 +179,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
         </p>
       )}
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
-      {!summary && !error && <Loading />}
+      {!summary && !error && <Loading shape="list" />}
 
       {summary && view.kind === 'overview' && (
         <Overview summary={summary} bills={bills} onAdd={() => setEditing(null)} onOpenBill={setBill} onDone={saved} />
@@ -372,9 +376,13 @@ function Group({
           return (
             <li key={c.id}>
               <a href={planHref ?? `#/budget/c/${c.id}`} className="block px-4 py-3">
-                <CategoryRow line={c} spending={spending} />
-                {c.type === 'FixedBill' && g.type === 'DebtPayment' && (
-                  <span className="mt-1 block text-xs text-ink-faint">Planned from your card balances at their APRs</span>
+                {c.partOfCardPayments ? (
+                  <InterestRow line={c} />
+                ) : (
+                  <CategoryRow line={c} spending={spending} />
+                )}
+                {c.interestIncludedCents > 0 && (
+                  <span className="mt-1 block text-xs text-ink-faint">Your card minimums, with about {formatCents(c.interestIncludedCents)} of interest in them</span>
                 )}
               </a>
               {items.length > 0 && <BillItems lineId={c.id} items={items} month={month} today={today} onOpen={onOpenBill} />}
@@ -477,6 +485,21 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
           A friend covers {formatCents(c.partnerOffsetCents)} · your share <span className="font-medium text-ink-soft">{formatCents(c.limitCents - c.partnerOffsetCents)}</span>
         </p>
       )}
+    </>
+  )
+}
+
+/** Card interest under Debt (DECISIONS.md 254): what the cards charged, which the card payment above pays. Not money of its own. */
+function InterestRow({ line: c }: { line: BudgetCategoryLine }) {
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="truncate text-sm font-medium">{c.name}</span>
+        <span className="shrink-0 text-sm tabular-nums text-ink-soft">{formatCents(c.spentCents)} charged</span>
+      </div>
+      <p className="mt-1 text-xs text-ink-faint">
+        About {formatCents(c.limitCents)} expected this month from your card balances and APRs. It’s part of the card payment above, not extra.
+      </p>
     </>
   )
 }
@@ -696,7 +719,7 @@ function SearchableList({
           </button>
         </div>
       )}
-      {searching && results === null && <Loading label="Searching" />}
+      {searching && results === null && <Loading label="Searching" shape="list" />}
       {searching && results && (
         <div className="mt-3 flex items-baseline justify-between gap-3 text-xs text-ink-soft" aria-live="polite">
           <p>
@@ -711,7 +734,7 @@ function SearchableList({
           </button>
         </div>
       )}
-      {!searching && shown === null && <Loading />}
+      {!searching && shown === null && <Loading shape="list" />}
       {!searching && shown && (
         <TransactionList items={shown} empty={back === 0 ? 'No transactions this month yet. Import a CSV from More.' : `No transactions in ${label}.`} onSelect={onSelect} />
       )}
