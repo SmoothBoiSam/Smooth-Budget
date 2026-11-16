@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, budgetApi, plaidApi, type BankUpdate, type CashCheck, type Category, type HomeSummary, type Me, type PickUp, type Transaction } from './api'
 import { TransactionList } from './BudgetScreen'
 import { TransactionEditSheet } from './ReviewScreen'
-import { formatCents, formatDay, formatTime } from './format'
+import { formatCents, formatDay, formatTime, healthBar } from './format'
 import { useArrivals, useTween } from './motion'
 import { saved, useOnline, useResume } from './offline'
 import { Card, Chevron, Loading, Notice, Pill, Row, Rows } from './ui'
@@ -285,50 +285,35 @@ function daysBetween(from: string, to: string) {
   return Math.round(day(to) - day(from))
 }
 
-/** Whole dollars, rounded toward zero, for the small tiles: "$84", "−$12". */
-const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${Math.floor(Math.abs(cents) / 100).toLocaleString('en-US')}`
-
 /**
- * Every spending category as a small tile under Left to Spend (DECISIONS.md 254): its name, a thin bar of what's left of
- * its limit, and the amount left. Small on purpose, three to a row; past nine, the rest are a tap away on Budget.
+ * Every spending category as a thin row under Left to Spend (DECISIONS.md 254, 255): its name, what's left, and a bar
+ * filled and colored the way its line on the Budget tab is (how much of the limit is used; green, gold when low, red
+ * when over). A tap opens the category.
  */
-function SpendingTiles({ items }: { items: NonNullable<HomeSummary['spending']> }) {
-  const MAX = 9
-  const shown = items.length > MAX ? items.slice(0, MAX - 1) : items
+function SpendingRows({ items }: { items: NonNullable<HomeSummary['spending']> }) {
   return (
-    <ul aria-label="Left in each spending category" className="mt-3 grid grid-cols-3 gap-2">
-      {shown.map((c) => {
-        const share = c.limitCents > 0 ? Math.max(0, Math.min(1, c.leftCents / c.limitCents)) : 0
+    <ul aria-label="Left in each spending category" className="mt-4">
+      {items.map((c) => {
+        const used = c.limitCents > 0 ? Math.min(1, Math.max(0, c.spentCents / c.limitCents)) : c.spentCents > 0 ? 1 : 0
         const over = c.leftCents < 0
-        const low = !over && share < 0.15
         return (
           <li key={c.id}>
             <a
               href={`#/budget/c/${c.id}`}
               aria-label={`${c.name}: ${over ? `${formatCents(-c.leftCents)} over` : `${formatCents(c.leftCents)} left of ${formatCents(c.limitCents)}`}`}
-              className="block rounded-xl neu-inset px-2.5 py-2"
+              className="grid grid-cols-[minmax(0,1fr)_auto_5rem] items-center gap-3 py-1.5 text-xs"
             >
-              <span className="block truncate text-[11px] font-medium text-ink-soft">{c.name}</span>
-              <span aria-hidden className="mt-1 block h-1 overflow-hidden rounded-full bg-ink/10">
-                <span
-                  className={`block h-full rounded-full transition-[width] duration-500 ${over ? 'bg-danger' : low ? 'bg-gold' : 'bg-good'}`}
-                  style={{ width: `${(over ? 1 : share) * 100}%` }}
-                />
+              <span className="truncate text-ink-soft">{c.name}</span>
+              <span aria-hidden className={`text-right font-semibold tabular-nums ${over ? 'text-danger' : ''}`}>
+                {over ? `${formatCents(-c.leftCents)} over` : formatCents(c.leftCents)}
               </span>
-              <span aria-hidden className={`mt-1 block text-xs font-semibold tabular-nums ${over ? 'text-danger' : ''}`}>
-                {over ? `${dollars(-c.leftCents)} over` : dollars(c.leftCents)}
+              <span aria-hidden className="block h-2 overflow-hidden rounded-full neu-inset">
+                <span className={`block h-full rounded-full ${healthBar[c.health]}`} style={{ width: `${used * 100}%` }} />
               </span>
             </a>
           </li>
         )
       })}
-      {items.length > MAX && (
-        <li>
-          <a href="#/budget" className="flex h-full items-center justify-center rounded-xl neu-inset px-2.5 py-2 text-xs font-semibold text-accent">
-            +{items.length - shown.length} more
-          </a>
-        </li>
-      )}
     </ul>
   )
 }
@@ -549,7 +534,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
             <dd className="text-lg font-semibold tabular-nums">{untilPayday ? <Cents cents={untilPayday.cents} countUp={shown.intro} /> : s.daysRemaining}</dd>
           </div>
         </dl>
-        {s.spending && s.spending.length > 0 && <SpendingTiles items={s.spending} />}
+        {s.spending && s.spending.length > 0 && <SpendingRows items={s.spending} />}
       </section>
 
       {notices.length > 0 && (

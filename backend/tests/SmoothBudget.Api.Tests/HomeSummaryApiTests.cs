@@ -134,7 +134,37 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(478_67 - c.AvailableCents, poor.CashShortCents);
         Assert.Equal(c.CheckingCents + c.IncomeStillComingCents + c.PartnerStillComingCents
                      - c.BillsStillDueCents - c.CardsToPayCents - c.SavingsStillToMoveCents - c.LeftoverToMoveCents, c.AvailableCents);
-        Assert.Equal(100_00, c.CheckingCents);
+        // The seed's pending charges aren't in the bank's balance yet: they come off it (DECISIONS.md 255).
+        long seedPending;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Data.AppDbContext>();
+            seedPending = await db.Transactions.Where(t => t.HouseholdId == household && t.Pending && t.Account.Type == SmoothBudget.Api.Data.AccountType.Checking).SumAsync(t => t.AmountCents);
+        }
+        Assert.True(seedPending > 0);
+        Assert.Equal(100_00 - seedPending, c.CheckingCents);
+
+        // DECISIONS.md 255: a pending charge isn't in the bank's balance yet, but the money's spent: it comes off now.
+        var pendingId = Guid.NewGuid();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Data.AppDbContext>();
+            var checkingId = await db.Accounts.Where(a => a.HouseholdId == household && a.Type == SmoothBudget.Api.Data.AccountType.Checking).Select(a => a.Id).FirstAsync();
+            db.Transactions.Add(new SmoothBudget.Api.Data.Transaction
+            {
+                Id = pendingId, HouseholdId = household, AccountId = checkingId, Date = new DateOnly(2026, 11, 20), AmountCents = 30_00, Merchant = "TEST CAFE",
+                Description = "TEST", Kind = SmoothBudget.Core.Transactions.TransactionKind.Purchase, Pending = true, Source = SmoothBudget.Api.Data.DataSource.Plaid, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var spentPending = await SummaryAsync(client);
+        Assert.Equal((c.CheckingCents - 30_00, c.AvailableCents - 30_00), (spentPending.Cash!.CheckingCents, spentPending.Cash.AvailableCents));
+        Assert.Equal(poor.LeftToSpendCents - 30_00, spentPending.LeftToSpendCents);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Data.AppDbContext>();
+            await db.Transactions.Where(t => t.Id == pendingId).ExecuteDeleteAsync();
+        }
 
         // DECISIONS.md 195: a card purchase before the last payday is held back from checking to pay the card off, unless
         // you skipped paying it off on the payday plan: then it stays on the card as debt and checking doesn't hold it.

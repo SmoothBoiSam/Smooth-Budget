@@ -45,7 +45,7 @@ export interface HomeSummary {
   /** When the accounts come up short: the flight hours that would make it up (DECISIONS.md 192). */
   pickUp: PickUp | null
   /** Each spending category in your budget's order, for the tiles under Left to Spend (DECISIONS.md 254). */
-  spending: { id: string; name: string; limitCents: number; spentCents: number; leftCents: number }[] | null
+  spending: { id: string; name: string; limitCents: number; spentCents: number; leftCents: number; health: Health }[] | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */

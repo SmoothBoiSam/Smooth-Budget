@@ -14,7 +14,7 @@ const series: { kind: IncomeKind; key: 'paycheckCents' | 'friendCents' | 'otherC
 ]
 const total = (m: IncomeMonth) => m.paycheckCents + m.friendCents + m.otherCents
 
-export const incomeKindLabel = (i: { kind: IncomeKind; friendName: string | null }) =>
+const incomeKindLabel = (i: { kind: IncomeKind; friendName: string | null }) =>
   i.kind === 'paycheck' ? 'Paycheck' : i.kind === 'friend' ? (i.friendName ? `From ${i.friendName}` : 'Friend’s contribution') : 'Other income'
 
 /**
@@ -85,14 +85,14 @@ function IncomeChart({ months }: { months: IncomeMonth[] }) {
         ))}
         {months.map((m, i) => {
           const x = pad.l + i * slot + (slot - bar) / 2
-          let base = 0
           const parts = series.filter((s) => m[s.key] > 0)
+          // Where each kind starts and ends, stacked from the bottom.
+          const tops = parts.map((_, k) => parts.slice(0, k + 1).reduce((sum, s) => sum + m[s.key], 0))
           return (
             <g key={m.month} opacity={hover === null || hover === i ? 1 : 0.45}>
               {parts.map((s, k) => {
-                const y0 = y(base)
-                base += m[s.key]
-                const y1 = y(base)
+                const y0 = y(k === 0 ? 0 : tops[k - 1])
+                const y1 = y(tops[k])
                 // A 2px gap between kinds (off the top of each lower one); the top of the bar is rounded.
                 const height = Math.max(0, y0 - y1)
                 const last = k === parts.length - 1

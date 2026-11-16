@@ -11,7 +11,6 @@ import {
   type BudgetSummary,
   type Category,
   type ContributionStatus,
-  type Health,
   type LastMonth,
   type RecurringItem,
   type SearchFilters,
@@ -26,7 +25,7 @@ import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
 import { ArchivedCategories, ResetCategories, UnusedCategories } from './CategoryTools'
 import BillSheet from './BillSheet'
-import { centsToInput, formatCents, formatDay, formatSigned, formatTime, ordinal, parseDollars, titleCase } from './format'
+import { centsToInput, formatCents, formatDay, formatSigned, formatTime, ordinal, parseDollars, titleCase, healthBar } from './format'
 import { TransactionEditSheet } from './ReviewScreen'
 
 // Sub-views of the Budget tab, from the URL hash:
@@ -47,7 +46,6 @@ function viewFromHash(): View {
   return { kind: 'overview' }
 }
 
-const healthBar: Record<Health, string> = { onTrack: 'bg-good', low: 'bg-gold', over: 'bg-danger' }
 const statusText: Record<BudgetSummary['status'], string> = {
   healthy: 'text-good',
   low: 'text-gold-ink',

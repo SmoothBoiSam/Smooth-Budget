@@ -50,8 +50,9 @@ public record HomeSummaryDto(
     // Each spending category, in your budget's order, for the small tiles under Left to Spend (DECISIONS.md 254).
     IReadOnlyList<HomeCategoryDto>? Spending = null);
 
-/// <summary>One spending category on Home: its limit, what's spent, and what's left (negative when over).</summary>
-public record HomeCategoryDto(Guid Id, string Name, long LimitCents, long SpentCents, long LeftCents);
+/// <summary>One spending category on Home: its limit, what's spent, what's left (negative when over), and its health,
+/// the same numbers and colors as its line on the Budget tab (DECISIONS.md 255).</summary>
+public record HomeCategoryDto(Guid Id, string Name, long LimitCents, long SpentCents, long LeftCents, string Health);
 
 /// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
 public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
@@ -206,10 +207,18 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             .Where(t => t.HouseholdId == householdId && checkingIds.Contains(t.AccountId) && t.Kind == TransactionKind.CardPayment && t.AmountCents > 0
                         && t.Date >= range.Start && t.Date <= today)
             .SumAsync(t => t.AmountCents, ct);
-        // A card's balance is negative when money is owed on it.
-        long? owed = cards.Count > 0 && cards.All(c => c.PlaidAccountId is not null) ? cards.Sum(c => Math.Max(0, -c.CurrentBalanceCents)) : null;
+        // Pending activity (DECISIONS.md 255): the bank's current balance leaves out charges and deposits still pending, so
+        // they're added here. Otherwise a charge waits to come off the money you have until it posts, a day or more.
+        var linkedIds = accounts.Where(a => a.PlaidAccountId is not null).Select(a => a.Id).ToList();
+        var pending = await db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.Pending && linkedIds.Contains(t.AccountId))
+            .GroupBy(t => t.AccountId).Select(g => new { g.Key, Cents = g.Sum(t => t.AmountCents) }).ToDictionaryAsync(x => x.Key, x => x.Cents, ct);
+        long Pending(Guid id) => pending.GetValueOrDefault(id);
 
-        return new CashInput(checking.Sum(a => a.CurrentBalanceCents), Math.Max(0, month.Row.IncomeExpectedCents - incomeLanded), partnerComing,
+        // A card's balance is negative when money is owed on it; a pending charge will be owed too.
+        long? owed = cards.Count > 0 && cards.All(c => c.PlaidAccountId is not null) ? cards.Sum(c => Math.Max(0, -c.CurrentBalanceCents + Pending(c.Id))) : null;
+
+        return new CashInput(checking.Sum(a => a.CurrentBalanceCents - Pending(a.Id)), Math.Max(0, month.Row.IncomeExpectedCents - incomeLanded), partnerComing,
             cards.Count > 0, charged, paid, owed, leftoverToMove);
     }
 }
@@ -254,10 +263,20 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             CashShortCents: r.CashShortCents,
             Cash: r.Cash,
             PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct),
-            Spending: data.Categories.Where(c => c.Type == Core.Budgeting.CategoryType.Variable).OrderBy(c => c.SortOrder)
-                .Select(c => (c, l: r.Categories.FirstOrDefault(x => x.CategoryId == c.Id)))
-                .Where(x => x.l is not null && (x.l.LimitCents > 0 || x.l.SpentCents > 0))
-                .Select(x => new HomeCategoryDto(x.c.Id, x.c.Name, x.l!.LimitCents, x.l.SpentCents, x.l.LimitCents - x.l.SpentCents)).ToList());
+            Spending: SpendingRows(data));
+    }
+
+    /// <summary>The spending categories as the Budget tab shows them (its calculator), in your budget's order.</summary>
+    private static List<HomeCategoryDto> SpendingRows(CurrentMonthData data)
+    {
+        var lines = Core.Budgeting.CategoryBreakdownCalculator.Calculate(data.Month, data.CalculatorCategories, data.Transactions).ToDictionary(l => l.CategoryId);
+        return data.Categories.Where(c => c.Type == Core.Budgeting.CategoryType.Variable).OrderBy(c => c.SortOrder)
+            .Where(c => lines.TryGetValue(c.Id, out var l) && (l.LimitCents > 0 || l.SpentCents > 0))
+            .Select(c =>
+            {
+                var l = lines[c.Id];
+                return new HomeCategoryDto(c.Id, c.Name, l.LimitCents, l.SpentCents, l.RemainingCents, Budget.BudgetSummaryService.HealthName(l.Health));
+            }).ToList();
     }
 
     /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>

@@ -1,3 +1,5 @@
+import type { Health } from './api'
+
 // Display formatting only. Amounts arrive from the API as integer cents.
 
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
@@ -46,3 +48,6 @@ export function ordinal(n: number): string {
   const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
   return `${n}${s}`
 }
+
+/** The bar color for a category's health, on the Budget tab and Home. */
+export const healthBar: Record<Health, string> = { onTrack: 'bg-good', low: 'bg-gold', over: 'bg-danger' }
