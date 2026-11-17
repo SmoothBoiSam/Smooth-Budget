@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, paydayApi, type ExpectedIncome, type IncomeKind, type IncomeMonth, type IncomeSummary } from './api'
 import { ask } from './confirm'
-import { CardLink } from './ui'
+import { CardLink, DateField } from './ui'
 import { formatCents, formatDay, parseDollars } from './format'
 
 const shortMonth = (iso: string) => new Date(iso.slice(0, 7) + '-01T12:00:00').toLocaleDateString('en-US', { month: 'short' })
@@ -261,10 +261,15 @@ export function BonusIncome({ onSignedOut }: { onSignedOut: () => void }) {
             <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="$0.00" className={fieldCls} autoFocus />
           </label>
           <p className="mt-1 text-xs text-ink-faint">After taxes: what you think will land in your account.</p>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-ink-soft">When you expect it</span>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={fieldCls} />
-          </label>
+          {/* A drawn box: an empty phone date input is invisible (DECISIONS.md 261). */}
+          <div className="mt-4">
+            <span aria-hidden className="text-sm font-medium text-ink-soft">
+              When you expect it
+            </span>
+            <div className="mt-1 flex">
+              <DateField label="When you expect it" placeholder="Pick a date" value={date} onChange={setDate} />
+            </div>
+          </div>
           <label className="mt-4 block">
             <span className="text-sm font-medium text-ink-soft">Name (optional)</span>
             <input value={name} onChange={(e) => setName(e.target.value)} maxLength={100} placeholder="Bonus" className={fieldCls} />

@@ -3,6 +3,7 @@
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react'
 import { confirmStore } from './confirm'
 import { bubbleStyle, bubbleText } from './theme'
+import { formatDay } from './format'
 
 /** Every screen's frame: one width, one gutter, room above the bottom nav. */
 export function Page({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -330,5 +331,49 @@ export function CardLink({ href, children }: { href: string; children: ReactNode
         ›
       </span>
     </a>
+  )
+}
+
+/**
+ * A date box that looks like one even when empty (DECISIONS.md 235, 261): phones draw an empty date input as blank space, so
+ * the box shows the date or "Start date" with a calendar mark, and the real input sits invisibly on top to open the picker.
+ */
+export function DateField({
+  label,
+  placeholder,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  placeholder: string
+  value: string
+  min?: string
+  max?: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <span className="relative block min-w-0 flex-1">
+      <span
+        aria-hidden
+        className={`flex min-h-11 items-center justify-between gap-2 rounded-xl neu-inset px-3 py-2 text-base ${value ? 'text-ink' : 'text-ink-faint'}`}
+      >
+        <span className="truncate">{value ? formatDay(value) : placeholder}</span>
+        <svg viewBox="0 0 20 20" className="size-4 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <rect x="3" y="4.5" width="14" height="12" rx="2" />
+          <path d="M3 8.5h14M7 3v3M13 3v3" strokeLinecap="round" />
+        </svg>
+      </span>
+      <input
+        type="date"
+        aria-label={label}
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      />
+    </span>
   )
 }

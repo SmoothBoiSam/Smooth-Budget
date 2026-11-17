@@ -12,7 +12,7 @@ import {
 import { useRemembered } from './offline'
 import { Paychecks } from './PaydayScreen'
 import { BonusIncome, IncomeCard } from './Income'
-import { Caret, ErrorNotice, Loading, Page, PageHeader, Row, Rows } from './ui'
+import { Caret, DateField, ErrorNotice, Loading, Page, PageHeader, Row, Rows } from './ui'
 import { formatCents, formatDay } from './format'
 
 const hm = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
@@ -486,16 +486,13 @@ function ProfileSection({ p, busy, act }: { p: PayProfile; busy: boolean; act: A
   return (
     <Section title="Pay profile" hint="Your rate follows your years of service.">
       <div className="space-y-2 rounded-2xl neu p-4 text-sm">
-        <label className="flex items-center justify-between gap-2">
-          InFlight date of hire
-          <input
-            type="date"
-            aria-label="Date of hire"
-            value={d.hireDate ?? ''}
-            onChange={(e) => setD({ ...d, hireDate: e.target.value || null })}
-            className="rounded-md neu-inset px-1.5 py-0.5"
-          />
-        </label>
+        <div className="flex items-center justify-between gap-2">
+          <span aria-hidden>InFlight date of hire</span>
+          {/* A drawn box, so it shows even before a date is set (DECISIONS.md 261). */}
+          <span className="flex w-44 shrink-0">
+            <DateField label="Date of hire" placeholder="Pick a date" value={d.hireDate ?? ''} onChange={(v) => setD({ ...d, hireDate: v || null })} />
+          </span>
+        </div>
         <p className="text-xs text-ink-soft">
           {p.hireDate
             ? `${p.yearsOfService} completed year${p.yearsOfService === 1 ? '' : 's'}: ${formatCents(p.rateCents)}/hour now.${p.nextRaiseOn && p.nextRaiseRateCents ? ` It goes up to ${formatCents(p.nextRaiseRateCents)} on ${formatDay(p.nextRaiseOn)}, ${p.nextRaiseOn.slice(0, 4)}.` : ''}`
