@@ -318,9 +318,15 @@ function SpendingRows({ items }: { items: NonNullable<HomeSummary['spending']> }
   )
 }
 
+/** About how many ems wide an amount is in bold tabular figures: digits and signs full width, commas and points narrow. */
+const fitWidthEms = (text: string) => [...text].reduce((n, ch) => n + (ch === ',' || ch === '.' ? 0.3 : 0.6), 0.1)
+
 /** Left to Spend in a pressed-in well, with a ring for the share of the variable budget still left. */
 function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShownLeft> }) {
   const style = levels[shown.level]
+  // The amount fits inside the ring (DECISIONS.md 262): full size while it fits, smaller for a big one (a bonus on the way).
+  // Sized from the final amount, so the count-up doesn't change size as it runs.
+  const fit = fitWidthEms(formatCents(s.leftToSpendCents))
   const r = 88
   const arc = 2 * Math.PI * r * 0.75 // a three-quarter ring, open at the bottom
   return (
@@ -355,7 +361,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
             ))}
         </g>
       </svg>
-      <div className="relative text-center">
+      <div className="@container relative w-[76%] text-center">
         <div className="relative mx-auto size-16">
           {(['plenty', 'getting-low', 'near-zero'] as const).map((l) => {
             const on = (shown.level === 'over' ? 'near-zero' : shown.level) === l
@@ -373,7 +379,12 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
         <h2 id="lts-label" className="mt-1 text-xs font-medium text-ink-soft">
           Left to Spend
         </h2>
-        <p data-testid="left-to-spend" className="text-4xl font-bold tracking-tight tabular-nums" aria-label={formatCents(s.leftToSpendCents)}>
+        <p
+          data-testid="left-to-spend"
+          className="font-bold leading-tight tracking-tight whitespace-nowrap tabular-nums"
+          style={{ fontSize: `min(2.25rem, calc(100cqi / ${fit.toFixed(2)}))` }}
+          aria-label={formatCents(s.leftToSpendCents)}
+        >
           {formatCents(shown.left)}
         </p>
         <p className="mt-0.5 text-xs text-ink-faint">
