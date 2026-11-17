@@ -62,7 +62,6 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
 
         await db.Transactions.Where(t => t.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.ImportBatches.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct);
-        await db.CategoryRules.Where(r => r.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.BudgetMonths.Where(b => b.HouseholdId == householdId).ExecuteDeleteAsync(ct); // also removes per-month categories and sweeps
         await db.Categories.Where(c => c.HouseholdId == householdId).ExecuteDeleteAsync(ct);
         await db.DebtAccounts.Where(d => d.HouseholdId == householdId).ExecuteDeleteAsync(ct);

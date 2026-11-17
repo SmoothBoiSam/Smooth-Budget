@@ -176,7 +176,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             ? fixedOnes.Sum(x => x.ReceivedCents)
             : Received(Core.Transactions.TransactionKind.PartnerContribution);
         var partnerName = await Shared.SharedService.TrackedNamesAsync(db, householdId, ct); // everyone whose transfers are tracked (DECISIONS.md 211)
-        var reviewCount = db.Transactions.Count(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null && !t.IsTransfer
+        var reviewCount = db.Transactions.Count(t => t.HouseholdId == householdId && t.NeedsReview
                                                      && t.Date >= data.Month.Start && t.Date <= data.Month.End);
 
         return new BudgetSummaryDto(

@@ -4,6 +4,7 @@ import {
   ApiError,
   budgetApi,
   budgetEditApi,
+  type Account,
   budgetSummaryApi,
   type BudgetCategoryLine,
   type CategoryMonth,
@@ -31,14 +32,15 @@ import { TransactionEditSheet } from './ReviewScreen'
 // Sub-views of the Budget tab, from the URL hash:
 //   #/budget            categories overview
 //   (#/budget/inbox moved to Tasks, #/tasks/transactions)
-//   #/transactions      every transaction and search, opened from Home (DECISIONS.md 171; #/budget/all still works)
+//   #/transactions      every transaction and search, opened from Home (DECISIONS.md 171; #/budget/all still works);
+//                       ?type=, accountId=, accountType=, unconfirmed=1, debtId= and back= open it filtered (DECISIONS.md 259)
 //   #/budget/c/<id>     one category's transactions
 //   #/budget/plan       budget settings and the budget generator
 //   (#/budget/categories is gone (DECISIONS.md 228): its links open the budget, or the category)
 type View = { kind: 'overview' } | { kind: 'all' } | { kind: 'plan' } | { kind: 'category'; id: string }
 
 function viewFromHash(): View {
-  const parts = window.location.hash.replace(/^#\/?/, '').split('/')
+  const parts = window.location.hash.replace(/^#\/?/, '').split('?')[0].split('/')
   if (parts[0] === 'transactions' || parts[1] === 'all') return { kind: 'all' }
   if (parts[1] === 'plan') return { kind: 'plan' }
   if (parts[1] === 'categories' && parts[2]) return { kind: 'category', id: parts[2] }
@@ -159,7 +161,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           view.kind === 'overview'
             ? undefined
             : view.kind === 'all'
-              ? { href: '#/', label: 'Home' }
+              ? backFromHash()
               : { href: '#/budget', label: 'Budget' }
         }
         action={
@@ -223,7 +225,7 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
 
 
       {summary && view.kind === 'all' && (
-        <SearchableList month={month} categories={categories} onSelect={setSelected} onError={searchFailed} />
+        <SearchableList key={window.location.hash} month={month} categories={categories} onSelect={setSelected} onError={searchFailed} />
       )}
 
       {selected && (
@@ -528,9 +530,44 @@ function CategoryHeader({ line: c }: { line: BudgetCategoryLine }) {
   )
 }
 
+/** The page a filtered link came from (DECISIONS.md 259), for the back button; else Home. */
+function backFromHash(): { href: string; label: string } {
+  const back = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('back')
+  const pages: Record<string, string> = { income: 'Income', debt: 'Debt', savings: 'Savings', debit: 'Debit', budget: 'Budget' }
+  return back && pages[back] ? { href: `#/${back}`, label: pages[back] } : { href: '#/', label: 'Home' }
+}
+
+/** The filters a link opens the page with: #/transactions?type=income, say (DECISIONS.md 259). */
+function filtersFromHash(): SearchFilters {
+  const p = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+  const type = p.get('type') ?? ''
+  return {
+    ...noFilters,
+    q: p.get('q') ?? '',
+    categoryId: p.get('categoryId') ?? '',
+    type: (typeNames.some((x) => x.id === type) ? type : '') as SearchFilters['type'],
+    accountId: p.get('accountId') ?? '',
+    accountType: p.get('accountType') ?? '',
+    unconfirmed: p.get('unconfirmed') === '1' || p.get('unconfirmed') === 'true',
+    debtId: p.get('debtId') ?? '',
+  }
+}
+
+const typeNames: { id: Exclude<SearchFilters['type'], ''>; label: string }[] = [
+  { id: 'spending', label: 'Spending' },
+  { id: 'bill', label: 'Bills' },
+  { id: 'income', label: 'Income' },
+  { id: 'transfer', label: 'Transfers' },
+  { id: 'interest', label: 'Interest' },
+  { id: 'debt', label: 'Debt payments' },
+  { id: 'savings', label: 'Savings' },
+]
+const accountTypeNames: Record<string, string> = { checking: 'All checking', savings: 'All savings', card: 'All cards' }
+
 /**
  * This month's transactions (with arrows back through earlier months), or a search across all of them (DECISIONS.md 150,
- * 164): words, a category, an amount range and a date range, all applied together.
+ * 164, 259): words, a category, a kind, an account, an amount range, a date range and only the unconfirmed ones, all
+ * applied together. Other pages link here with filters already set.
  */
 function SearchableList({
   month,
@@ -543,8 +580,19 @@ function SearchableList({
   onSelect: (t: Transaction) => void
   onError: (e: unknown) => void
 }) {
-  const [f, setF] = useState<SearchFilters>(noFilters)
+  const [f, setF] = useState<SearchFilters>(filtersFromHash)
   const [open, setOpen] = useState(false)
+  const [accounts, setAccounts] = useState<Account[]>([])
+  useEffect(() => {
+    let live = true
+    budgetApi
+      .accounts()
+      .then((a) => live && setAccounts(a))
+      .catch(() => undefined) // the Account filter just stays short
+    return () => {
+      live = false
+    }
+  }, [])
   const [found, setFound] = useState<{ key: string; items: Transaction[]; total: number; netCents: number } | null>(null)
   // Step back through earlier months to check how everything was filed (DECISIONS.md 153). 0 = this month.
   const [back, setBack] = useState(0)
@@ -578,10 +626,19 @@ function SearchableList({
     max: maxBad || amountsBackwards ? '' : f.max.replace(/[$,\s]/g, ''),
     from: datesBackwards ? '' : f.from,
     to: datesBackwards ? '' : f.to,
+    type: f.type,
+    accountId: f.accountId,
+    accountType: f.accountType,
+    unconfirmed: f.unconfirmed,
+    debtId: f.debtId,
   }
   const key = JSON.stringify(sent)
   const searching = key !== JSON.stringify(noFilters)
-  const filterCount = [f.categoryId, f.min || f.max, f.from || f.to].filter(Boolean).length
+  const filterCount = [f.categoryId, f.type, f.accountId || f.accountType, f.debtId, f.unconfirmed, f.min || f.max, f.from || f.to].filter(Boolean).length
+  const accountValue = f.accountId ? `id:${f.accountId}` : f.accountType ? `type:${f.accountType}` : ''
+  const accountName = f.accountId
+    ? (accounts.find((a) => a.id === f.accountId)?.name ?? 'One account')
+    : (accountTypeNames[f.accountType] ?? 'Account')
 
   useEffect(() => {
     if (!searching) return
@@ -629,6 +686,51 @@ function SearchableList({
 
       {open && (
         <div id="search-filters" className="mt-3 space-y-3 rounded-2xl neu p-3">
+          <label className="block">
+            <span className="text-xs font-medium text-ink-soft">Type</span>
+            <select value={f.type} onChange={(e) => set({ type: e.target.value as SearchFilters['type'] })} className={`mt-1 ${field}`}>
+              <option value="">Any type</option>
+              {typeNames.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-medium text-ink-soft">Account</span>
+            <select
+              value={accountValue}
+              onChange={(e) => {
+                const v = e.target.value
+                set({ accountId: v.startsWith('id:') ? v.slice(3) : '', accountType: v.startsWith('type:') ? v.slice(5) : '' })
+              }}
+              className={`mt-1 ${field}`}
+            >
+              <option value="">Any account</option>
+              {Object.entries(accountTypeNames).map(([id, name]) => (
+                <option key={id} value={`type:${id}`}>
+                  {name}
+                </option>
+              ))}
+              {accounts.length > 0 && (
+                <optgroup label="One account">
+                  {accounts.map((a) => (
+                    <option key={a.id} value={`id:${a.id}`}>
+                      {a.mask ? `${a.name} ••${a.mask}` : a.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </label>
+
+          <label className="flex cursor-pointer items-center gap-3 px-1">
+            <input type="checkbox" checked={f.unconfirmed} onChange={(e) => set({ unconfirmed: e.target.checked })} className="size-4 shrink-0" />
+            <span className="text-sm">Only ones not confirmed yet</span>
+          </label>
+
           <label className="block">
             <span className="text-xs font-medium text-ink-soft">Category</span>
             <select value={f.categoryId} onChange={(e) => set({ categoryId: e.target.value })} className={`mt-1 ${field}`}>
@@ -698,6 +800,10 @@ function SearchableList({
       {/* What's being searched, each removable, while the filters are folded away. */}
       {!open && filterCount > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
+          {f.type && <Chip label={typeNames.find((x) => x.id === f.type)?.label ?? 'Type'} onRemove={() => set({ type: '' })} />}
+          {(f.accountId || f.accountType) && <Chip label={accountName} onRemove={() => set({ accountId: '', accountType: '' })} />}
+          {f.debtId && <Chip label="One card or loan" onRemove={() => set({ debtId: '' })} />}
+          {f.unconfirmed && <Chip label="Not confirmed yet" onRemove={() => set({ unconfirmed: false })} />}
           {f.categoryId && <Chip label={categoryName ?? 'Category'} onRemove={() => set({ categoryId: '' })} />}
           {(f.min || f.max) && <Chip label={amountLabel(f.min, f.max)} onRemove={() => set({ min: '', max: '' })} />}
           {(f.from || f.to) && <Chip label={dateLabel(f.from, f.to)} onRemove={() => set({ from: '', to: '' })} />}
@@ -724,7 +830,7 @@ function SearchableList({
             <span className="font-semibold text-ink-soft">
               {results.total} {results.total === 1 ? 'match' : 'matches'}
             </span>
-            {results.total > 0 && ` · ${formatCents(Math.abs(results.netCents))} ${results.netCents < 0 ? 'back' : 'spent'}`}
+            {results.total > 0 && results.netCents !== 0 && ` · ${formatCents(Math.abs(results.netCents))} ${results.netCents < 0 ? 'back' : 'spent'}`}
             {results.total > results.items.length && ` · showing the newest ${results.items.length}`}
           </p>
           <button type="button" onClick={() => setF(noFilters)} className={`${smallBtn} shrink-0 text-danger`}>
@@ -741,7 +847,7 @@ function SearchableList({
   )
 }
 
-const noFilters: SearchFilters = { q: '', categoryId: '', min: '', max: '', from: '', to: '' }
+const noFilters: SearchFilters = { q: '', categoryId: '', min: '', max: '', from: '', to: '', type: '', accountId: '', accountType: '', unconfirmed: false, debtId: '' }
 const groupOrder: Category['type'][] = ['Variable', 'FixedBill', 'DebtPayment', 'SavingsTransfer']
 const groupNames: Record<Category['type'], string> = { Variable: 'Spending Categories', FixedBill: 'Bill Categories', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
 
@@ -804,7 +910,7 @@ function CategoryMonths({
     if (!past) return
     let live = true
     budgetApi
-      .search({ q: '', categoryId: line.id, min: '', max: '', from: past.start, to: past.end })
+      .search({ ...noFilters, categoryId: line.id, from: past.start, to: past.end })
       .then((r) => live && setEarlier({ key: past.month, items: r.items }))
       .catch((e) => live && onError(e))
     return () => {
@@ -1099,7 +1205,7 @@ function IncomeCard({
                     </button>
                   </>
                 ) : (
-                  (explanation ?? 'From your paychecks this month (the Plan tab), or your usual income until there is pay data.')
+                  (explanation ?? 'From your paychecks this month (Money → Income), or your usual income until there is pay data.')
                 )}
               </p>
             )}

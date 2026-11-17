@@ -442,36 +442,6 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("Categories");
                 });
 
-            modelBuilder.Entity("SmoothBudget.Api.Data.CategoryRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CategoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("HouseholdId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Pattern")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CategoryId");
-
-                    b.HasIndex("HouseholdId", "Pattern")
-                        .IsUnique();
-
-                    b.ToTable("CategoryRules");
-                });
-
             modelBuilder.Entity("SmoothBudget.Api.Data.DebtAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -533,6 +503,39 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasIndex("HouseholdId");
 
                     b.ToTable("DebtAccounts");
+                });
+
+            modelBuilder.Entity("SmoothBudget.Api.Data.ExpectedIncome", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DepositTransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ExpectedDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HouseholdId", "ExpectedDate");
+
+                    b.ToTable("ExpectedIncomes");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.Friend", b =>
@@ -1365,6 +1368,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<Guid?>("SuggestedCategoryId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("TransferAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("TransferGroupId")
                         .HasColumnType("uuid");
 
@@ -1381,6 +1387,8 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.HasIndex("PlaidTransactionId")
                         .IsUnique()
                         .HasFilter("\"PlaidTransactionId\" IS NOT NULL");
+
+                    b.HasIndex("TransferAccountId");
 
                     b.HasIndex("AccountId", "Fingerprint");
 
@@ -1500,23 +1508,6 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasForeignKey("HouseholdId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("SmoothBudget.Api.Data.CategoryRule", b =>
-                {
-                    b.HasOne("SmoothBudget.Api.Data.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("SmoothBudget.Api.Data.Household", null)
-                        .WithMany()
-                        .HasForeignKey("HouseholdId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Category");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.DebtAccount", b =>
@@ -1643,7 +1634,7 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("SmoothBudget.Api.Data.DebtAccount", null)
+                    b.HasOne("SmoothBudget.Api.Data.DebtAccount", "DebtAccount")
                         .WithMany()
                         .HasForeignKey("DebtAccountId")
                         .OnDelete(DeleteBehavior.SetNull);
@@ -1664,11 +1655,20 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasForeignKey("ImportBatchId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("SmoothBudget.Api.Data.Account", "TransferAccount")
+                        .WithMany()
+                        .HasForeignKey("TransferAccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Account");
 
                     b.Navigation("Category");
 
+                    b.Navigation("DebtAccount");
+
                     b.Navigation("Friend");
+
+                    b.Navigation("TransferAccount");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.BudgetMonth", b =>

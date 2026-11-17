@@ -141,7 +141,7 @@ export function Alert({
 
 /**
  * A bill on a transaction's Review card once you say it's a bill (DECISIONS.md 245): what the bill review card shows, its
- * price, what needs a look, its charges, and More options, under the transaction's own buttons.
+ * price, what needs a look and its charges. No More options here (DECISIONS.md 259): the bill's own page has them.
  */
 export function BillOnCard({
   item: i,
@@ -172,11 +172,6 @@ export function BillOnCard({
         </div>
       )}
       <ChargeHistory item={i} />
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" onClick={() => onOpen('edit')} className={`${smallBtn} text-accent`}>
-          More options
-        </button>
-      </div>
     </div>
   )
 }

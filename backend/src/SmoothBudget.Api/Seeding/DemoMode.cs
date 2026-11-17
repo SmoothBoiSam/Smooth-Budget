@@ -93,7 +93,6 @@ public static class DemoMode
         await db.HouseholdLinks.Where(x => x.HouseholdAId == id || x.HouseholdBId == id).ExecuteDeleteAsync(ct);
         await db.SweepTasks.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.BudgetMonths.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
-        await db.CategoryRules.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.SavingsGoals.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.DebtAccounts.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.RecurringItems.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
@@ -105,6 +104,7 @@ public static class DemoMode
         await db.ScheduleMonths.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.PayStubs.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.PayPeriodForecasts.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
+        await db.ExpectedIncomes.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.PaydayChecklistItems.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.PushDevices.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.NotificationLogs.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);

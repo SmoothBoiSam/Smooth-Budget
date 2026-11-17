@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ApiError, debtApi, type DebtPayment, type InterestHistory } from './api'
-import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
-import { formatCents, formatDay, titleCase } from './format'
+import { useEffect, useState } from 'react'
+import { debtApi, type InterestHistory } from './api'
+import { CardLink } from './ui'
+import { formatCents } from './format'
 
 const shortMonth = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' })
 const longMonth = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -81,131 +81,8 @@ export function InterestCard() {
         ))}
       </ul>
 
-      <CardLink href="#/debt/interest">Past interest charges</CardLink>
+      <CardLink href="#/transactions?type=interest&back=debt">Past interest charges</CardLink>
     </section>
   )
 }
 
-/** Debt → Past interest charges (DECISIONS.md 237): every interest charge, newest first, by month, for one card or all. */
-export default function InterestScreen({ onSignedOut }: { onSignedOut: () => void }) {
-  const fetch = useCallback(() => debtApi.interest().then((h) => h.charges), [])
-  return <DebtMoneyList title="Interest charges" empty="No interest charges yet." fetch={fetch} onSignedOut={onSignedOut} />
-}
-
-/** Debt → Past payments (DECISIONS.md 240): the same layout, for payments to your cards and loans. */
-export function PaymentsScreen({ onSignedOut }: { onSignedOut: () => void }) {
-  const fetch = useCallback(() => debtApi.payments(), [])
-  return <DebtMoneyList title="Past payments" empty="No payments seen yet." fetch={fetch} onSignedOut={onSignedOut} />
-}
-
-/** A list of money tied to cards and loans, newest first, by month with each month's total, for one card or all. */
-function DebtMoneyList({
-  title,
-  empty,
-  fetch,
-  onSignedOut,
-}: {
-  title: string
-  empty: string
-  fetch: () => Promise<DebtPayment[]>
-  onSignedOut: () => void
-}) {
-  const [h, setH] = useState<{ charges: DebtPayment[] } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [debt, setDebt] = useState<string>('all')
-
-  const load = useCallback(
-    () =>
-      fetch()
-        .then((x) => {
-          setH({ charges: x })
-          setError(null)
-        })
-        .catch((e) => {
-          if (e instanceof ApiError && e.status === 401) return onSignedOut()
-          setError(e instanceof Error ? e.message : 'Something went wrong.')
-        }),
-    [fetch, onSignedOut],
-  )
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  // The cards and loans that have charges, for the filter.
-  const debts = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const c of h?.charges ?? []) if (c.debtId && c.debtName) seen.set(c.debtId, c.debtName)
-    return [...seen].map(([id, name]) => ({ id, name }))
-  }, [h])
-  const charges = (h?.charges ?? []).filter((c) => debt === 'all' || c.debtId === debt)
-  const byMonth = useMemo(() => {
-    const groups: { month: string; total: number; items: typeof charges }[] = []
-    for (const c of charges) {
-      const month = c.date.slice(0, 7)
-      const g = groups.at(-1)
-      if (g && g.month === month) {
-        g.items.push(c)
-        g.total += c.amountCents
-      } else groups.push({ month, total: c.amountCents, items: [c] })
-    }
-    return groups
-  }, [charges])
-
-  return (
-    <Page>
-      <PageHeader title={title} back={{ href: '#/debt', label: 'Debt' }} />
-      {!h ? (
-        error ? (
-          <ErrorNotice message={error} onRetry={() => void load()} />
-        ) : (
-          <Loading shape="list" />
-        )
-      ) : (
-        <>
-          {debts.length > 1 && (
-            <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Which card or loan">
-              {[{ id: 'all', name: 'All' }, ...debts].map((d) => (
-                <button
-                  key={d.id}
-                  role="tab"
-                  aria-selected={debt === d.id}
-                  type="button"
-                  onClick={() => setDebt(d.id)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${debt === d.id ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-ink-soft'}`}
-                >
-                  {d.name}
-                </button>
-              ))}
-            </div>
-          )}
-          {byMonth.length === 0 ? (
-            <p className="mt-4 rounded-3xl neu px-5 py-4 text-sm text-ink-soft">{empty}</p>
-          ) : (
-            byMonth.map((g) => (
-              <section key={g.month} className="mt-5">
-                <h2 className="flex items-baseline justify-between px-1 text-sm font-semibold text-ink-soft">
-                  <span>{longMonth(g.month + '-01')}</span>
-                  <span className="tabular-nums">{formatCents(g.total)}</span>
-                </h2>
-                <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-3xl neu">
-                  {g.items.map((c) => (
-                    <li key={c.id} className="flex items-center gap-3 px-5 py-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{titleCase(c.merchant)}</p>
-                        <p className="truncate text-xs text-ink-faint">
-                          {formatDay(c.date)}
-                          {c.debtName ? ` · ${c.debtName}` : ''}
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCents(c.amountCents)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))
-          )}
-        </>
-      )}
-    </Page>
-  )
-}

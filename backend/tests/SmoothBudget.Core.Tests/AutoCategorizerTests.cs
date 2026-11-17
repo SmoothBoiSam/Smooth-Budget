@@ -15,8 +15,8 @@ public class AutoCategorizerTests
     };
 
     private static CategoryGuess G(string merchant, string? label, string? primary = null, string? confidence = null,
-        MerchantRule[]? rules = null, MerchantHistory? history = null, Dictionary<string, Guid>? cats = null) =>
-        AutoCategorizer.Guess(new CategorizationInput(merchant, label, primary, confidence), rules ?? [], history, cats ?? Cats);
+        MerchantHistory? history = null, Dictionary<string, Guid>? cats = null) =>
+        AutoCategorizer.Guess(new CategorizationInput(merchant, label, primary, confidence), history, cats ?? Cats);
 
     [Theory]
     [InlineData("FOOD_AND_DRINK_GROCERIES", "FOOD_AND_DRINK", "HIGH")]
@@ -61,14 +61,6 @@ public class AutoCategorizerTests
         Assert.Equal((Groceries, false), (G("FRESH MARKET", "Grocery").CategoryId, G("FRESH MARKET", "Grocery").Unsure));
         Assert.Equal((EatingOut, false), (G("TAQUERIA UNO", "Food & Drink").CategoryId, G("TAQUERIA UNO", "Food & Drink").Unsure));
         Assert.True(G("STREAMCO", "Entertainment").Unsure); // often a subscription
-    }
-
-    [Fact]
-    public void A_merchant_rule_beats_everything_automatic()
-    {
-        var g = G("KING SOOPERS FUEL", "FOOD_AND_DRINK_GROCERIES", "FOOD_AND_DRINK", "HIGH",
-            rules: [new MerchantRule(Gas, "KING SOOPERS FUEL", DateTime.UtcNow)]);
-        Assert.Equal((Gas, CategorySource.Rule, false), (g.CategoryId, g.Source, g.Unsure));
     }
 
     [Fact]

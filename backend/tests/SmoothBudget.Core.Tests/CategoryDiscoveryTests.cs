@@ -27,7 +27,7 @@ public class SpendingThemesTests
     {
         var ev = Guid.NewGuid();
         var gas = Guid.NewGuid();
-        var g = AutoCategorizer.Guess(new CategorizationInput("VOLT CHARGERS CHARGING CO", "TRANSPORTATION_GAS", "TRANSPORTATION", "HIGH"), [], null,
+        var g = AutoCategorizer.Guess(new CategorizationInput("VOLT CHARGERS CHARGING CO", "TRANSPORTATION_GAS", "TRANSPORTATION", "HIGH"), null,
             new Dictionary<string, Guid> { ["EV charging"] = ev, ["Gas"] = gas });
         Assert.Equal((ev, false), (g.CategoryId, g.Unsure));
     }

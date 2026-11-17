@@ -52,6 +52,43 @@ public static class PaydayEndpoints
         g.MapGet("/income/transactions", async (HttpContext ctx, IncomeHistory income, TimeProvider clock, CancellationToken ct) =>
             await income.ItemsAsync(ctx.User.HouseholdId(), DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime).AddYears(-2), ct));
 
+        // Income you expect apart from your paychecks, like a bonus (DECISIONS.md 256).
+        g.MapGet("/expected", async (HttpContext ctx, AppDbContext db, Budget.BudgetMonthService months, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var (_, today, _) = await months.ContextAsync(householdId, ct);
+            return await ExpectedIncomes.ListAsync(db, householdId, today, ct);
+        });
+        g.MapPost("/expected", async (ExpectedIncomeRequest req, HttpContext ctx, AppDbContext db, PaydayService payday, Budget.BudgetMonthService months,
+            TimeProvider clock, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var (_, today, _) = await months.ContextAsync(householdId, ct);
+            var name = string.IsNullOrWhiteSpace(req.Name) ? "Bonus" : req.Name.Trim();
+            if (name.Length > 100 || req.AmountCents <= 0 || req.AmountCents > 1_000_000_00)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["amount"] = ["Enter what you expect to take home, more than $0."] });
+            if (req.ExpectedDate < today.AddDays(-ExpectedIncomes.LateDays) || req.ExpectedDate > today.AddYears(1))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["date"] = ["Pick a day from the last week or so to a year from now."] });
+            db.ExpectedIncomes.Add(new ExpectedIncome
+            {
+                Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, AmountCents = req.AmountCents, ExpectedDate = req.ExpectedDate,
+                CreatedUtc = clock.GetUtcNow().UtcDateTime,
+            });
+            await db.SaveChangesAsync(ct);
+            await payday.MatchDepositsAsync(householdId, ct); // it may have landed already
+            return Results.Ok(await ExpectedIncomes.ListAsync(db, householdId, today, ct));
+        });
+        g.MapDelete("/expected/{id:guid}", async (Guid id, HttpContext ctx, AppDbContext db, Budget.BudgetMonthService months, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var row = await db.ExpectedIncomes.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
+            if (row is null) return Results.NotFound();
+            db.ExpectedIncomes.Remove(row);
+            await db.SaveChangesAsync(ct);
+            var (_, today, _) = await months.ContextAsync(householdId, ct);
+            return Results.Ok(await ExpectedIncomes.ListAsync(db, householdId, today, ct));
+        });
+
         g.MapPut("/plan/{payDate}/{key}", async (DateOnly payDate, string key, ChecklistRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();

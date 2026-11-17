@@ -96,8 +96,6 @@ public static class CategoryMerge
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.CategoryId, intoKey), ct);
         await db.Transactions.Where(t => t.HouseholdId == householdId && t.SuggestedCategoryId != null && fromIds.Contains(t.SuggestedCategoryId.Value))
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.SuggestedCategoryId, intoKey), ct);
-        await db.CategoryRules.Where(r => r.HouseholdId == householdId && fromIds.Contains(r.CategoryId))
-            .ExecuteUpdateAsync(s => s.SetProperty(r => r.CategoryId, intoKey), ct);
         await db.PartnerArrangements.Where(a => a.HouseholdId == householdId && fromIds.Contains(a.CategoryId))
             .ExecuteUpdateAsync(s => s.SetProperty(a => a.CategoryId, intoKey), ct);
 

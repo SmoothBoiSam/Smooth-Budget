@@ -12,7 +12,8 @@ public sealed record TransferCandidate(
     TransactionKind Kind,
     string Description,
     Guid? TransferGroupId = null,
-    bool UserLocked = false);
+    bool UserLocked = false,
+    bool Waiting = false);
 
 public enum TransferRole
 {
@@ -28,7 +29,8 @@ public enum TransferRole
 
 /// <param name="GroupId">Shared by the two sides of a matched pair; null when only one side was seen.</param>
 /// <param name="CounterpartAccount">The other side's account type, when matched.</param>
-public sealed record TransferDecision(Guid Id, TransferRole Role, Guid? GroupId, AccountKind? CounterpartAccount);
+/// <param name="CounterpartAccountId">The other side's account, when matched.</param>
+public sealed record TransferDecision(Guid Id, TransferRole Role, Guid? GroupId, AccountKind? CounterpartAccount, Guid? CounterpartAccountId = null);
 
 /// <summary>
 /// Finds card payments and moves between the owner's own accounts, so they are never counted as
@@ -40,12 +42,16 @@ public sealed record TransferDecision(Guid Id, TransferRole Role, Guid? GroupId,
 /// within <see cref="MatchWindowDays"/> days. At least one side must already look like a payment or
 /// transfer, so an ordinary purchase is never mistaken for one. This also catches payments whose
 /// bank-side description the patterns don't know.</item>
+/// <item>Most likely a transfer (DECISIONS.md 259): two rows still waiting for review on two of your accounts, one in and
+/// one out, for the same amount within <see cref="LikelyWindowDays"/> days, even when neither looks like one.</item>
 /// </list>
 /// Rows the user has locked are never changed.
 /// </summary>
 public static class TransferDetector
 {
     public const int MatchWindowDays = 5;
+    /// <summary>How close two same-amount rows have to be to look like a transfer when neither is worded like one.</summary>
+    public const int LikelyWindowDays = 3;
 
     public static readonly string[] CardPaymentPatterns =
     [
@@ -70,12 +76,12 @@ public static class TransferDetector
                 roles[t.Id] = role;
         }
 
-        var paired = new Dictionary<Guid, (Guid Group, AccountKind Other)>();
+        var paired = new Dictionary<Guid, (Guid Group, AccountKind Other, Guid OtherId)>();
         foreach (var t in txns.Where(t => t.TransferGroupId is not null))
         {
             var partner = txns.FirstOrDefault(o => o.TransferGroupId == t.TransferGroupId && o.Id != t.Id);
             if (partner is not null)
-                paired[t.Id] = (t.TransferGroupId!.Value, partner.Account);
+                paired[t.Id] = (t.TransferGroupId!.Value, partner.Account, partner.AccountId);
         }
 
         var outflows = txns
@@ -95,7 +101,7 @@ public static class TransferDetector
                             && !paired.ContainsKey(i.Id)
                             && Math.Abs(i.Date.DayNumber - o.Date.DayNumber) <= MatchWindowDays)
                 .Select(i => (i, inRole: roles.TryGetValue(i.Id, out var r) ? r : (TransferRole?)null))
-                .Where(x => Compatible(o, outKnown ? outRole : null, x.i, x.inRole))
+                .Where(x => Compatible(o, outKnown ? outRole : null, x.i, x.inRole) || Likely(o, outKnown, x.i, x.inRole))
                 .OrderBy(x => Math.Abs(x.i.Date.DayNumber - o.Date.DayNumber))
                 .ThenBy(x => x.i.Date)
                 .ThenBy(x => x.i.Id)
@@ -105,8 +111,8 @@ public static class TransferDetector
                 continue;
 
             var group = Guid.NewGuid();
-            paired[o.Id] = (group, match.Account);
-            paired[match.Id] = (group, o.Account);
+            paired[o.Id] = (group, match.Account, match.AccountId);
+            paired[match.Id] = (group, o.Account, o.AccountId);
             if (match.Account == AccountKind.CreditCard)
             {
                 roles[o.Id] = TransferRole.CardPaymentSent;
@@ -122,7 +128,7 @@ public static class TransferDetector
         return roles
             .Where(kv => !txns.First(t => t.Id == kv.Key).UserLocked)
             .Select(kv => paired.TryGetValue(kv.Key, out var p)
-                ? new TransferDecision(kv.Key, kv.Value, p.Group, p.Other)
+                ? new TransferDecision(kv.Key, kv.Value, p.Group, p.Other, p.OtherId)
                 : new TransferDecision(kv.Key, kv.Value, null, null))
             .ToList();
     }
@@ -142,6 +148,10 @@ public static class TransferDetector
             return outflow ? TransferRole.OwnTransferOut : TransferRole.OwnTransferIn;
         return null;
     }
+
+    /// <summary>Same amount, one in and one out, both still waiting for you, a few days apart: most likely a transfer.</summary>
+    private static bool Likely(TransferCandidate o, bool outKnown, TransferCandidate i, TransferRole? inRole) =>
+        !outKnown && inRole is null && o.Waiting && i.Waiting && Math.Abs(i.Date.DayNumber - o.Date.DayNumber) <= LikelyWindowDays;
 
     private static bool Compatible(TransferCandidate o, TransferRole? outRole, TransferCandidate i, TransferRole? inRole)
     {

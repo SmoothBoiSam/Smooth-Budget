@@ -204,4 +204,108 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(("paycheck", true), items.Where(i => i.Id == bonus).Select(i => (i.Kind, i.Said)).Single());
         Assert.Equal("other", items.Single(i => i.Description == "PAYMENT APP CASHOUT").Kind);
     }
+
+    [Fact]
+    public async Task A_bonus_you_expect_counts_until_it_lands_then_the_deposit_does()
+    {
+        // DECISIONS.md 256. Made-up numbers throughout.
+        var (c, rent, _, _) = await NewHouseholdAsync();
+        foreach (var stub in PayFixtures.Stubs)
+            (await c.PostAsJsonAsync("/api/payday/paystubs/confirm", stub, Json)).EnsureSuccessStatusCode();
+        await Upload(c, "/api/payday/schedule", Encoding.UTF8.GetBytes(PayFixtures.Text), "schedule.txt", "text/plain", confirm: true);
+        var before = await Summary(c);
+
+        // Nothing to take home, or a day long gone: turned away.
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/payday/expected", new ExpectedIncomeRequest("Bonus", 0, new DateOnly(2027, 2, 20)), Json)).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/payday/expected", new ExpectedIncomeRequest("Bonus", 500_00, new DateOnly(2026, 12, 1)), Json)).StatusCode);
+
+        // Expected Feb 20, inside this budget month: the month's money counts it.
+        var list = (await (await c.PostAsJsonAsync("/api/payday/expected", new ExpectedIncomeRequest(null, 1_000_00, new DateOnly(2027, 2, 20)), Json))
+            .Content.ReadFromJsonAsync<List<ExpectedIncomeDto>>(Json))!;
+        Assert.Equal(("Bonus", (DateOnly?)null), (list.Single().Name, list.Single().LandedDate));
+        Assert.Equal(before.IncomeExpectedCents + 1_000_00, (await Summary(c)).IncomeExpectedCents);
+        Assert.Contains("Bonus $1,000.00 expected Feb 20", (await c.GetFromJsonAsync<GeneratorDto>("/api/budget/generator", Json))!.IncomeExplanation);
+
+        // It lands a day late and a little smaller: matched, other income, counted once at what came in, and waiting in
+        // Review to confirm (DECISIONS.md 257).
+        var deposit = Guid.NewGuid();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var household = db.Categories.Single(x => x.Id == rent).HouseholdId;
+            db.Transactions.Add(new Transaction
+            {
+                Id = deposit, HouseholdId = household, AccountId = db.Accounts.Single(a => a.HouseholdId == household).Id, Date = new DateOnly(2027, 2, 21),
+                AmountCents = -960_00, Merchant = "EMPLOYER BONUS", Description = "EMPLOYER BONUS", Kind = TransactionKind.Income, NeedsReview = true,
+                Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        app.Clock.SetUtcNow(new DateTimeOffset(2027, 2, 21, 19, 0, 0, TimeSpan.Zero));
+        await c.GetAsync("/api/payday"); // the payday page matches deposits
+        await c.PutAsJsonAsync("/api/settings/budget", new BudgetSettingsDto(SweepTarget.Debt, 50, AutoBudget: true), Json);
+        var landed = (await c.GetFromJsonAsync<List<ExpectedIncomeDto>>("/api/payday/expected", Json))!.Single();
+        Assert.Equal((new DateOnly(2027, 2, 21), 960_00L), (landed.LandedDate!.Value, landed.LandedCents!.Value));
+        Assert.Equal(before.IncomeExpectedCents + 960_00, (await Summary(c)).IncomeExpectedCents);
+        var row = (await c.GetFromJsonAsync<List<TransactionDto>>("/api/accounts/transactions?type=checking", Json))!.Single(t => t.Id == deposit);
+        Assert.Equal(("other", true), (row.IncomeType, row.NeedsReview));
+        Assert.Contains("Looks like your Bonus", row.CategoryReason);
+        // Confirmed in Review as that bonus: settled, still the bonus (DECISIONS.md 259).
+        (await c.PostAsJsonAsync($"/api/transactions/{deposit}/income", new MarkIncomeRequest("bonus", ExpectedIncomeId: landed.Id), Json)).EnsureSuccessStatusCode();
+        Assert.NotNull((await c.GetFromJsonAsync<List<ExpectedIncomeDto>>("/api/payday/expected", Json))!.Single().LandedDate);
+        // Called other income instead, it lets go of the bonus; called the bonus again, it's back.
+        (await c.PostAsJsonAsync($"/api/transactions/{deposit}/income", new MarkIncomeRequest("other"), Json)).EnsureSuccessStatusCode();
+        Assert.Null((await c.GetFromJsonAsync<List<ExpectedIncomeDto>>("/api/payday/expected", Json))!.Single().LandedDate);
+        (await c.PostAsJsonAsync($"/api/transactions/{deposit}/income", new MarkIncomeRequest("bonus", ExpectedIncomeId: landed.Id), Json)).EnsureSuccessStatusCode();
+
+        // Removing it once it's landed leaves the deposit as the other income it is.
+        (await c.DeleteAsync($"/api/payday/expected/{landed.Id}")).EnsureSuccessStatusCode();
+        Assert.Equal(before.IncomeExpectedCents + 960_00, (await Summary(c)).IncomeExpectedCents);
+    }
+
+    [Fact]
+    public async Task Account_balances_take_pending_charges_off_the_banks_number()
+    {
+        // DECISIONS.md 256. A bank-synced account: its balance less what's pending. One you track: the balance you gave on a
+        // day, moved by everything since, pending included.
+        var (c, rent, _, _) = await NewHouseholdAsync();
+        Guid household, checking, savings = Guid.NewGuid();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            household = db.Categories.Single(x => x.Id == rent).HouseholdId;
+            var acct = db.Accounts.Single(a => a.HouseholdId == household);
+            checking = acct.Id;
+            (acct.PlaidAccountId, acct.CurrentBalanceCents) = ("test-chk-bal", 1_000_00);
+            db.Accounts.Add(new Account { Id = savings, HouseholdId = household, Name = "Test Savings", Type = AccountType.Savings, Source = DataSource.Csv,
+                CurrentBalanceCents = 500_00, BalanceAsOf = new DateOnly(2027, 2, 1), CreatedUtc = DateTime.UtcNow });
+            Transaction T(Guid account, DateOnly d, long cents, bool pending) => new()
+            {
+                Id = Guid.NewGuid(), HouseholdId = household, AccountId = account, Date = d, AmountCents = cents, Merchant = "TEST", Description = "TEST",
+                Kind = TransactionKind.Purchase, Pending = pending, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            };
+            db.Transactions.AddRange(T(checking, new DateOnly(2027, 2, 10), 30_00, pending: true), T(savings, new DateOnly(2027, 1, 30), 99_00, pending: false),
+                T(savings, new DateOnly(2027, 2, 5), -100_00, pending: false), T(savings, new DateOnly(2027, 2, 10), 20_00, pending: true));
+            await db.SaveChangesAsync();
+        }
+        var chk = (await c.GetFromJsonAsync<List<Accounts.AccountBalanceDto>>("/api/accounts/balances?type=checking", Json))!.Single();
+        Assert.Equal((970_00L, 30_00L, true), (chk.BalanceCents, chk.PendingCents, chk.BankSynced));
+        var sav = (await c.GetFromJsonAsync<List<Accounts.AccountBalanceDto>>("/api/accounts/balances?type=savings", Json))!.Single();
+        Assert.Equal((580_00L, 20_00L, false), (sav.BalanceCents, sav.PendingCents, sav.BankSynced));
+        Assert.Empty((await c.GetFromJsonAsync<List<Accounts.AccountBalanceDto>>("/api/accounts/balances?type=card", Json))!);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await c.GetAsync("/api/accounts/balances?type=loans")).StatusCode);
+
+        // Debit's Cash card (DECISIONS.md 257): the checking total now, and each day's close worked back: before today's
+        // pending charge, it was 30 more.
+        var cash = (await c.GetFromJsonAsync<Accounts.CashDto>("/api/accounts/cash", Json))!;
+        Assert.Equal(970_00, cash.TotalCents);
+        Assert.Equal((new DateOnly(2027, 2, 10), 970_00L), (cash.History[^1].Date, cash.History[^1].BalanceCents));
+        Assert.Equal((new DateOnly(2027, 2, 9), 1_000_00L), (cash.History[^2].Date, cash.History[^2].BalanceCents));
+        Assert.Equal(Accounts.AccountBalances.CashDays + 1, cash.History.Count);
+
+        // Transactions: one account's, or all of that kind.
+        var savTx = (await c.GetFromJsonAsync<List<TransactionDto>>($"/api/accounts/transactions?type=savings&accountId={savings}", Json))!;
+        Assert.Equal(3, savTx.Count);
+        Assert.All(savTx, t => Assert.Equal(savings, t.AccountId));
+    }
 }

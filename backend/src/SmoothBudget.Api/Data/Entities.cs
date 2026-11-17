@@ -221,6 +221,14 @@ public class Transaction
     /// <summary>Shared by the two sides of a detected card payment or own-account transfer.</summary>
     public Guid? TransferGroupId { get; set; }
 
+    /// <summary>
+    /// The other account (DECISIONS.md 259): for a transfer, the one it went to or came from (null with <see cref="IsTransfer"/>
+    /// set: an account not in the app, or a loan you track by hand, in <see cref="DebtAccountId"/>); for interest earned,
+    /// the savings account that paid it.
+    /// </summary>
+    public Guid? TransferAccountId { get; set; }
+    public Account? TransferAccount { get; set; }
+
     /// <summary>Date|amount|description key used to skip rows already imported into this account.</summary>
     public string? Fingerprint { get; set; }
 
@@ -238,6 +246,7 @@ public class Transaction
     public Friend? Friend { get; set; }
     /// <summary>The debt this money was paid toward, or the card or loan an interest charge was for (DECISIONS.md 232).</summary>
     public Guid? DebtAccountId { get; set; }
+    public DebtAccount? DebtAccount { get; set; }
     /// <summary>For a transfer waiting for a label: the category the app thinks it was for (shown pre-selected, counted nowhere).</summary>
     public Guid? SuggestedCategoryId { get; set; }
     /// <summary>Her contribution sent early: it counts for the budget month starting on this date, not the one it landed in (DECISIONS.md 166).</summary>
@@ -250,16 +259,6 @@ public class Transaction
     public DateTime CreatedUtc { get; set; }
 }
 
-/// <summary>Merchant pattern to category (SPEC section 6.2). Matches any merchant containing the pattern.</summary>
-public class CategoryRule
-{
-    public Guid Id { get; set; }
-    public Guid HouseholdId { get; set; }
-    public required string Pattern { get; set; }
-    public Guid CategoryId { get; set; }
-    public Category Category { get; set; } = null!;
-    public DateTime CreatedUtc { get; set; }
-}
 
 /// <summary>One CSV upload. Lets the user see what an import did and undo it.</summary>
 public class ImportBatch
@@ -535,6 +534,22 @@ public class PayPeriodForecast
     public string? ActualSource { get; set; }
     public Guid? DepositTransactionId { get; set; }
     public DateTime UpdatedUtc { get; set; }
+}
+
+/// <summary>
+/// Income you expect apart from your paychecks, like a bonus (DECISIONS.md 256): what you think it'll be after taxes and
+/// the day it should land. The budget counts it in its month until the deposit arrives, then the deposit itself.
+/// </summary>
+public class ExpectedIncome
+{
+    public Guid Id { get; set; }
+    public Guid HouseholdId { get; set; }
+    public required string Name { get; set; }
+    public long AmountCents { get; set; }
+    public DateOnly ExpectedDate { get; set; }
+    /// <summary>The deposit it arrived as, once matched.</summary>
+    public Guid? DepositTransactionId { get; set; }
+    public DateTime CreatedUtc { get; set; }
 }
 
 /// <summary>A payday plan item you checked off.</summary>

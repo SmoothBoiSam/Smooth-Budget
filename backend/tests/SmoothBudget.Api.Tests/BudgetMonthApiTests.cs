@@ -167,6 +167,34 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Many_screens_opening_at_once_start_a_new_month_once()
+    {
+        // What a fresh demo hit (DECISIONS.md 260): every screen loading together, each finding last month to freeze and close.
+        var (client, household, _) = await NewHouseholdAsync();
+        (await client.GetAsync("/api/budget/summary")).EnsureSuccessStatusCode(); // October's row
+        await At(client, 2026, 11, 20); // October ended more than 5 days ago
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+        {
+            using var scope = app.Services.CreateScope();
+            var months = scope.ServiceProvider.GetRequiredService<BudgetMonthService>();
+            return (await months.EnsureCurrentAsync(household, CancellationToken.None)).Id;
+        })));
+        Assert.Single(results.Distinct());
+
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var october = await db.BudgetMonths.SingleAsync(m => m.HouseholdId == household && m.StartDate == new DateOnly(2026, 10, 7));
+            Assert.NotNull(october.ClosedUtc);
+            var snaps = await db.BudgetMonthCategories.Where(x => x.BudgetMonthId == october.Id).ToListAsync();
+            Assert.Equal(snaps.Count, snaps.Select(x => x.CategoryId).Distinct().Count());
+            var sweeps = await db.SweepTasks.Where(s => s.BudgetMonthId == october.Id).ToListAsync();
+            Assert.Equal(sweeps.Count, sweeps.Select(s => s.Kind).Distinct().Count()); // closed once: no doubled sweep items
+        }
+    }
+
+    [Fact]
     public async Task A_month_cannot_be_closed_before_it_ends()
     {
         var (client, _, _) = await NewHouseholdAsync();

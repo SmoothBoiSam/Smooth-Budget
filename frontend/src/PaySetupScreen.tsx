@@ -11,7 +11,7 @@ import {
 } from './api'
 import { useRemembered } from './offline'
 import { Paychecks } from './PaydayScreen'
-import { IncomeCard } from './Income'
+import { BonusIncome, IncomeCard } from './Income'
 import { Caret, ErrorNotice, Loading, Page, PageHeader, Row, Rows } from './ui'
 import { formatCents, formatDay } from './format'
 
@@ -205,7 +205,7 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
 
   return (
     <Page>
-      {header('#/payday', 'Plan', 'Income')}
+      {header('#/payday', 'Money', 'Income')}
       {!summary && !error && <Loading />}
       {income && <IncomeCard s={income} />}
 
@@ -230,6 +230,11 @@ export default function PaySetupScreen({ onSignedOut }: { onSignedOut: () => voi
           if (saved.varianceCents !== null) setNotice(`Saved. The app had predicted ${formatCents(saved.predictedNetCents ?? 0)}; it was ${formatCents(saved.actualNetCents)}.`)
         }, 'Saved. Your forecast learned from it.')} />}
         <SubLink href="#/income/stubs" title="View pay stubs" detail={stubs.length === 0 ? 'None uploaded yet' : `${stubs.length} ${stubs.length === 1 ? 'stub' : 'stubs'}, latest paid ${formatDay(stubs.reduce((a, b) => (a.payDate > b.payDate ? a : b)).payDate)}`} />
+      </Section>
+
+      {/* A bonus or other pay you expect apart from your checks (DECISIONS.md 256). */}
+      <Section title="Bonus income" hint="A bonus or other pay you expect. Your budget counts it in the month it’s due until it lands.">
+        <BonusIncome onSignedOut={onSignedOut} />
       </Section>
 
       {profile && <ProfileSection p={profile} busy={busy} act={act} />}

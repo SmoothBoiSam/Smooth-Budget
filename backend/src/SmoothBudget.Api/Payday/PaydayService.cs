@@ -163,8 +163,12 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         }
         if (parts.Count == 0) return null;
         var other = await OtherIncomeAsync(householdId, start, end, c, checks, ct);
-        return (total + other, $"Your paychecks this budget month: {string.Join(", ", parts)}."
-                               + (other > 0 ? $" Plus {PayEngine.Dollars(other)} of other income that has come in." : ""));
+        // Income you said is coming, like a bonus (DECISIONS.md 256): counted until it lands, then it's other income above.
+        var coming = await ExpectedIncomes.StillComingAsync(db, householdId, start, end, c.Today, ct);
+        var bonus = coming.Sum(x => x.AmountCents);
+        return (total + other + bonus, $"Your paychecks this budget month: {string.Join(", ", parts)}."
+                               + (other > 0 ? $" Plus {PayEngine.Dollars(other)} of other income that has come in." : "")
+                               + (bonus > 0 ? $" Plus {string.Join(", ", coming.Select(x => $"{x.Name} {PayEngine.Dollars(x.AmountCents)} expected {x.ExpectedDate:MMM d}"))}." : ""));
     }
 
     /// <summary>
@@ -205,7 +209,11 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     /// <summary>Matches new deposits to their pay dates (after a sync or import), so a paycheck doesn't wait in Review (DECISIONS.md 254).</summary>
     public async Task MatchDepositsAsync(Guid householdId, CancellationToken ct)
     {
-        if (!await db.PayPeriodForecasts.AnyAsync(f => f.HouseholdId == householdId, ct)) return;
+        if (!await db.PayPeriodForecasts.AnyAsync(f => f.HouseholdId == householdId, ct))
+        {
+            await ExpectedIncomes.MatchAsync(db, householdId, ct); // a bonus still lands without a pay forecast (DECISIONS.md 256)
+            return;
+        }
         var c = await ContextAsync(householdId, ct);
         var gate = Gates.GetOrAdd(householdId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct);
@@ -353,6 +361,9 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     /// </summary>
     public async Task MatchActualsAsync(Guid householdId, PayContext c, CancellationToken ct)
     {
+        // A bonus you said was coming is matched first (DECISIONS.md 256): matched, it's other income, which a paycheck
+        // never takes, so a bonus landing on payday for about a check's amount isn't mistaken for the check.
+        await ExpectedIncomes.MatchAsync(db, householdId, ct);
         var rows = await db.PayPeriodForecasts.Where(f => f.HouseholdId == householdId && f.PayDate <= c.Today.AddDays(3)).ToListAsync(ct);
         var linkedIds = rows.Where(f => f.DepositTransactionId != null).Select(f => f.DepositTransactionId!.Value).ToList();
         var notPay = (await db.Transactions.AsNoTracking()
@@ -378,7 +389,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var deposits = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && t.Kind == TransactionKind.Income && t.AmountCents < 0 && !t.IsTransfer && !t.IsPartnerTransfer
                         && t.IncomeType != Data.IncomeType.Other && t.Account.Type == AccountType.Checking && t.Date >= from && t.Date <= to)
-            .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant, Said = t.IncomeType == Data.IncomeType.Paycheck }).ToListAsync(ct);
+            .Select(t => new { t.Id, t.Date, t.AmountCents, t.Merchant, Said = t.IncomeType == Data.IncomeType.Paycheck && t.CategorySource == CategorySource.User }).ToListAsync(ct);
         var matched = new List<Guid>();
 
         foreach (var f in open)
@@ -398,10 +409,11 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             matched.Add(match.Id);
         }
         await db.SaveChangesAsync(ct);
+        // Matched to its pay date it's most likely your paycheck, but it still waits in Review for you to confirm (DECISIONS.md 259).
         if (matched.Count > 0)
-            await db.Transactions.Where(t => matched.Contains(t.Id) && t.NeedsReview && t.CategorySource != CategorySource.User)
-                .ExecuteUpdateAsync(s => s.SetProperty(t => t.NeedsReview, false)
-                    .SetProperty(t => t.CategoryReason, "Your paycheck: it landed on payday."), ct);
+            await db.Transactions.Where(t => matched.Contains(t.Id) && t.CategorySource != CategorySource.User)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.IncomeType, Data.IncomeType.Paycheck)
+                    .SetProperty(t => t.CategoryReason, "Looks like your paycheck: it landed on payday."), ct);
     }
 
     /// <summary>

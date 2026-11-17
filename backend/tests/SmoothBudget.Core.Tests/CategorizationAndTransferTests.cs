@@ -14,11 +14,9 @@ public class CategorizerTests
         ["Groceries"] = Groceries, ["Eating out"] = EatingOut, ["Coffee"] = Coffee, ["Gas"] = Gas,
     };
 
-    private static readonly DateTime T0 = new(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc);
-
-    private static (Guid?, CategorySource) Guess(string merchant, string? bank, IReadOnlyCollection<MerchantRule>? rules = null)
+    private static (Guid?, CategorySource) Guess(string merchant, string? bank)
     {
-        var g = AutoCategorizer.Guess(new CategorizationInput(merchant, bank), rules ?? [], null, Categories);
+        var g = AutoCategorizer.Guess(new CategorizationInput(merchant, bank), null, Categories);
         return (g.CategoryId, g.Source);
     }
 
@@ -37,35 +35,6 @@ public class CategorizerTests
         Assert.Equal((null, CategorySource.None), Guess("KING SOOPERS DENVER CO", null));
     }
 
-    [Fact]
-    public void A_merchant_rule_beats_the_bank_category()
-    {
-        var rules = new[] { new MerchantRule(Coffee, "BLUE DOOR", T0) };
-        Assert.Equal((Coffee, CategorySource.Rule), Guess("BLUE DOOR COFFEE", "Food & Drink", rules));
-    }
-
-    [Fact]
-    public void Rules_match_case_insensitively_and_the_longest_pattern_wins()
-    {
-        var rules = new[]
-        {
-            new MerchantRule(Groceries, "KING SOOPERS", T0),
-            new MerchantRule(Gas, "KING SOOPERS FUEL", T0),
-        };
-        Assert.Equal(Gas, Categorizer.MatchRule("King Soopers Fuel Center", rules)!.CategoryId);
-        Assert.Equal(Groceries, Categorizer.MatchRule("KING SOOPERS DENVER CO", rules)!.CategoryId);
-    }
-
-    [Fact]
-    public void Equal_length_patterns_go_to_the_newest_rule()
-    {
-        var rules = new[]
-        {
-            new MerchantRule(Groceries, "TARGET", T0),
-            new MerchantRule(Coffee, "TARGET", T0.AddDays(1)),
-        };
-        Assert.Equal(Coffee, Categorizer.MatchRule("TARGET DENVER", rules)!.CategoryId);
-    }
 }
 
 public class TransactionRulesTests

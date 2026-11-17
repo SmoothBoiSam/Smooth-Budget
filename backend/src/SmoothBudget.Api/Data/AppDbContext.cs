@@ -15,7 +15,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<BudgetMonth> BudgetMonths => Set<BudgetMonth>();
-    public DbSet<CategoryRule> CategoryRules => Set<CategoryRule>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
     public DbSet<PlaidItem> PlaidItems => Set<PlaidItem>();
     public DbSet<BudgetMonthCategory> BudgetMonthCategories => Set<BudgetMonthCategory>();
@@ -28,6 +27,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ScheduleMonth> ScheduleMonths => Set<ScheduleMonth>();
     public DbSet<PayStub> PayStubs => Set<PayStub>();
     public DbSet<PayPeriodForecast> PayPeriodForecasts => Set<PayPeriodForecast>();
+    public DbSet<ExpectedIncome> ExpectedIncomes => Set<ExpectedIncome>();
     public DbSet<PaydayChecklistItem> PaydayChecklistItems => Set<PaydayChecklistItem>();
     public DbSet<PushDevice> PushDevices => Set<PushDevice>();
     public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
@@ -90,7 +90,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.PlaidTransactionId).HasMaxLength(100);
             e.HasIndex(x => x.PlaidTransactionId).IsUnique().HasFilter("\"PlaidTransactionId\" IS NOT NULL");
             e.HasOne(x => x.Friend).WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.SetNull);
-            e.HasOne<DebtAccount>().WithMany().HasForeignKey(x => x.DebtAccountId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.DebtAccount).WithMany().HasForeignKey(x => x.DebtAccountId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.TransferAccount).WithMany().HasForeignKey(x => x.TransferAccountId).OnDelete(DeleteBehavior.SetNull);
             // No cascade: undoing an import deletes its rows explicitly (and keeps SQL Server's single-cascade-path rule happy).
             e.HasOne<ImportBatch>().WithMany().HasForeignKey(x => x.ImportBatchId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
@@ -98,14 +99,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.SetNull);
             // The Home summary reads one household's transactions for one budget month.
             e.HasIndex(x => new { x.HouseholdId, x.Date });
-        });
-
-        b.Entity<CategoryRule>(e =>
-        {
-            e.Property(x => x.Pattern).HasMaxLength(200);
-            e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(x => new { x.HouseholdId, x.Pattern }).IsUnique();
         });
 
         b.Entity<ImportBatch>(e =>
@@ -147,6 +140,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(x => x.ActualSource).HasMaxLength(10);
             e.HasIndex(x => new { x.HouseholdId, x.PayDate }).IsUnique();
+        });
+        b.Entity<ExpectedIncome>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.HasIndex(x => new { x.HouseholdId, x.ExpectedDate });
         });
         b.Entity<PaydayChecklistItem>(e =>
         {

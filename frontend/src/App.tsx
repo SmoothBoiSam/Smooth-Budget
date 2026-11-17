@@ -3,8 +3,6 @@ import { ApiError, api, budgetApi, onDataChanged, payBadge, paydayApi, type Me }
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
-import InterestScreen, { PaymentsScreen } from './DebtInterest'
-import SavingsHistoryScreen from './SavingsHistory'
 import HomeScreen from './HomeScreen'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
@@ -15,7 +13,7 @@ import TasksScreen from './TasksScreen'
 import PayTasksScreen from './PayTasksScreen'
 import PaydayScreen from './PaydayScreen'
 import PaySetupScreen from './PaySetupScreen'
-import IncomeHistoryScreen from './Income'
+import DebitScreen from './Accounts'
 import SavingsScreen from './SavingsScreen'
 import { inViewTransition, reducedMotion } from './motion'
 import { saved, useOnline, useResume } from './offline'
@@ -24,6 +22,21 @@ import { ConfirmHost, DemoBar, OfflineBar } from './ui'
 // Back from a bank's own sign-in (Plaid OAuth, DECISIONS.md 185): open More, where Bank connections picks Plaid up again.
 // The path and ?oauth_state_id stay in the address for Plaid to read.
 if (window.location.pathname.startsWith('/plaid-oauth') && !window.location.hash.startsWith('#/more/banks')) window.location.hash = '#/more/banks'
+
+/**
+ * The lists that became the Transactions page, filtered (DECISIONS.md 259): Past income, interest charges, payments,
+ * savings transactions, and each account's transactions.
+ */
+function listMoved(hash: string): string | null {
+  if (hash === 'income/history') return 'transactions?type=income&back=income'
+  if (hash === 'debt/interest') return 'transactions?type=interest&back=debt'
+  if (hash === 'debt/payments') return 'transactions?type=debt&back=debt'
+  if (hash === 'savings/history') return 'transactions?type=savings&back=savings'
+  const m = hash.match(/^(debit|debt|savings)\/transactions(?:\/([0-9a-f-]+))?$/)
+  if (!m) return null
+  const kind = m[1] === 'debit' ? 'checking' : m[1] === 'debt' ? 'card' : 'savings'
+  return m[2] ? `transactions?accountId=${m[2]}&back=${m[1]}` : `transactions?accountType=${kind}&back=${m[1]}`
+}
 
 function currentRoute(): Route {
   let hash = window.location.hash.replace(/^#\/?/, '')
@@ -42,18 +55,19 @@ function currentRoute(): Route {
               ? 'friends/transfers' // Partner became the friend whose transfers are tracked
               : hash === 'payday/setup' || hash.startsWith('payday/setup/')
                 ? 'income' + hash.slice('payday/setup'.length) // Schedule & pay stubs became Income (DECISIONS.md 254)
-                : null
+                : listMoved(hash)
   if (moved) {
     window.history.replaceState(null, '', '#/' + moved)
     hash = moved
   }
-  if (hash === 'transactions') return 'transactions' // all transactions and search, from Home (DECISIONS.md 171)
+  if (hash === 'transactions' || hash.startsWith('transactions?')) return 'transactions' // all transactions and search (DECISIONS.md 171, 259)
   if (hash === 'tasks') return 'tasks'
   if (hash === 'tasks/payday') return 'paytasks'
   if (hash.startsWith('tasks/')) return 'review' // tasks/transactions
-  if (hash === 'income/history') return 'incomehistory'
   if (hash === 'income' || hash.startsWith('income/')) return 'paysetup' // Income: your pay, schedule and stubs (DECISIONS.md 254)
-  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'debt/interest' ? 'debtinterest' : hash === 'debt/payments' ? 'debtpayments' : hash === 'savings' ? 'savings' : hash === 'savings/history' ? 'savingshistory' : hash === 'payday' ? 'payday' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
+  // Money → Debit, and every Accounts card's Transactions (DECISIONS.md 256).
+  if (hash === 'debit') return 'debit'
+  return hash.startsWith('budget') ? 'budget' : hash === 'debt' ? 'debt' : hash === 'savings' ? 'savings' : hash === 'payday' ? 'payday' : hash === 'friends' || hash.startsWith('join/') ? 'friends' : hash.startsWith('friends/') ? 'friend' : hash === 'more' || hash.startsWith('more/') ? 'more' : 'home'
 }
 
 export default function App() {
@@ -192,13 +206,10 @@ export default function App() {
       {route === 'paytasks' && <PayTasksScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'review' && <ReviewScreen onChanged={reviewChanged} onSignedOut={signedOut} />}
       {route === 'debt' && <DebtScreen onSignedOut={signedOut} />}
-      {route === 'debtinterest' && <InterestScreen onSignedOut={signedOut} />}
-      {route === 'debtpayments' && <PaymentsScreen onSignedOut={signedOut} />}
       {route === 'savings' && <SavingsScreen onSignedOut={signedOut} />}
-      {route === 'savingshistory' && <SavingsHistoryScreen onSignedOut={signedOut} />}
+      {route === 'debit' && <DebitScreen />}
       {route === 'payday' && <PaydayScreen onSignedOut={signedOut} onOpenItems={setPlanCount} />}
       {route === 'paysetup' && <PaySetupScreen onSignedOut={signedOut} />}
-      {route === 'incomehistory' && <IncomeHistoryScreen onSignedOut={signedOut} />}
       {route === 'friends' && <FriendsScreen onSignedOut={signedOut} />}
       {route === 'friend' && <FriendScreen key={window.location.hash} id={window.location.hash.slice('#/friends/'.length)} onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}

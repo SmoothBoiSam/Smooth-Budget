@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ask } from './confirm'
-import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me, type Rule } from './api'
+import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me } from './api'
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import BankConnections from './BankConnections'
@@ -12,15 +12,13 @@ const accountTypeLabel: Record<Account['type'], string> = { Checking: 'Checking'
 export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onChanged: () => void; onSignedOut: () => void }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [batches, setBatches] = useState<ImportBatch[]>([])
-  const [rules, setRules] = useState<Rule[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
-      const [a, b, r] = await Promise.all([budgetApi.accounts(), budgetApi.batches(), budgetApi.rules()])
+      const [a, b] = await Promise.all([budgetApi.accounts(), budgetApi.batches()])
       setAccounts(a)
       setBatches(b)
-      setRules(r)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onSignedOut()
       setError(e instanceof Error ? e.message : 'Could not load.')
@@ -40,11 +38,6 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
     if (!(await ask(`Remove the ${b.importedCount} transactions added by ${b.fileName}?`, { yes: 'Remove', danger: true }))) return
     await budgetApi.undoBatch(b.id).catch((e) => setError(e.message))
     changed()
-  }
-
-  async function removeRule(r: Rule) {
-    await budgetApi.deleteRule(r.id).catch((e) => setError(e.message))
-    void load()
   }
 
   async function signOut() {
@@ -108,32 +101,6 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
       </Page>
     )
 
-  if (sub === 'rules')
-    return (
-      <Page>
-        <PageHeader title="Merchant rules" back={back} />
-        {errorBox}
-        <Card>
-          {rules.length === 0 ? (
-            <p className="px-5 py-4 text-sm text-ink-soft">None yet. Tick “Always use this category” when you change a transaction’s category.</p>
-          ) : (
-            <Rows>
-              {rules.map((r) => (
-                <li key={r.id} className="flex items-center gap-3 px-5 py-3.5">
-                  <p className="min-w-0 flex-1 text-sm">
-                    <span className="font-medium">{r.pattern}</span> <span className="text-ink-faint">→</span> {r.categoryName}
-                  </p>
-                  <button type="button" onClick={() => removeRule(r)} className={headerActionCls + ' text-danger!'}>
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </Rows>
-          )}
-        </Card>
-      </Page>
-    )
-
   const lastImport = batches[0]
   return (
     <Page>
@@ -144,7 +111,6 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         <Rows>
           <Row label="Bank connections" href="#/more/banks" />
           <Row label="Import a CSV" hint={lastImport ? `Last: ${lastImport.fileName}` : undefined} href="#/more/import" />
-          <Row label="Merchant rules" value={rules.length > 0 ? rules.length : undefined} href="#/more/rules" />
           <Row label="Friends" hint="People you split costs with" href="#/friends" />
         </Rows>
       </Card>
@@ -171,13 +137,12 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
 
 const subFromHash = () => {
   const h = window.location.hash
-  return h.startsWith('#/more/rules')
-    ? 'rules'
-    : h.startsWith('#/more/import') // #/more/imports, the old list page, lands here too
-      ? 'import'
-      : h.startsWith('#/more/banks')
-        ? 'banks'
-        : null
+  // Merchant rules are gone (DECISIONS.md 259): the most likely category learns from what you confirm.
+  return h.startsWith('#/more/import') // #/more/imports, the old list page, lands here too
+    ? 'import'
+    : h.startsWith('#/more/banks')
+      ? 'banks'
+      : null
 }
 
 function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Account[]; onImported: () => void; onAccountAdded: () => void }) {

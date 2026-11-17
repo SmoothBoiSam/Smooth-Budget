@@ -12,8 +12,8 @@ const monthName = (iso: string) => {
 }
 
 /**
- * The Plan tab (SPEC 4.6; DECISIONS.md 147, 249, 254): one menu for Debt, Savings, and Income, which holds your
- * paychecks, schedule and pay stubs. The payday plan for each check is checked off under Tasks (DECISIONS.md 206).
+ * The Money tab, once Plan (SPEC 4.6; DECISIONS.md 147, 249, 254, 256): one menu for Debit, Debt, Savings, and Income,
+ * which holds your paychecks, schedule, pay stubs and expected bonuses. The payday plan for each check is checked off under Tasks (DECISIONS.md 206).
  */
 export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut: () => void; onOpenItems: (n: number) => void }) {
   const [s, setS] = useState<PaydaySummary | null>(null)
@@ -48,9 +48,9 @@ export default function PaydayScreen({ onSignedOut, onOpenItems }: { onSignedOut
 
   return (
     <Page>
-      <PageHeader title="Plan" />
-      {/* The menu shows straight away; its lines fill in as they load. Plan has no cards below it any more, so no
-          placeholder cards either (DECISIONS.md 254). */}
+      <PageHeader title="Money" />
+      {/* The menu shows straight away; its lines fill in as they load. Money has no cards below it, so no placeholder
+          cards either (DECISIONS.md 254). */}
       <DebtSavingsLinks debt={debt} savings={savings} payday={s} />
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
     </Page>
@@ -175,6 +175,7 @@ function DebtSavingsLinks({ debt, savings, payday }: { debt: DebtSummary | null;
   return (
     <Card>
       <Rows>
+        <MenuRow icon={icons.debit} label={<span className="font-semibold">Debit</span>} hint="Your checking accounts and their transactions" href="#/debit" />
         <MenuRow icon={icons.debt} label={<span className="font-semibold">Debt</span>} hint={debtLine} href="#/debt" />
         <MenuRow icon={icons.savings} label={<span className="font-semibold">Savings</span>} hint={savingsLine} href="#/savings" />
         <MenuRow icon={icons.payday} label={<span className="font-semibold">Income</span>} hint={payLine} href="#/income" />

@@ -46,9 +46,9 @@ public class CardInterestTests
     public void New_interest_charges_file_under_the_interest_bill()
     {
         var ids = new Dictionary<string, Guid> { ["Card interest"] = Interest, ["Fees & interest"] = Guid.NewGuid() };
-        var g = AutoCategorizer.Guess(new CategorizationInput("PURCHASE INTEREST CHARGE", "Fees & Adjustments"), [], null, ids);
+        var g = AutoCategorizer.Guess(new CategorizationInput("PURCHASE INTEREST CHARGE", "Fees & Adjustments"), null, ids);
         Assert.Equal(Interest, g.CategoryId);
-        var plaid = AutoCategorizer.Guess(new CategorizationInput("CHASE CARD", "BANK_FEES_INTEREST_CHARGE", "BANK_FEES"), [], null, ids);
+        var plaid = AutoCategorizer.Guess(new CategorizationInput("CHASE CARD", "BANK_FEES_INTEREST_CHARGE", "BANK_FEES"), null, ids);
         Assert.Equal(Interest, plaid.CategoryId);
     }
 

@@ -206,49 +206,6 @@ public class ImportApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task Recategorizing_with_a_rule_applies_to_matching_rows_and_future_imports()
-    {
-        var s = await ImportAllAsync();
-        var categories = (await s.Client.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
-        var groceries = categories.Single(c => c.Name == "Groceries").Id;
-        var kingSoopers = (await Month(s.Client)).Single(t => t.Merchant == "KING SOOPERS DENVER CO");
-
-        var res = await s.Client.PatchAsJsonAsync($"/api/transactions/{kingSoopers.Id}", new UpdateTransactionRequest(groceries, false, "king soopers"), Json);
-        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        var updated = (await res.Content.ReadFromJsonAsync<UpdateTransactionResult>(Json))!;
-        Assert.Equal(("Groceries", "User"), (updated.Transaction.CategoryName, updated.Transaction.CategorySource));
-
-        var rules = (await s.Client.GetFromJsonAsync<List<RuleDto>>("/api/rules", Json))!;
-        Assert.Equal(("KING SOOPERS", "Groceries"), (rules.Single().Pattern, rules.Single().CategoryName));
-
-        // A later export with another King Soopers trip is categorized by the rule.
-        var next = ChaseChecking + "\nDEBIT,11/22/2026,\"Card Purchase 11/21 King Soopers #0099 Aurora CO Card 1234\",-23.10,DEBIT_CARD,1375.46,,\n";
-        var r = await Import(s.Client, s.Checking, next);
-        Assert.Equal(1, r.Imported);
-        var newTrip = (await Month(s.Client)).Single(t => t.Merchant == "KING SOOPERS AURORA CO");
-        Assert.Equal(("Groceries", "Rule"), (newTrip.CategoryName, newTrip.CategorySource));
-
-        var summary = (await s.Client.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!;
-        Assert.Equal(225_09 + 64_30 + 23_10, summary.TotalVariableSpentCents);
-    }
-
-    [Fact]
-    public async Task A_rule_does_not_override_a_users_own_choice()
-    {
-        var s = await ImportAllAsync();
-        var categories = (await s.Client.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
-        var shopping = categories.Single(c => c.Name == "Shopping").Id;
-        var household = categories.Single(c => c.Name == "Household").Id;
-        var bigBox = (await Month(s.Client)).Where(t => t.Merchant == "BIG BOX STORE").ToList();
-
-        await s.Client.PatchAsJsonAsync($"/api/transactions/{bigBox[0].Id}", new UpdateTransactionRequest(household, false, null), Json);
-        var res = await s.Client.PatchAsJsonAsync($"/api/transactions/{bigBox[1].Id}", new UpdateTransactionRequest(shopping, false, "BIG BOX"), Json);
-
-        Assert.Equal(0, (await res.Content.ReadFromJsonAsync<UpdateTransactionResult>(Json))!.RuleAppliedTo);
-        Assert.Equal("Household", (await Month(s.Client)).Single(t => t.Id == bigBox[0].Id).CategoryName);
-    }
-
-    [Fact]
     public async Task Marking_a_transaction_as_a_transfer_removes_it_from_spending_and_the_inbox()
     {
         var s = await ImportAllAsync();

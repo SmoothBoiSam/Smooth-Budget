@@ -24,10 +24,9 @@ public sealed record CategoryGuess(Guid? CategoryId, CategorySource Source, bool
 }
 
 /// <summary>
-/// Automatic categorization with a confidence level (follows SPEC 6.1 step 1: bank category, then merchant
-/// rules, then what the user corrected). In order:
+/// Automatic categorization with a confidence level: the most likely category (DECISIONS.md 259; merchant rules are gone).
+/// In order:
 /// <list type="number">
-/// <item><b>Your merchant rules</b>: sure.</item>
 /// <item><b>What you chose before for this merchant</b>: sure when you've always picked the same category;
 /// a guess (most common choice) when you've picked different ones.</item>
 /// <item><b>Merchant patterns</b> (<see cref="SpendingThemes"/>), when the household has that category: sure. This is how
@@ -145,16 +144,10 @@ public static partial class AutoCategorizer
 
     public static CategoryGuess Guess(
         CategorizationInput input,
-        IReadOnlyCollection<MerchantRule> rules,
         MerchantHistory? history,
         IReadOnlyDictionary<string, Guid> categoryIdsByName)
     {
-        // 1. The user's own merchant rules.
-        var rule = Categorizer.MatchRule(input.Merchant, rules);
-        if (rule is not null)
-            return new CategoryGuess(rule.CategoryId, CategorySource.Rule, false, $"Your rule for \"{rule.Pattern}\".");
-
-        // 2. What the user picked before for this merchant.
+        // 1. What the user picked before for this merchant.
         if (history is { CategoryCounts.Count: > 0 })
         {
             var ranked = history.CategoryCounts.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).ToList();
@@ -165,12 +158,12 @@ public static partial class AutoCategorizer
                     : $"Your most common choice for this merchant ({ranked[0].Value} of {history.CategoryCounts.Values.Sum()}).");
         }
 
-        // 3. Merchant patterns (EV charging, rent, phone carriers, streaming, …) that map to one of the household's categories.
+        // 2. Merchant patterns (EV charging, rent, phone carriers, streaming, …) that map to one of the household's categories.
         var theme = SpendingThemes.Match(input.Merchant, input.Description);
         if (theme is not null && FindCategory(theme.Name, categoryIdsByName) is { } themed)
             return new CategoryGuess(themed, CategorySource.Bank, false, $"Looks like {theme.Name.ToLowerInvariant()} from the merchant name.");
 
-        // 4. The bank's category: the detailed label first, then the primary.
+        // 3. The bank's category: the detailed label first, then the primary.
         foreach (var label in new[] { input.BankCategory, input.BankPrimary })
         {
             if (string.IsNullOrWhiteSpace(label))

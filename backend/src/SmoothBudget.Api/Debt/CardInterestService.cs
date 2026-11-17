@@ -55,10 +55,12 @@ public class CardInterestService(AppDbContext db)
         }
         foreach (var t in charges)
         {
+            // Newly found interest is the most likely answer, waiting in Review for you (DECISIONS.md 259); what was already
+            // on the line stays as it was settled.
+            if (t.CategoryId != cat.Id && t.CategorySource != CategorySource.User) t.NeedsReview = true;
             t.CategoryId = cat.Id;
             t.SuggestedCategoryId = null;
             if (t.CategorySource != CategorySource.User) t.CategorySource = CategorySource.Bank;
-            t.NeedsReview = false;
             t.CategoryUnsure = false;
             t.CategoryReason = Reason;
         }

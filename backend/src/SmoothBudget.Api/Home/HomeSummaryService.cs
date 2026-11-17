@@ -116,8 +116,8 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             .Select(s => new { s.Id, s.Kind, s.AmountCents, s.Destination, s.BudgetMonth.StartDate })
             .ToListAsync(ct);
         var calendar = new BudgetMonthCalendar(household.BudgetMonthStartDay);
-        var reviewCount = await db.Transactions.CountAsync(t => t.HouseholdId == householdId && t.NeedsReview && t.CategoryId != null
-            && !t.IsTransfer && t.Date >= month.Range.Start && t.Date <= month.Range.End, ct);
+        var reviewCount = await db.Transactions.CountAsync(t => t.HouseholdId == householdId && t.NeedsReview
+            && t.Date >= month.Range.Start && t.Date <= month.Range.End, ct);
 
         var lastUpdated = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId)

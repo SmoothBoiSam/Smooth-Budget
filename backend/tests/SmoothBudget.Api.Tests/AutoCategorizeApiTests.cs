@@ -166,27 +166,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task A_rule_files_automatically_but_you_still_confirm()
-    {
-        var c = await NewUserAsync();
-        var card = await AccountAsync(c, "CreditCard", "4321");
-        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,WAL-MART #1234,Shopping,Sale,-60.00,", "11/12/2026,11/13/2026,WAL-MART #1234,Shopping,Sale,-30.00,");
-        var groceries = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Groceries").Id;
-        var waiting = await Review(c);
-        Assert.Equal(2, waiting.Count);
-        var res = await c.PatchAsJsonAsync($"/api/transactions/{waiting[0].Id}", new UpdateTransactionRequest(groceries, false, "WAL-MART"), Json);
-        // DECISIONS.md 224: "always" settles the one already here too, so nothing from that store is left in review.
-        Assert.Equal(1, (await res.Content.ReadFromJsonAsync<UpdateTransactionResult>(Json))!.RuleAppliedTo);
-        Assert.Empty(await Review(c));
-
-        await ImportAsync(c, card, ChaseCard, "11/15/2026,11/16/2026,WAL-MART #1234,Shopping,Sale,-45.00,");
-
-        var second = (await Review(c)).Single(); // sometimes groceries, sometimes household: you decide
-        Assert.Equal(("Groceries", "Rule", true), (second.CategoryName, second.CategorySource, second.NeedsReview));
-    }
-
-    [Fact]
-    public async Task Likely_ones_can_be_confirmed_in_bulk_but_never_the_unsure_ones()
+    public async Task Use_most_likely_settles_one_or_a_whole_scope()
     {
         var c = await NewUserAsync();
         var card = await AccountAsync(c, "CreditCard", "4321");
@@ -200,19 +180,21 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal((2, 1, 1), (s.Earlier.Total, s.Earlier.Likely, s.Earlier.Unsure));
         Assert.True((await Review(c, "earlier")).First().Unsure); // unsure first
 
-        var res = await c.PostAsJsonAsync("/api/transactions/review/confirm-likely", new ConfirmLikelyRequest("earlier"), Json);
-        Assert.Equal(1, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("confirmed").GetInt32());
+        // DECISIONS.md 259: "Use most likely for all" settles a whole scope, the unsure ones too.
+        var res = await c.PostAsJsonAsync("/api/transactions/review/most-likely", new ConfirmLikelyRequest("earlier"), Json);
+        Assert.Equal(2, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("confirmed").GetInt32());
 
         s = (await c.GetFromJsonAsync<ReviewSummaryDto>("/api/transactions/review/summary", Json))!;
-        Assert.Equal((1, 0, 1), (s.Earlier.Total, s.Earlier.Likely, s.Earlier.Unsure)); // the unsure one still waits
+        Assert.Equal(0, s.Earlier.Total);
         Assert.Equal(1, s.Month.Total); // this month untouched
         var count = await c.GetFromJsonAsync<JsonElement>("/api/transactions/inbox/count");
         Assert.Equal(1, count.GetProperty("review").GetInt32()); // the badge counts this month only
 
+        // One at a time, from a card.
         var ids = (await Review(c)).Select(t => t.Id).ToList();
-        await c.PostAsJsonAsync("/api/transactions/review/confirm", new ConfirmRequest(ids), Json);
+        await c.PostAsJsonAsync("/api/transactions/most-likely", new IdsRequest(ids), Json);
         Assert.Empty(await Review(c));
-        Assert.Equal("User", (await All(c)).Single(t => t.Merchant == "CORNER GROCERY").CategorySource);
+        Assert.Equal(("Groceries", "User"), ((await All(c)).Single(t => t.Merchant == "CORNER GROCERY") is var g ? (g.CategoryName, g.CategorySource) : default));
     }
 
     [Fact]
@@ -256,7 +238,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task I_dont_remember_keeps_the_guess_or_files_it_under_other_and_teaches_nothing()
+    public async Task Use_most_likely_keeps_the_guess_or_files_it_under_other()
     {
         var c = await NewUserAsync();
         var card = await AccountAsync(c, "CreditCard", "4321");
@@ -266,27 +248,23 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
             "DEBIT,02/10/2026,\"MYSTERY SHOP\",-30.00,DEBIT_CARD,970.00,,",
             "DEBIT,03/10/2026,\"ANOTHER MYSTERY\",-12.00,DEBIT_CARD,958.00,,");
 
-        // One at a time: the app's guess is kept.
+        // One at a time: the app's guess is kept, as yours.
         var fresh = (await All(c)).Single(t => t.Merchant == "FRESH MARKET");
-        var res = await c.PostAsync($"/api/transactions/{fresh.Id}/best-guess", null);
-        var kept = (await res.Content.ReadFromJsonAsync<TransactionDto>(Json))!;
-        Assert.Equal(("Groceries", "BestGuess", false), (kept.CategoryName, kept.CategorySource, kept.NeedsReview));
+        await c.PostAsJsonAsync("/api/transactions/most-likely", new IdsRequest([fresh.Id]), Json);
+        var kept = (await All(c)).Single(t => t.Id == fresh.Id);
+        Assert.Equal(("Groceries", "User", false), (kept.CategoryName, kept.CategorySource, kept.NeedsReview));
 
         // In bulk, everything older than the budget window: no guess, so "Other".
-        res = await c.PostAsJsonAsync("/api/transactions/review/best-guess", new ConfirmLikelyRequest("older"), Json);
-        Assert.Equal(2, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("settled").GetInt32());
-        Assert.All((await All(c)).Where(t => t.Merchant.Contains("MYSTERY")), t => Assert.Equal(("Other", "BestGuess"), (t.CategoryName, t.CategorySource)));
+        var res = await c.PostAsJsonAsync("/api/transactions/review/most-likely", new ConfirmLikelyRequest("older"), Json);
+        Assert.Equal(2, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("confirmed").GetInt32());
+        Assert.All((await All(c)).Where(t => t.Merchant.Contains("MYSTERY")), t => Assert.Equal(("Other", "User"), (t.CategoryName, t.CategorySource)));
         var other = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Other");
         Assert.Equal("Variable", other.Type); // a visible spending line, so nothing disappears
         Assert.Equal(0, (await c.GetFromJsonAsync<ReviewSummaryDto>("/api/transactions/review/summary", Json))!.Older.Total);
 
-        // A best guess doesn't teach the categorizer: the next one is still the bank's call, not "what you chose".
-        await ImportAsync(c, card, ChaseCard, "11/12/2026,11/13/2026,FRESH MARKET,Groceries,Sale,-55.00,");
-        Assert.Equal("Bank", (await All(c)).Single(t => t.Date == new DateOnly(2026, 11, 12)).CategorySource);
-
-        // And re-sorting never changes it.
+        // Re-sorting never changes it.
         await c.PostAsync("/api/transactions/auto-categorize", null);
-        Assert.Equal("BestGuess", (await All(c)).Single(t => t.Id == fresh.Id).CategorySource);
+        Assert.Equal("User", (await All(c)).Single(t => t.Id == fresh.Id).CategorySource);
     }
 
     [Fact]
@@ -361,6 +339,14 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         // Other income: settled, out of Review.
         var marked = (await (await c.PostAsJsonAsync($"/api/transactions/{bonus.Id}/income", new MarkIncomeRequest("other"), Json)).Content.ReadFromJsonAsync<TransactionDto>(Json))!;
         Assert.Equal(("Income", "other", false), (marked.Kind, marked.IncomeType, marked.NeedsReview));
+
+        // Marked wrong? Past income opens it (DECISIONS.md 258) and it can be changed to a paycheck after all.
+        var opened = (await c.GetFromJsonAsync<TransactionDto>($"/api/transactions/{bonus.Id}", Json))!;
+        Assert.Equal((bonus.Id, "other"), (opened.Id, opened.IncomeType));
+        var fixedUp = (await (await c.PostAsJsonAsync($"/api/transactions/{bonus.Id}/income", new MarkIncomeRequest("paycheck"), Json)).Content.ReadFromJsonAsync<TransactionDto>(Json))!;
+        Assert.Equal(("Income", "paycheck"), (fixedUp.Kind, fixedUp.IncomeType));
+        (await c.PostAsJsonAsync($"/api/transactions/{bonus.Id}/income", new MarkIncomeRequest("other"), Json)).EnsureSuccessStatusCode();
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, (await c.GetAsync($"/api/transactions/{Guid.NewGuid()}")).StatusCode);
 
         // A friend's contribution needs which friend; then it's theirs, and a re-run keeps it so though the transfer
         // doesn't carry the name on their transfers.
@@ -512,7 +498,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
 
         await ImportAsync(c, card, ChaseCard, "11/08/2026,11/09/2026,NETFLIX.COM,Entertainment,Sale,-15.49,");
         var next = (await All(c)).Single(t => t.Date == new DateOnly(2026, 11, 8));
-        Assert.Equal(("Netflix", "Rule", true), (next.CategoryName, next.CategorySource, next.NeedsReview)); // still yours to confirm
+        Assert.Equal(("Netflix", "Learned", true), (next.CategoryName, next.CategorySource, next.NeedsReview)); // most likely from its history, still yours to confirm
     }
 
     // ---- Plaid ---------------------------------------------------------------------------------------
@@ -633,7 +619,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         var cats = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!;
         Guid Id(string name) => cats.Single(x => x.Name == name).Id;
         var walmart = (await All(c)).Single(t => t.Merchant.StartsWith("WAL-MART"));
-        await c.PatchAsJsonAsync($"/api/transactions/{walmart.Id}", new UpdateTransactionRequest(Id("Groceries"), false, "WAL-MART"), Json);
+        await c.PatchAsJsonAsync($"/api/transactions/{walmart.Id}", new UpdateTransactionRequest(Id("Groceries"), false, null), Json);
         // A "this month only" limit on Groceries: the merged category gets it plus Eating out's usual limit this month.
         await c.PutAsJsonAsync($"/api/budget/categories/{Id("Groceries")}",
             new UpdateCategoryRequest("Groceries", CategoryType.Variable, 500_00, null, false, "month"), Json);
@@ -653,8 +639,7 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.DoesNotContain(cats, x => x.Name is "Groceries" or "Eating out");
         var food = cats.Single(x => x.Name == "Food");
         Assert.Equal(("Variable", 600_00L, CategoryPriority.Medium), (food.Type, food.MonthlyLimitCents, food.Priority)); // groceries were essential, so not low priority
-        Assert.All(await All(c), t => Assert.Equal("Food", t.CategoryName)); // the rule-filed Walmart charge too
-        Assert.Equal("Food", (await c.GetFromJsonAsync<List<RuleDto>>("/api/rules", Json))!.Single(r => r.Pattern == "WAL-MART").CategoryName);
+        Assert.All(await All(c), t => Assert.Equal("Food", t.CategoryName)); // the Walmart charge you filed too
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -774,56 +759,4 @@ public class AutoCategorizeApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(40_00 + 30_00 - 25_00 - 10_00, after.Groups.SelectMany(g => g.Categories).Single(x => x.Name == "Groceries").SpentCents);
     }
 
-    [Fact]
-    public async Task What_a_rule_settled_stays_settled_when_everything_is_filed_again()
-    {
-        var c = await NewUserAsync();
-        var card = await AccountAsync(c, "CreditCard", "4321");
-        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,WAL-MART #1234,Shopping,Sale,-60.00,", "11/12/2026,11/13/2026,WAL-MART #1234,Shopping,Sale,-30.00,");
-        var groceries = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Groceries").Id;
-        var waiting = await Review(c);
-        await c.PatchAsJsonAsync($"/api/transactions/{waiting[0].Id}", new UpdateTransactionRequest(groceries, false, "WAL-MART"), Json);
-        Assert.Empty(await Review(c));
-
-        // Adding a category files everything again (DECISIONS.md 252): the purchase your rule settled doesn't come back.
-        (await c.PostAsJsonAsync("/api/budget/categories", new SmoothBudget.Api.Budget.CategoryRequest("Garden", CategoryType.Variable, 0), Json)).EnsureSuccessStatusCode();
-        Assert.Empty(await Review(c));
-        Assert.Equal(2, (await All(c)).Count(t => t.CategoryName == "Groceries"));
-
-        // A rule that now gives a different answer does bring it back: you haven't seen that one.
-        var shopping = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Shopping").Id;
-        using (var scope = app.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.CategoryRules.Single(r => r.Pattern == "WAL-MART" && r.CategoryId == groceries).CategoryId = shopping;
-            await db.SaveChangesAsync();
-        }
-        await c.PostAsync("/api/transactions/auto-categorize", null);
-        var back = Assert.Single(await Review(c)); // the other one is yours (you chose it), so it stays
-        Assert.Equal(("Shopping", "Rule"), (back.CategoryName, back.CategorySource));
-    }
-
-    [Fact]
-    public async Task A_rule_for_a_hidden_category_is_ignored()
-    {
-        var c = await NewUserAsync();
-        var card = await AccountAsync(c, "CreditCard", "4321");
-        await ImportAsync(c, card, ChaseCard, "11/10/2026,11/11/2026,OLD CLINIC PLAN,Health & Wellness,Sale,-44.00,");
-        var plan = (await (await c.PostAsJsonAsync("/api/budget/categories", new SmoothBudget.Api.Budget.CategoryRequest("Clinic plan", CategoryType.FixedBill, 44_00), Json))
-            .Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>(Json))!["id"]!.GetValue<Guid>();
-        var first = (await All(c)).Single(t => t.Merchant == "OLD CLINIC PLAN");
-        await c.PatchAsJsonAsync($"/api/transactions/{first.Id}", new UpdateTransactionRequest(plan, false, "OLD CLINIC PLAN"), Json);
-        using (var scope = app.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Categories.Single(x => x.Id == plan).IsHidden = true; // the bill was canceled and its line hidden; the rule is still there
-            await db.SaveChangesAsync();
-        }
-
-        // DECISIONS.md 252: the next charge isn't filed under the hidden line, where it would count nowhere.
-        await ImportAsync(c, card, ChaseCard, "11/14/2026,11/15/2026,OLD CLINIC PLAN,Health & Wellness,Sale,-44.00,");
-        var next = (await All(c)).Single(t => t.Merchant == "OLD CLINIC PLAN" && t.Date == new DateOnly(2026, 11, 14));
-        Assert.NotEqual("Clinic plan", next.CategoryName);
-        Assert.NotEqual("Rule", next.CategorySource);
-    }
 }

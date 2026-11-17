@@ -1,18 +1,18 @@
 // Bottom tab bar (DECISIONS.md 147, 206): five tabs with their names under the icons. Tasks holds everything waiting on
-// you (transactions, bills, pay period tasks); Plan the paycheck forecast with Debt and Savings; Friends and Settings live under More.
+// you (transactions, bills, pay period tasks); Money your Debit, Debt, Savings and Income; Friends and Settings live under More.
 import type { ReactNode } from 'react'
 
 import { icons } from './icons'
 import { bubbleStyle, bubbleText } from './theme'
 
-export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'debtinterest' | 'debtpayments' | 'savings' | 'savingshistory' | 'payday' | 'paysetup' | 'incomehistory' | 'more' | 'friends' | 'friend'
+export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'debit' | 'more' | 'friends' | 'friend'
 
 const tabs: { label: string; route: Route; icon: ReactNode; also: Route[] }[] = [
   { label: 'Home', route: 'home', icon: icons.home, also: ['transactions'] },
   { label: 'Budget', route: 'budget', icon: icons.budget, also: [] },
   { label: 'Tasks', route: 'tasks', icon: icons.tasks, also: ['review', 'paytasks'] },
-  // Income, Debt and Savings live under Plan; Friends under More.
-  { label: 'Plan', route: 'payday', icon: icons.payday, also: ['paysetup', 'incomehistory', 'debt', 'debtinterest', 'debtpayments', 'savings', 'savingshistory'] },
+  // Debit, Debt, Savings and Income live under Money (once Plan, DECISIONS.md 256); Friends under More.
+  { label: 'Money', route: 'payday', icon: icons.money, also: ['paysetup', 'debit', 'debt', 'savings'] },
   { label: 'More', route: 'more', icon: icons.more, also: ['friends', 'friend'] },
 ]
 

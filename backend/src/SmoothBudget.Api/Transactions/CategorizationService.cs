@@ -10,7 +10,6 @@ public sealed record FriendTransfers(Guid Id, string Name, string TransferName, 
 
 /// <summary>What categorization needs about one household, loaded once per import, sync or back-fill.</summary>
 public sealed class CategorizationContext(
-    IReadOnlyCollection<MerchantRule> rules,
     IReadOnlyDictionary<string, Guid> categoryIdsByName,
     IReadOnlyDictionary<string, MerchantHistory> history,
     IReadOnlyList<FriendTransfers> friends,
@@ -20,7 +19,7 @@ public sealed class CategorizationContext(
 
     public CategoryGuess Guess(Transaction t) => AutoCategorizer.Guess(
         new CategorizationInput(t.Merchant, t.BankCategory, t.BankCategoryPrimary, t.BankConfidence, t.Description),
-        rules, history.GetValueOrDefault(t.Merchant), CategoryIdsByName);
+        history.GetValueOrDefault(t.Merchant), CategoryIdsByName);
 
     /// <summary>
     /// Applies automatic decisions to one row: recognizes money to and from a friend (by the name on their transfers), files
@@ -83,6 +82,15 @@ public sealed class CategorizationContext(
                     (TransactionKind.PartnerContribution, null, CategorySource.None, false, false, null);
             return;
         }
+        // Interest a savings account paid you: most likely interest, counted nowhere (DECISIONS.md 259).
+        if (t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.Interest && LooksLikeInterestEarned(t))
+        {
+            if (t.Kind != TransactionKind.Interest) t.NeedsReview = true;
+            (t.Kind, t.CategoryId, t.CategorySource, t.CategoryUnsure, t.TransferAccountId, t.IncomeType) =
+                (TransactionKind.Interest, null, CategorySource.None, false, t.AccountId, null);
+            t.CategoryReason = "Looks like interest your account paid you.";
+            return;
+        }
         if (t.AmountCents < 0 && t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.PartnerTransfer)
         {
             // Your income. New deposits wait in Review for you to say what they are (DECISIONS.md 254, see AskAboutIncome);
@@ -129,6 +137,11 @@ public sealed class CategorizationContext(
             t.NeedsReview = true;
     }
 
+    private static bool LooksLikeInterestEarned(Transaction t) =>
+        t.BankCategory is "INCOME_INTEREST_EARNED" || t.BankCategoryPrimary is "INCOME_INTEREST_EARNED"
+        || System.Text.RegularExpressions.Regex.IsMatch($"{t.Merchant} {t.Description}", @"\bINTEREST (PAYMENT|PAID|EARNED|CREDIT)\b|\bINT(EREST)? PMT\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
     /// <summary>Money between you, waiting for a label: no category (so it counts nowhere), the suggestion pre-selected in Review.</summary>
     private static void Wait(Transaction t, PartnerSuggestion s)
     {
@@ -156,10 +169,6 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
 {
     public async Task<CategorizationContext> ContextAsync(Guid householdId, CancellationToken ct)
     {
-        // A rule for a category you've hidden is ignored (DECISIONS.md 252): it would file new charges where they count
-        // nowhere. It's kept, so it works again if you bring the category back.
-        var rules = await db.CategoryRules.Where(r => r.HouseholdId == householdId && !r.Category.IsHidden)
-            .Select(r => new MerchantRule(r.CategoryId, r.Pattern, r.CreatedUtc)).ToListAsync(ct);
         var shown = await db.Categories.Where(c => c.HouseholdId == householdId && !c.IsHidden)
             .Select(c => new { c.Name, c.Id, c.MergedNames }).ToListAsync(ct);
         var categories = shown.ToDictionary(c => c.Name, c => c.Id, StringComparer.OrdinalIgnoreCase);
@@ -186,7 +195,7 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
                         && t.CategoryId != null && t.Kind == TransactionKind.Purchase)
             .Select(t => new RecentPurchase(t.Date, t.Merchant, t.AmountCents, t.CategoryId!.Value))
             .ToListAsync(ct);
-        return new CategorizationContext(rules, categories, history, friends, recent);
+        return new CategorizationContext(categories, history, friends, recent);
     }
 
     /// <summary>Friends whose transfers are tracked, oldest first (so the first one added wins a tie).</summary>
@@ -236,12 +245,14 @@ public class CategorizationService(AppDbContext db, TimeProvider clock)
                 if (!TransactionRules.IsAutomatic(t.CategorySource))
                     continue;
                 var a = active.First(x => x.Id == s.ArrangementId);
+                // Already their contribution and not waiting: it stays settled (DECISIONS.md 259: only new ones are reviewed).
+                var settled = t.Kind == TransactionKind.PartnerContribution && !t.NeedsReview;
                 (t.Kind, t.CategoryId, t.SuggestedCategoryId) = (TransactionKind.PartnerContribution, null, null);
                 t.CategoryUnsure = s.State == ContributionState.DifferentAmount;
                 t.CategoryReason = s.State == ContributionState.Received
                     ? $"{first}'s contribution toward {a.Category.Name}."
                     : $"{first}'s contribution toward {a.Category.Name}: {Money(s.ReceivedCents)}, not the usual {Money(s.ExpectedCents)}.";
-                if (a.Friend.LabelsStartAfter is not { } start || t.Date > start)
+                if (!settled && (a.Friend.LabelsStartAfter is not { } start || t.Date > start))
                     t.NeedsReview = true; // still yours to confirm
             }
         }
@@ -383,9 +394,7 @@ public class CategoryDiscoveryService(AppDbContext db, CategorizationService cat
     {
         var categories = await db.Categories.Where(c => c.HouseholdId == householdId).ToListAsync(ct);
         var order = categories.Count == 0 ? 0 : categories.Max(c => c.SortOrder) + 1;
-        var rules = await db.CategoryRules.Where(r => r.HouseholdId == householdId).ToListAsync(ct);
-        var now = clock.GetUtcNow().UtcDateTime;
-        var moves = new List<(Guid From, string Pattern, Guid To)>();
+        var moves = new List<(Guid? From, string Pattern, Guid To, string Name)>();
         foreach (var n in req.Create)
         {
             var name = n.Name.Trim();
@@ -405,31 +414,27 @@ public class CategoryDiscoveryService(AppDbContext db, CategorizationService cat
                 categories.Add(c);
             }
 
-            // One bill per line: a merchant rule keeps future charges on this line, and the bill's past charges
-            // move out of the grouped category it's split from (the user asked for the split, so their own too).
+            // One bill per line: the bill's past charges move out of the grouped category it's split from (the user asked
+            // for the split, so their own too), so the most likely category for its next charges is this line (DECISIONS.md 259).
             var pattern = n.MerchantPattern?.Trim().ToUpperInvariant();
             if (string.IsNullOrEmpty(pattern) || pattern.Length > 100)
                 continue;
-            var rule = rules.FirstOrDefault(r => r.Pattern == pattern);
-            if (rule is null)
-            {
-                rule = new CategoryRule { Id = Guid.NewGuid(), HouseholdId = householdId, Pattern = pattern, CategoryId = c.Id, CreatedUtc = now };
-                db.CategoryRules.Add(rule);
-                rules.Add(rule);
-            }
-            else
-                rule.CategoryId = c.Id;
             var from = categories.FirstOrDefault(x => n.Replaces is not null && string.Equals(x.Name, n.Replaces, StringComparison.OrdinalIgnoreCase));
-            if (from is not null)
-                moves.Add((from.Id, pattern, c.Id));
+            moves.Add((from?.Id, pattern, c.Id, c.Name));
         }
         foreach (var c in categories.Where(c => req.HideIds.Contains(c.Id)))
             c.IsHidden = true;
         await db.SaveChangesAsync(ct);
-        foreach (var (fromId, pattern, toId) in moves) // after saving, so the new categories exist
+        // You asked for the merchant's own line, so its charges move there as your choice (DECISIONS.md 259): the ones in the
+        // grouped category, and the ones the app filed anywhere else. Their next charges follow from that.
+        foreach (var (fromId, pattern, toId, name) in moves) // after saving, so the new categories exist
             await db.Transactions
-                .Where(t => t.HouseholdId == householdId && t.CategoryId == fromId && t.Merchant.ToUpper().Contains(pattern))
-                .ExecuteUpdateAsync(s => s.SetProperty(t => t.CategoryId, toId), ct);
+                .Where(t => t.HouseholdId == householdId && !t.IsTransfer && t.Merchant.ToUpper().Contains(pattern) && t.AmountCents > 0
+                            && (t.CategoryId == fromId || t.CategorySource == CategorySource.None || t.CategorySource == CategorySource.Bank
+                                || t.CategorySource == CategorySource.Learned || t.CategorySource == CategorySource.Rule))
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.CategoryId, toId).SetProperty(t => t.CategorySource, CategorySource.User)
+                    .SetProperty(t => t.NeedsReview, false).SetProperty(t => t.CategoryUnsure, false)
+                    .SetProperty(t => t.CategoryReason, "You gave " + name + " its own line."), ct);
         return await categorization.RunAsync(householdId, ct);
     }
 }

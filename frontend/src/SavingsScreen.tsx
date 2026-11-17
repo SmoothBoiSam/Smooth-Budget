@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
 import { useResume } from './offline'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
+import { AccountsCard } from './Accounts'
 import { centsToInput, formatCents, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -66,7 +67,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
 
   return (
     <Page>
-      <PageHeader title="Savings" back={{ href: '#/payday', label: 'Plan' }} />
+      <PageHeader title="Savings" back={{ href: '#/payday', label: 'Money' }} />
       {notice && (
         <p role="status" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
           {notice}
@@ -78,6 +79,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
       {s && (
         <>
           <SavedCard s={s} />
+          <AccountsCard section="savings" />
 
           <section aria-labelledby="goals-h" className="mt-6">
             <h2 id="goals-h" className="px-1 text-sm font-semibold text-ink-soft">
@@ -181,7 +183,7 @@ function SavedCard({ s }: { s: SavingsSummary }) {
       <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.totalSavedCents)}</p>
       {s.accounts.length === 0 && <p className="mt-2 text-xs text-ink-soft">No savings account yet. Add it in More → Bank connections, or import its CSV.</p>}
       {chart && <SavingsChart points={points} />}
-      <CardLink href="#/savings/history">Savings transactions</CardLink>
+      <CardLink href="#/transactions?type=savings&back=savings">Savings transactions</CardLink>
     </section>
   )
 }

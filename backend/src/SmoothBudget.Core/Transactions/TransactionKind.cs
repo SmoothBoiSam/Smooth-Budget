@@ -23,6 +23,8 @@ public enum TransactionKind
     /// you say what it was for: then it becomes a refund in a category, her money in, or spending in a category.
     /// </summary>
     PartnerTransfer = 8,
+    /// <summary>Interest a savings account paid you (DECISIONS.md 259): not income, not spending, counted nowhere.</summary>
+    Interest = 9,
 }
 
 /// <summary>
@@ -34,7 +36,7 @@ public enum CategorySource
     None = 0,
     /// <summary>Mapped from the bank's own category (Plaid, or a CSV's category column).</summary>
     Bank = 1,
-    /// <summary>Matched a merchant rule.</summary>
+    /// <summary>Matched a merchant rule. Rules are gone (DECISIONS.md 259); old rows keep it and count as automatic.</summary>
     Rule = 2,
     /// <summary>Set by transfer detection (debt payment or savings transfer).</summary>
     Transfer = 3,

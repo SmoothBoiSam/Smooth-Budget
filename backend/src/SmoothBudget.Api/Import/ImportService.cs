@@ -151,7 +151,7 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
             await tx.CommitAsync(ct);
         }
         if (created.Any(t => t.NeedsReview && t.Kind == TransactionKind.Income))
-            await payday.MatchDepositsAsync(householdId, ct); // a paycheck leaves Review once it's matched to its pay date
+            await payday.MatchDepositsAsync(householdId, ct); // matched to its pay date, it's most likely a paycheck (still in Review)
 
         return new ImportResultDto(
             batch.Id, Describe(parsed.Format), batch.RowCount, created.Count, duplicates,

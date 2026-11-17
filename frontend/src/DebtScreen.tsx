@@ -4,6 +4,7 @@ import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type 
 import { useResume } from './offline'
 import { InterestCard } from './DebtInterest'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
+import { AccountsCard } from './Accounts'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -67,7 +68,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
   if (!saved) {
     return (
       <Page>
-        <PageHeader title="Debt" back={{ href: '#/payday', label: 'Plan' }} />
+        <PageHeader title="Debt" back={{ href: '#/payday', label: 'Money' }} />
         {error ? <ErrorNotice message={error} onRetry={() => void load()} /> : <Loading />}
       </Page>
     )
@@ -100,7 +101,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
 
   return (
     <Page>
-      <PageHeader title="Debt" back={{ href: '#/payday', label: 'Plan' }} />
+      <PageHeader title="Debt" back={{ href: '#/payday', label: 'Money' }} />
 
       {notice && (
         <p role="status" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-good">
@@ -155,6 +156,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
         <PayoffChart past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))} points={plan.chart} />
       )}
       <InterestCard />
+      <AccountsCard section="debt" />
 
       {plan && (
         <section aria-labelledby="plan-h" className="mt-4 rounded-3xl neu p-4">
@@ -456,7 +458,7 @@ function PayoffChart({ past, points: plan }: { past: { month: string; balanceCen
         )}
       </svg>
       {/* Past payments on their own page, like interest's (DECISIONS.md 240). */}
-      <CardLink href="#/debt/payments">Past payments</CardLink>
+      <CardLink href="#/transactions?type=debt&back=debt">Past payments</CardLink>
     </figure>
   )
 }

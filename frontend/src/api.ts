@@ -172,7 +172,7 @@ export interface Transaction {
   amountCents: number
   merchant: string
   description: string
-  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution' | 'PartnerTransfer'
+  kind: 'Purchase' | 'Refund' | 'Income' | 'Fee' | 'CardPayment' | 'Transfer' | 'Other' | 'PartnerContribution' | 'PartnerTransfer' | 'Interest'
   categoryId: string | null
   categoryName: string | null
   categorySource: 'None' | 'Bank' | 'Rule' | 'Transfer' | 'User' | 'Learned' | 'BestGuess'
@@ -194,6 +194,33 @@ export interface Transaction {
   /** While money between you waits for a label: the category the app suggests (counted nowhere). */
   suggestedCategoryId: string | null
   categoryReason: string | null
+  /** A transfer's other account, or the savings account that paid interest (DECISIONS.md 259). */
+  transferAccountId: string | null
+  transferAccountName: string | null
+  /** The card or loan a payment went to, or that charged interest. */
+  debtAccountId: string | null
+  debtAccountName: string | null
+}
+
+/** Everything the review and edit card's dropdowns offer (DECISIONS.md 259). */
+export interface TransactionChoices {
+  /** Your accounts: kind is checking, savings or card; a card's debt; a savings account's goals. */
+  accounts: { id: string; name: string; type: 'checking' | 'savings' | 'card'; debtId: string | null; goals: { id: string; name: string }[] }[]
+  /** Loans you track by hand (no bank account). */
+  loans: { id: string; name: string }[]
+  /** Every card and loan, for interest. */
+  debts: { id: string; name: string }[]
+  friends: { id: string; name: string }[]
+  bonuses: { id: string; name: string; amountCents: number; expectedDate: string; depositTransactionId: string | null }[]
+}
+
+/** How income is filed (DECISIONS.md 259): a new friend or bonus is created by name. */
+export interface MarkIncome {
+  as: IncomeKind | 'bonus'
+  friendId?: string
+  newFriendName?: string
+  expectedIncomeId?: string
+  newBonusName?: string
 }
 
 export interface ImportResult {
@@ -225,14 +252,6 @@ export interface ImportBatch {
   errorCount: number
 }
 
-export interface Rule {
-  id: string
-  pattern: string
-  categoryId: string
-  categoryName: string
-  createdUtc: string
-}
-
 async function upload<T>(path: string, form: FormData): Promise<T> {
   const res = await send(`/api${path}`, { method: 'POST', credentials: 'same-origin', body: form })
   if (!res.ok) {
@@ -257,6 +276,8 @@ export const budgetApi = {
   /** back = how many budget months before this one (0 = this month). */
   monthTransactions: (back = 0) =>
     request<{ from: string; to: string; items: Transaction[]; label: string | null }>('GET', back > 0 ? `/transactions?back=${back}` : '/transactions'),
+  /** One transaction, to open its edit pop-up (DECISIONS.md 258). */
+  transaction: (id: string) => request<Transaction>('GET', `/transactions/${id}`),
   /** The newest few transactions from any month, for Home (DECISIONS.md 171). */
   recent: (count = 5) => request<Transaction[]>('GET', `/transactions/recent?count=${count}`),
   /** Every transaction matching all the filters set (DECISIONS.md 164); newest first, up to 200, with the full count and total. */
@@ -268,34 +289,52 @@ export const budgetApi = {
     if (f.max) p.set('max', f.max)
     if (f.from) p.set('from', f.from)
     if (f.to) p.set('to', f.to)
+    if (f.type) p.set('type', f.type)
+    if (f.accountId) p.set('accountId', f.accountId)
+    if (f.accountType) p.set('accountType', f.accountType)
+    if (f.unconfirmed) p.set('unconfirmed', 'true')
+    if (f.debtId) p.set('debtId', f.debtId)
     return request<{ items: Transaction[]; total: number; netCents: number }>('GET', `/transactions/search?${p}`)
   },
   inbox: () => request<Transaction[]>('GET', '/transactions/inbox'),
   inboxCount: () => request<{ count: number; review: number }>('GET', '/transactions/inbox/count'),
   review: (scope: ReviewScope = 'month') => request<Transaction[]>('GET', `/transactions/review?scope=${scope}`),
   reviewSummary: () => request<ReviewSummary>('GET', '/transactions/review/summary'),
-  confirmLikely: (scope: ReviewScope | 'all') => request<{ confirmed: number }>('POST', '/transactions/review/confirm-likely', { scope }),
-  /** "I don't remember": keep the app's best guess, or file it under Other. */
-  bestGuess: (id: string) => request<Transaction>('POST', `/transactions/${id}/best-guess`),
-  bestGuessAll: (scope: ReviewScope | 'all') => request<{ settled: number }>('POST', '/transactions/review/best-guess', { scope }),
+  /** "Use most likely" (DECISIONS.md 259): settle these the way the app has them. */
+  mostLikely: (ids: string[]) => request<{ confirmed: number }>('POST', '/transactions/most-likely', { ids }),
+  /** "Use most likely for all", in one part of Review. */
+  mostLikelyAll: (scope: ReviewScope | 'all') => request<{ confirmed: number }>('POST', '/transactions/review/most-likely', { scope }),
+  choices: () => request<TransactionChoices>('GET', '/transactions/choices'),
+  /** A transfer to or from one of your accounts, a loan you track by hand, or (neither) an account not in Smooth Budget. */
+  transfer: (id: string, r: { accountId: string | null; loanId?: string | null; goalId?: string | null }) =>
+    request<{ transaction: Transaction; otherHalfFound: boolean }>('POST', `/transactions/${id}/transfer`, {
+      accountId: r.accountId,
+      loanId: r.loanId ?? null,
+      goalId: r.goalId ?? null,
+    }),
+  /** Interest charged by a card or loan (debtId), or paid by a savings account (accountId). */
+  interest: (id: string, r: { debtId?: string | null; accountId?: string | null }) =>
+    request<Transaction>('POST', `/transactions/${id}/interest`, { debtId: r.debtId ?? null, accountId: r.accountId ?? null }),
+  /** "Apply to all past transactions from this merchant": the ones not confirmed yet are filed like this one. */
+  applyToMerchant: (id: string) => request<{ applied: number }>('POST', `/transactions/${id}/apply-to-merchant`),
   context: (id: string) => request<TransactionContext>('GET', `/transactions/${id}/context`),
   confirmGuesses: (ids: string[]) => request<{ confirmed: number }>('POST', '/transactions/review/confirm', { ids }),
-  /** Money in is your income (DECISIONS.md 254): a paycheck, a friend's contribution (which friend), or other income. */
-  markIncome: (id: string, as: IncomeKind, friendId?: string) =>
-    request<Transaction>('POST', `/transactions/${id}/income`, { as, friendId: friendId ?? null }),
+  /** Money in is your income (DECISIONS.md 254, 259): a paycheck, a friend's money, a bonus, or other income. */
+  markIncome: (id: string, m: MarkIncome) =>
+    request<Transaction>('POST', `/transactions/${id}/income`, {
+      as: m.as,
+      friendId: m.friendId ?? null,
+      newFriendName: m.newFriendName ?? null,
+      expectedIncomeId: m.expectedIncomeId ?? null,
+      newBonusName: m.newBonusName ?? null,
+    }),
   autoCategorize: () => request<AutoCategorizeResult>('POST', '/transactions/auto-categorize'),
   suggestedCategories: () => request<SuggestedCategory[]>('GET', '/transactions/suggested-categories'),
-  updateTransaction: (
-    id: string,
-    categoryId: string | null,
-    isTransfer: boolean,
-    rulePattern: string | null,
-    extra: { partnerPurpose?: PartnerPurpose } = {},
-  ) =>
-    request<{ transaction: Transaction; ruleAppliedTo: number; billChargesMoved: number }>('PATCH', `/transactions/${id}`, {
+  updateTransaction: (id: string, categoryId: string | null, isTransfer: boolean, extra: { partnerPurpose?: PartnerPurpose } = {}) =>
+    request<{ transaction: Transaction; billChargesMoved: number }>('PATCH', `/transactions/${id}`, {
       categoryId,
       isTransfer,
-      rulePattern,
+      rulePattern: null,
       partnerPurpose: extra.partnerPurpose ?? null,
     }),
   importCsv: (accountId: string, file: File) => {
@@ -306,8 +345,6 @@ export const budgetApi = {
   },
   batches: () => request<ImportBatch[]>('GET', '/import/batches'),
   undoBatch: (id: string) => request<void>('DELETE', `/import/batches/${id}`),
-  rules: () => request<Rule[]>('GET', '/rules'),
-  deleteRule: (id: string) => request<void>('DELETE', `/rules/${id}`),
 }
 
 export type Health = 'onTrack' | 'low' | 'over'
@@ -902,9 +939,8 @@ export const recurringApi = {
   fileToward: (transactionId: string, kind: 'debt' | 'interest' | 'savings', id: string) =>
     request<{ towardName: string; categoryName: string }>('POST', `/transactions/${transactionId}/toward`, { kind, id }),
   billChoices: (transactionId: string) => request<ChargeBillChoices>('GET', `/recurring/for/${transactionId}`),
-  /** always: a merchant rule, so its charges go to this bill from now on (DECISIONS.md 254). */
-  fileAsBill: (body: { transactionId: string; billKey?: string; categoryId?: string; name?: string; always?: boolean }) =>
-    request<{ categoryId: string; categoryName: string; moved: number; ruleAppliedTo: number }>('POST', '/recurring/file-charge', body),
+  fileAsBill: (body: { transactionId: string; billKey?: string; categoryId?: string; name?: string }) =>
+    request<{ categoryId: string; categoryName: string; moved: number }>('POST', '/recurring/file-charge', body),
   update: (u: RecurringUpdate) => request<void>('PUT', '/recurring', u),
   trackAsBill: (key: string) => request<{ categoryId: string; name: string }>('POST', '/recurring/track-as-bill', { key }),
   /** File a bill's charges (past and future) under another category. */
@@ -1317,6 +1353,46 @@ export interface IncomeSummary {
   thisMonthCents: number
   toReview: number
 }
+/** A bonus or other income you said is coming (DECISIONS.md 256). Landed once a deposit matched it; late once it's 10 days past due. */
+export interface ExpectedIncome {
+  id: string
+  name: string
+  amountCents: number
+  expectedDate: string
+  landedDate: string | null
+  landedCents: number | null
+  late: boolean
+}
+
+/** Which accounts an Accounts card shows (DECISIONS.md 256): checking on Debit, cards on Debt, savings on Savings. */
+export type AccountKind = 'checking' | 'card' | 'savings'
+
+/** An account with its balance now, pending charges already taken off. Owed on a card is negative. */
+export interface AccountBalance {
+  id: string
+  name: string
+  type: string
+  mask: string | null
+  bankSynced: boolean
+  includedInBudget: boolean
+  balanceCents: number
+  pendingCents: number
+}
+
+/** Debit's Cash card (DECISIONS.md 257): every checking account's money now, and each day's close for the last 90 days. */
+export interface Cash {
+  totalCents: number
+  history: { date: string; balanceCents: number }[]
+}
+
+export const accountsApi = {
+  cash: () => request<Cash>('GET', '/accounts/cash'),
+  balances: (kind: AccountKind) => request<AccountBalance[]>('GET', `/accounts/balances?type=${kind}`),
+  /** Newest first, up to 200: every account of that kind, or just one. */
+  transactions: (kind: AccountKind, accountId?: string) =>
+    request<Transaction[]>('GET', `/accounts/transactions?type=${kind}${accountId ? `&accountId=${accountId}` : ''}`),
+}
+
 export interface IncomeItem {
   id: string
   date: string
@@ -1335,6 +1411,11 @@ export const paydayApi = {
   /** The Income page (DECISIONS.md 254): a year of income by month. */
   income: () => request<IncomeSummary>('GET', '/payday/income'),
   incomeTransactions: () => request<IncomeItem[]>('GET', '/payday/income/transactions'),
+  /** Income you expect apart from your paychecks, like a bonus (DECISIONS.md 256). */
+  expected: () => request<ExpectedIncome[]>('GET', '/payday/expected'),
+  addExpected: (name: string, amountCents: number, expectedDate: string) =>
+    request<ExpectedIncome[]>('POST', '/payday/expected', { name: name || null, amountCents, expectedDate }),
+  removeExpected: (id: string) => request<ExpectedIncome[]>('DELETE', `/payday/expected/${id}`),
   setDone: (payDate: string, key: string, done: boolean) =>
     request<void>('PUT', `/payday/plan/${payDate}/${encodeURIComponent(key)}`, { done }),
   setSkipped: (payDate: string, key: string, skipped: boolean) =>
@@ -1384,6 +1465,13 @@ export interface SearchFilters {
   max: string
   from: string
   to: string
+  /** What kind of transaction (DECISIONS.md 259); debt and savings are payments toward them. */
+  type: '' | 'spending' | 'bill' | 'income' | 'transfer' | 'interest' | 'debt' | 'savings'
+  accountId: string
+  /** checking, savings or card. */
+  accountType: string
+  unconfirmed: boolean
+  debtId: string
 }
 
 export interface NotificationType {

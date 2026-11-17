@@ -1,11 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Data;
-using SmoothBudget.Core.Budgeting;
 using SmoothBudget.Core.Transactions;
 
 namespace SmoothBudget.Api.Transactions;
 
-/// <summary>Runs <see cref="TransferDetector"/> over a date window of one household's transactions and saves the result.</summary>
+/// <summary>
+/// Runs <see cref="TransferDetector"/> over a date window of one household's transactions and saves the result. A newly
+/// found transfer is only the most likely answer (DECISIONS.md 259): it waits in Review like everything else, filed as a
+/// transfer with the account its other half is on, until you confirm one half. Then the other half follows on its own
+/// (<see cref="TransferFiling.CompleteAsync"/>), which this runs at the end too.
+/// </summary>
 public class TransferDetectionService(AppDbContext db)
 {
     /// <summary>Looks this far around imported dates so a payment can pair with a row from an earlier import.</summary>
@@ -22,39 +26,42 @@ public class TransferDetectionService(AppDbContext db)
         if (txns.Count == 0)
             return;
 
+        // Settled by you (or your best guess) is never changed. Still waiting is what can look like a transfer by amount alone.
+        static bool Locked(Transaction t) => t.CategorySource is CategorySource.User or CategorySource.BestGuess;
         var candidates = txns.Select(t => new TransferCandidate(
             t.Id, t.AccountId, ToKind(t.Account.Type), t.Date, t.AmountCents, t.Kind,
-            $"{t.Description} {t.Merchant}", t.TransferGroupId, t.CategorySource == CategorySource.User)).ToList();
+            $"{t.Description} {t.Merchant}", t.TransferGroupId, Locked(t),
+            Waiting: !Locked(t) && !t.IsTransfer && (t.NeedsReview || TransactionRules.NeedsCategory(t.CategoryId is not null, t.IsTransfer, t.Kind, t.AmountCents)))).ToList();
 
-        var categories = await db.Categories
-            .Where(c => c.HouseholdId == householdId && !c.IsHidden)
-            .OrderBy(c => c.SortOrder)
-            .Select(c => new { c.Id, c.Type })
-            .ToListAsync(ct);
-        var debtCategory = categories.FirstOrDefault(c => c.Type == CategoryType.DebtPayment)?.Id;
-        var savingsCategory = categories.FirstOrDefault(c => c.Type == CategoryType.SavingsTransfer)?.Id;
-
+        var filing = new TransferFiling(db, householdId);
         var byId = txns.ToDictionary(t => t.Id);
         foreach (var d in TransferDetector.Detect(candidates))
         {
             var t = byId[d.Id];
-            t.IsTransfer = true;
-            t.TransferGroupId = d.GroupId ?? t.TransferGroupId;
-            t.Kind = d.Role is TransferRole.CardPaymentSent or TransferRole.CardPaymentReceived
-                ? TransactionKind.CardPayment
-                : TransactionKind.Transfer;
-            t.CategoryId = d.Role switch
+            var wasTransfer = t.IsTransfer;
+            var waiting = t.NeedsReview;
+            if (wasTransfer && !waiting)
             {
-                // SPEC section 3: the card payment counts as a debt payment, not new spending.
-                TransferRole.CardPaymentSent => debtCategory,
-                TransferRole.OwnTransferOut when d.CounterpartAccount == AccountKind.Savings => savingsCategory,
-                _ => null,
-            };
+                // Settled already: its filing stays as it is, it only learns which account its other half is on.
+                t.TransferAccountId ??= d.CounterpartAccountId;
+                t.TransferGroupId = d.GroupId ?? t.TransferGroupId;
+                continue;
+            }
+            var name = await filing.FileAsync(t, d.CounterpartAccountId, null, null, create: false, ct);
+            if (d.Role is TransferRole.CardPaymentSent or TransferRole.CardPaymentReceived)
+                t.Kind = TransactionKind.CardPayment;
+            t.TransferGroupId = d.GroupId ?? t.TransferGroupId;
             t.CategorySource = t.CategoryId is null ? CategorySource.None : CategorySource.Transfer;
-            // Nothing is left from the guess it had as a purchase (DECISIONS.md 252): a transfer isn't waiting for review.
-            (t.NeedsReview, t.CategoryUnsure, t.SuggestedCategoryId, t.CategoryReason) = (false, false, null, null);
+            t.CategoryUnsure = false;
+            // New: the most likely answer, waiting for you. Already a transfer before: left as it was settled.
+            t.NeedsReview = wasTransfer ? waiting : true;
+            if (!wasTransfer || t.CategoryReason is null)
+                t.CategoryReason = d.CounterpartAccountId is null
+                    ? "Looks like a transfer between your accounts."
+                    : $"Looks like a transfer {(t.AmountCents > 0 ? "to" : "from")} {name}: the same amount {(t.AmountCents > 0 ? "landed there" : "left there")}.";
         }
         await db.SaveChangesAsync(ct);
+        await TransferFiling.CompleteAsync(db, householdId, ct);
     }
 
     public static AccountKind ToKind(AccountType type) => type switch

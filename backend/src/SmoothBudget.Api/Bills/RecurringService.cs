@@ -63,7 +63,7 @@ public record ChargeBillChoicesDto(IReadOnlyList<BillChoiceDto> Bills, IReadOnly
 /// <summary>A charge in review is a bill (DECISIONS.md 225, 230): <paramref name="BillKey"/> (it's that bill), or a new bill
 /// named <paramref name="Name"/>, in the bill category <paramref name="CategoryId"/> or, without one, a new bill category of its own.</summary>
 /// <param name="Always">Always file this merchant's charges under the bill (DECISIONS.md 254): a merchant rule, like "Always" on a category.</param>
-public record FileChargeAsBillRequest(Guid TransactionId, string? BillKey = null, Guid? CategoryId = null, string? Name = null, bool Always = false);
+public record FileChargeAsBillRequest(Guid TransactionId, string? BillKey = null, Guid? CategoryId = null, string? Name = null);
 /// <param name="Moved">Other charges that moved to that line with it.</param>
 public record FiledAsBillDto(Guid CategoryId, string CategoryName, int Moved, int RuleAppliedTo = 0);
 public record MoveBillRequest(string Key, Guid CategoryId);
@@ -257,7 +257,17 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
     public async Task<FiledAsBillDto?> FileChargeAsBillAsync(Guid householdId, FileChargeAsBillRequest req, CancellationToken ct)
     {
         var t = await db.Transactions.SingleOrDefaultAsync(x => x.Id == req.TransactionId && x.HouseholdId == householdId, ct);
-        if (t is null || t.IsTransfer) return null;
+        if (t is null) return null;
+        if (t.IsTransfer)
+        {
+            // The app thought it was a transfer; you say it's a bill (DECISIONS.md 259).
+            await Transactions.TransferFiling.UnpairAsync(db, t, ct);
+            (t.IsTransfer, t.TransferAccountId, t.DebtAccountId) = (false, null, null);
+            if (t.Kind is TransactionKind.CardPayment or TransactionKind.Transfer)
+                t.Kind = t.AmountCents > 0 ? TransactionKind.Purchase : TransactionKind.Refund;
+        }
+        if (t.Kind is TransactionKind.Income or TransactionKind.PartnerContribution or TransactionKind.Interest)
+            (t.Kind, t.IncomeType, t.FriendId, t.IsPartnerTransfer, t.TransferAccountId) = (t.AmountCents > 0 ? TransactionKind.Purchase : TransactionKind.Refund, null, null, false, null);
         var items = (await ItemsAsync(householdId, ct)).Where(i => !i.Dismissed).ToList();
         var own = items.FirstOrDefault(i => i.Series.TransactionIds.Contains(t.Id));
 
@@ -307,11 +317,9 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         else if (own is not null)
             await FileUnderAsync(householdId, own, cat.Id, reason, ct);
         await KeepBillsTogetherAsync(householdId, ct, t.Id);
-        var ruled = req.Always && Transactions.TransactionEndpoints.NormalizePattern(t.Merchant) is { } pattern
-            ? await Transactions.TransactionEndpoints.AlwaysAsync(db, householdId, pattern, cat.Id, t.Id, clock, ct) : 0;
 
         var after = await db.Transactions.CountAsync(x => x.HouseholdId == householdId && x.CategoryId == cat.Id && x.Id != t.Id, ct);
-        return new FiledAsBillDto(cat.Id, cat.Name, Math.Max(0, after - before), ruled);
+        return new FiledAsBillDto(cat.Id, cat.Name, Math.Max(0, after - before), 0);
     }
 
     /// <summary>
@@ -383,13 +391,6 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
     {
         var s = item.Series;
         var key = item.Dto.Key;
-        if (item.Dto.MerchantWide)
-        {
-            var rule = await db.CategoryRules.SingleOrDefaultAsync(r => r.HouseholdId == householdId && r.Pattern == s.MerchantKey, ct);
-            if (rule is null)
-                db.CategoryRules.Add(rule = new CategoryRule { Id = Guid.NewGuid(), HouseholdId = householdId, Pattern = s.MerchantKey, CreatedUtc = clock.GetUtcNow().UtcDateTime });
-            rule.CategoryId = categoryId;
-        }
         var ids = (only ?? s.TransactionIds).ToList();
         await db.Transactions.Where(t => t.HouseholdId == householdId && ids.Contains(t.Id))
             .ExecuteUpdateAsync(u => u

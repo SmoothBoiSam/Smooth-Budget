@@ -14,6 +14,7 @@ using SmoothBudget.Api.Plaid;
 using SmoothBudget.Core.Security;
 using SmoothBudget.Api.Seeding;
 using SmoothBudget.Api.Transactions;
+using SmoothBudget.Api.Accounts;
 
 // Local development reads secrets from the git-ignored .env at the repo root. In CI and hosting,
 // real environment variables are used instead and no .env file exists.
@@ -182,6 +183,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
 app.MapDemoEndpoints();
 app.MapImportEndpoints();
+app.MapAccountBalanceEndpoints();
 app.MapTransactionEndpoints();
 app.MapBudgetEndpoints();
 app.MapPlaidEndpoints();

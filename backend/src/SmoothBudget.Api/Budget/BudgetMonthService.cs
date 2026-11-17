@@ -56,11 +56,63 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
     }
 
     /// <summary>Makes sure rows exist up to the current month and closes months past their grace period. Returns the current month's row.</summary>
+    /// <remarks>
+    /// Screens load at once, so several requests can find the same month to create, freeze or close. That work runs one
+    /// request at a time per household, under a lock (DECISIONS.md 260); the usual case, nothing to do, takes no lock.
+    /// </remarks>
     public async Task<BudgetMonth> EnsureCurrentAsync(Guid householdId, CancellationToken ct)
     {
         var (_, today, calendar) = await ContextAsync(householdId, ct);
         var current = calendar.MonthContaining(today);
+        if (!await NeedsWorkAsync(householdId, current, today, ct))
+            return await db.BudgetMonths.SingleAsync(m => m.HouseholdId == householdId && m.StartDate == current.Start, ct);
+        BudgetMonth result = null!;
+        await InMonthLockAsync(householdId, async () => result = await EnsureCurrentLockedAsync(householdId, today, calendar, current, ct), ct);
+        return result;
+    }
 
+    /// <summary>Whether a month is missing, has ended without its limits frozen, or is past its grace period and still open.</summary>
+    private async Task<bool> NeedsWorkAsync(Guid householdId, BudgetMonthRange current, DateOnly today, CancellationToken ct)
+    {
+        var months = await db.BudgetMonths.AsNoTracking().Where(m => m.HouseholdId == householdId)
+            .Select(m => new
+            {
+                m.StartDate, m.EndDate, m.ClosedUtc,
+                Frozen = db.BudgetMonthCategories.Any(x => x.BudgetMonthId == m.Id && x.ClosingLimitCents != null),
+            })
+            .ToListAsync(ct);
+        if (!months.Any(m => m.StartDate == current.Start) || months.Max(m => m.StartDate) < current.Start)
+            return true;
+        return months.Any(m => (m.EndDate < today && !m.Frozen) || (m.ClosedUtc == null && m.EndDate.DayNumber < today.DayNumber - GraceDays));
+    }
+
+    /// <summary>
+    /// Runs month work one request at a time for this household: a Postgres lock held until the transaction ends, so a
+    /// second request waits, then finds the work done. Inside a transaction already, it takes the lock in that one.
+    /// </summary>
+    private async Task InMonthLockAsync(Guid householdId, Func<Task> work, CancellationToken ct)
+    {
+        var key = BitConverter.ToInt64(householdId.ToByteArray(), 0) ^ MonthLockSalt;
+        if (db.Database.CurrentTransaction is not null)
+        {
+            await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({key})", ct);
+            await work();
+            return;
+        }
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({key})", ct);
+        await work();
+        await tx.CommitAsync(ct);
+    }
+
+    /// <summary>Keeps these locks apart from any other advisory lock keyed by a household.</summary>
+    private const long MonthLockSalt = 0x4255_444D_4F4E_5448;
+
+    private async Task<BudgetMonth> EnsureCurrentLockedAsync(Guid householdId, DateOnly today, BudgetMonthCalendar calendar, BudgetMonthRange current, CancellationToken ct)
+    {
+        // Rows this request read before the lock may be stale: another request may just have closed them.
+        foreach (var e in db.ChangeTracker.Entries<BudgetMonth>().Where(e => e.State == EntityState.Unchanged && e.Entity.HouseholdId == householdId).ToList())
+            await e.ReloadAsync(ct);
         var rows = await db.BudgetMonths.Where(m => m.HouseholdId == householdId).OrderBy(m => m.StartDate).ToListAsync(ct);
         if (rows.Count == 0)
         {
@@ -86,7 +138,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
             await FreezeLimitsAsync(householdId, row, ct);
 
         foreach (var row in rows.Where(r => r.ClosedUtc is null && r.EndDate.DayNumber < today.DayNumber - GraceDays))
-            await CloseAsync(householdId, row, ct);
+            await CloseLockedAsync(householdId, row, ct);
 
         return rows.Single(r => r.StartDate == current.Start);
     }
@@ -225,7 +277,15 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
     }
 
     /// <summary>Freezes a month that has ended: its result, each category's limit and spending, and its sweep items.</summary>
-    public async Task CloseAsync(Guid householdId, BudgetMonth row, CancellationToken ct)
+    public Task CloseAsync(Guid householdId, BudgetMonth row, CancellationToken ct) =>
+        InMonthLockAsync(householdId, async () =>
+        {
+            if (db.Entry(row).State == EntityState.Unchanged)
+                await db.Entry(row).ReloadAsync(ct); // closed by another request while this one waited
+            await CloseLockedAsync(householdId, row, ct);
+        }, ct);
+
+    private async Task CloseLockedAsync(Guid householdId, BudgetMonth row, CancellationToken ct)
     {
         if (row.ClosedUtc is not null)
             return;

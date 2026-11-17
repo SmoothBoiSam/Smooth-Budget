@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ApiError, paydayApi, type IncomeItem, type IncomeKind, type IncomeMonth, type IncomeSummary } from './api'
-import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
-import { formatCents, formatDay, titleCase } from './format'
+import { useCallback, useEffect, useState } from 'react'
+import { ApiError, paydayApi, type ExpectedIncome, type IncomeKind, type IncomeMonth, type IncomeSummary } from './api'
+import { ask } from './confirm'
+import { CardLink } from './ui'
+import { formatCents, formatDay, parseDollars } from './format'
 
 const shortMonth = (iso: string) => new Date(iso.slice(0, 7) + '-01T12:00:00').toLocaleDateString('en-US', { month: 'short' })
 const longMonth = (ym: string) => new Date(ym + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -13,9 +14,6 @@ const series: { kind: IncomeKind; key: 'paycheckCents' | 'friendCents' | 'otherC
   { kind: 'other', key: 'otherCents', label: 'Other', color: 'var(--color-chart-other)' },
 ]
 const total = (m: IncomeMonth) => m.paycheckCents + m.friendCents + m.otherCents
-
-const incomeKindLabel = (i: { kind: IncomeKind; friendName: string | null }) =>
-  i.kind === 'paycheck' ? 'Paycheck' : i.kind === 'friend' ? (i.friendName ? `From ${i.friendName}` : 'Friend’s contribution') : 'Other income'
 
 /**
  * The Income card at the top of the Income page (DECISIONS.md 254), like Debt's and Savings' cards: what's come in this
@@ -35,7 +33,7 @@ export function IncomeCard({ s }: { s: IncomeSummary }) {
         </a>
       )}
       {chart ? <IncomeChart months={s.months} /> : <p className="mt-2 text-xs text-ink-soft">No income seen yet. It shows here once your checking account syncs.</p>}
-      <CardLink href="#/income/history">Past income</CardLink>
+      <CardLink href="#/transactions?type=income&back=income">Past income</CardLink>
     </section>
   )
 }
@@ -167,82 +165,131 @@ function shortMoney(cents: number) {
 
 /**
  * Income → Past income (DECISIONS.md 254): every income deposit, newest first, by month with each month's total, and what
- * each one counted as. To change one, open it from Home or the Budget tab's transactions.
+ * each one counted as. Tap one to change it (DECISIONS.md 258): a paycheck, other income, a friend's money, or not income at
+ * all (a refund, a transfer), in the same pop-up as anywhere else.
  */
-export default function IncomeHistoryScreen({ onSignedOut }: { onSignedOut: () => void }) {
-  const [items, setItems] = useState<IncomeItem[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+const fieldCls = 'mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base'
 
-  const load = useCallback(
-    () =>
-      paydayApi
-        .incomeTransactions()
-        .then((x) => {
-          setItems(x)
-          setError(null)
-        })
-        .catch((e) => {
-          if (e instanceof ApiError && e.status === 401) return onSignedOut()
-          setError(e instanceof Error ? e.message : 'Something went wrong.')
-        }),
+/**
+ * Income → Bonus income (DECISIONS.md 256): a bonus or other pay you expect apart from your checks. Until it lands, the
+ * budget month it's due in counts it with your paychecks; once a deposit matches it, the deposit counts instead.
+ */
+export function BonusIncome({ onSignedOut }: { onSignedOut: () => void }) {
+  const [items, setItems] = useState<ExpectedIncome[] | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [amount, setAmount] = useState('')
+  const [date, setDate] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ good: boolean; text: string } | null>(null)
+
+  const fail = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.status === 401) return onSignedOut()
+      setMessage({ good: false, text: e instanceof Error ? e.message : 'Something went wrong.' })
+    },
     [onSignedOut],
   )
   useEffect(() => {
-    void load()
-  }, [load])
+    paydayApi.expected().then(setItems).catch(fail)
+  }, [fail])
 
-  const byMonth = useMemo(() => {
-    const groups: { month: string; total: number; items: IncomeItem[] }[] = []
-    for (const t of items ?? []) {
-      const month = t.date.slice(0, 7)
-      const g = groups.at(-1)
-      if (g && g.month === month) {
-        g.items.push(t)
-        g.total += t.cents
-      } else groups.push({ month, total: t.cents, items: [t] })
+  async function save(e: React.FormEvent) {
+    e.preventDefault()
+    const cents = parseDollars(amount)
+    if (!cents) return setMessage({ good: false, text: 'Enter what you expect to take home, after taxes.' })
+    if (!date) return setMessage({ good: false, text: 'Pick the day you expect it.' })
+    setBusy(true)
+    try {
+      setItems(await paydayApi.addExpected(name.trim(), cents, date))
+      setMessage({ good: true, text: `Added. Your budget now counts ${formatCents(cents)} coming ${formatDay(date)}.` })
+      setAdding(false)
+      setName('')
+      setAmount('')
+      setDate('')
+    } catch (err) {
+      fail(err)
+    } finally {
+      setBusy(false)
     }
-    return groups
-  }, [items])
+  }
+
+  async function remove(x: ExpectedIncome) {
+    const landed = x.landedDate !== null
+    if (!(await ask(landed ? `Remove ${x.name}? The deposit stays as other income.` : `Remove ${x.name}? Your budget stops counting it.`, { yes: 'Remove', danger: true }))) return
+    try {
+      setItems(await paydayApi.removeExpected(x.id))
+      setMessage({ good: true, text: `${x.name} removed.` })
+    } catch (err) {
+      fail(err)
+    }
+  }
 
   return (
-    <Page>
-      <PageHeader title="Past income" back={{ href: '#/income', label: 'Income' }} />
-      {!items ? (
-        error ? (
-          <ErrorNotice message={error} onRetry={() => void load()} />
-        ) : (
-          <Loading shape="list" />
-        )
-      ) : byMonth.length === 0 ? (
-        <p className="mt-4 rounded-3xl neu px-5 py-4 text-sm text-ink-soft">No income yet.</p>
-      ) : (
-        <>
-          <p className="mt-4 px-1 text-xs text-ink-faint">To change what one counts as, open it from Home or the Budget tab’s transactions.</p>
-          {byMonth.map((g) => (
-            <section key={g.month} className="mt-5">
-              <h2 className="flex items-baseline justify-between px-1 text-sm font-semibold text-ink-soft">
-                <span>{longMonth(g.month)}</span>
-                <span className="tabular-nums text-good">{formatCents(g.total)}</span>
-              </h2>
-              <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-3xl neu">
-                {g.items.map((t) => (
-                  <li key={t.id} className="flex items-center gap-3 px-5 py-3">
-                    <span aria-hidden className="size-2.5 shrink-0 rounded-sm" style={{ background: series.find((s) => s.kind === t.kind)!.color }} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{titleCase(t.description)}</p>
-                      <p className="truncate text-xs text-ink-faint">
-                        {formatDay(t.date)} · {incomeKindLabel(t)}
-                        {t.needsReview ? ' · waiting in Tasks' : ''}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums text-good">+{formatCents(t.cents)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
+    <>
+      {items && items.length > 0 && (
+        <ul className="mb-3 divide-y divide-ink/[0.07] overflow-hidden rounded-3xl neu">
+          {items.map((x) => (
+            <li key={x.id} className="flex items-center gap-3 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{x.name}</p>
+                <p className={`text-xs ${x.late ? 'text-gold-ink' : x.landedDate ? 'text-good' : 'text-ink-faint'}`}>
+                  {x.landedDate
+                    ? `Landed ${formatDay(x.landedDate)}: ${formatCents(x.landedCents ?? 0)}`
+                    : x.late
+                      ? `Expected ${formatDay(x.expectedDate)}, not seen yet. Your budget stopped counting it.`
+                      : `Expected ${formatDay(x.expectedDate)} · counted in your budget`}
+                </p>
+              </div>
+              <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCents(x.amountCents)}</span>
+              <button type="button" onClick={() => void remove(x)} aria-label={`Remove ${x.name}`} className="shrink-0 px-1 text-lg leading-none text-ink-faint">
+                ×
+              </button>
+            </li>
           ))}
-        </>
+        </ul>
       )}
-    </Page>
+      {message && (
+        <p role="status" className={`mb-3 rounded-2xl neu-inset px-4 py-3 text-sm ${message.good ? 'text-good' : 'text-danger'}`}>
+          {message.text}
+        </p>
+      )}
+      {adding ? (
+        <form onSubmit={(e) => void save(e)} className="rounded-3xl neu p-5">
+          <label className="block">
+            <span className="text-sm font-medium text-ink-soft">What you expect to take home</span>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="$0.00" className={fieldCls} autoFocus />
+          </label>
+          <p className="mt-1 text-xs text-ink-faint">After taxes: what you think will land in your account.</p>
+          <label className="mt-4 block">
+            <span className="text-sm font-medium text-ink-soft">When you expect it</span>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={fieldCls} />
+          </label>
+          <label className="mt-4 block">
+            <span className="text-sm font-medium text-ink-soft">Name (optional)</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={100} placeholder="Bonus" className={fieldCls} />
+          </label>
+          <div className="mt-5 flex gap-3">
+            <button type="button" onClick={() => setAdding(false)} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-danger">
+              Cancel
+            </button>
+            <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-ink shadow-neu-sm disabled:opacity-50">
+              {busy ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setAdding(true)
+            setMessage(null)
+          }}
+          className="block w-full rounded-2xl neu py-3 text-center text-sm font-medium"
+        >
+          Add bonus income
+        </button>
+      )}
+    </>
   )
 }

@@ -79,6 +79,34 @@ export const icons = {
       ))}
     </>,
   ),
+  /** A bank with a coin in its roof: Debit, your checking accounts (DECISIONS.md 256). */
+  debit: art(
+    <>
+      {outlined(
+        <>
+          <path d="M16 3.5 28.5 10.5v1.5h-25v-1.5z" fill={C.body} />
+          {[6, 11.5, 17.5, 23].map((x) => (
+            <rect key={x} x={x} y="13.5" width="3" height="10" rx="1" fill={C.body} />
+          ))}
+          <rect x="3.5" y="24.5" width="25" height="4" rx="1.4" fill={C.body} />
+        </>,
+      )}
+      <circle cx="16" cy="8.6" r="2.3" fill={C.coin} stroke={C.coinRim} strokeWidth={0.9} />
+      <rect x="5.5" y="25.8" width="21" height="1.4" rx="0.7" fill={C.ring} />
+    </>,
+  ),
+  /** A wallet with a coin peeking out: the Money tab, once Plan (DECISIONS.md 256). */
+  money: art(
+    <>
+      {outlined(<circle cx="12" cy="9" r="5.6" fill={C.coinRim} />)}
+      <circle cx="12" cy="9" r="4.3" fill={C.coin} />
+      <path d="M12 6.8v3.6" stroke={C.dollar} strokeWidth={1.4} strokeLinecap="round" />
+      {outlined(<rect x="3" y="11" width="25" height="17" rx="4" fill={C.body} />)}
+      <path d="M3 15h25" stroke={C.ring} strokeWidth={1.6} />
+      <rect x="19" y="17" width="11" height="7.5" rx="2.5" fill={C.ring} stroke="#fff" strokeWidth={1.2} />
+      <circle cx="23.5" cy="20.75" r="1.7" fill={C.blush} />
+    </>,
+  ),
   payday: art(
     <>
       {outlined(
