@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ApiError, api, budgetApi, plaidApi, type BankUpdate, type CashCheck, type Category, type HomeSummary, type Me, type PickUp, type Transaction } from './api'
 import { TransactionList } from './BudgetScreen'
 import { TransactionEditSheet } from './ReviewScreen'
@@ -318,15 +318,41 @@ function SpendingRows({ items }: { items: NonNullable<HomeSummary['spending']> }
   )
 }
 
-/** About how many ems wide an amount is in bold tabular figures: digits and signs full width, commas and points narrow. */
-const fitWidthEms = (text: string) => [...text].reduce((n, ch) => n + (ch === ',' || ch === '.' ? 0.3 : 0.6), 0.1)
+/**
+ * A font size that fits `text` in `box` (DECISIONS.md 262): `maxPx` while it fits, smaller when it doesn't. It measures
+ * the text in a hidden copy at `maxPx` in the real font, again when the box resizes and once the web fonts load, so
+ * it's right on every phone; a guess at glyph widths ran past the ring on an iPhone.
+ */
+function useFitText(text: string, maxPx: number) {
+  const box = useRef<HTMLDivElement>(null)
+  const probe = useRef<HTMLSpanElement>(null)
+  const [size, setSize] = useState(maxPx)
+  useLayoutEffect(() => {
+    const b = box.current
+    if (!b) return
+    const fit = () => {
+      const p = probe.current
+      if (!p) return // gone already
+      const room = b.clientWidth * 0.9 // a little air between the amount and the ring
+      const wide = p.getBoundingClientRect().width
+      setSize(wide > room && wide > 0 ? Math.max(12, Math.floor((maxPx * room * 10) / wide) / 10) : maxPx)
+    }
+    fit()
+    const watch = new ResizeObserver(fit)
+    watch.observe(b)
+    document.fonts?.ready.then(fit).catch(() => undefined)
+    return () => watch.disconnect()
+  }, [text, maxPx])
+  return { box, probe, size }
+}
 
 /** Left to Spend in a pressed-in well, with a ring for the share of the variable budget still left. */
 function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShownLeft> }) {
   const style = levels[shown.level]
   // The amount fits inside the ring (DECISIONS.md 262): full size while it fits, smaller for a big one (a bonus on the way).
   // Sized from the final amount, so the count-up doesn't change size as it runs.
-  const fit = fitWidthEms(formatCents(s.leftToSpendCents))
+  const amount = formatCents(s.leftToSpendCents)
+  const { box: fitBox, probe: fitProbe, size: fitSize } = useFitText(amount, 36)
   const r = 88
   const arc = 2 * Math.PI * r * 0.75 // a three-quarter ring, open at the bottom
   return (
@@ -361,7 +387,13 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
             ))}
         </g>
       </svg>
-      <div className="@container relative w-[76%] text-center">
+      <div ref={fitBox} className="relative w-[76%] text-center">
+        {/* The final amount at full size, measured but never seen. */}
+        <span aria-hidden className="pointer-events-none invisible absolute top-0 left-0 size-0 overflow-hidden">
+          <span ref={fitProbe} className="inline-block font-bold tracking-tight whitespace-nowrap tabular-nums" style={{ fontSize: 36 }}>
+            {amount}
+          </span>
+        </span>
         <div className="relative mx-auto size-16">
           {(['plenty', 'getting-low', 'near-zero'] as const).map((l) => {
             const on = (shown.level === 'over' ? 'near-zero' : shown.level) === l
@@ -382,8 +414,8 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
         <p
           data-testid="left-to-spend"
           className="font-bold leading-tight tracking-tight whitespace-nowrap tabular-nums"
-          style={{ fontSize: `min(2.25rem, calc(100cqi / ${fit.toFixed(2)}))` }}
-          aria-label={formatCents(s.leftToSpendCents)}
+          style={{ fontSize: fitSize }}
+          aria-label={amount}
         >
           {formatCents(shown.left)}
         </p>
