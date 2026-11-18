@@ -368,6 +368,36 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public void Until_payday_is_the_budgets_share_held_to_what_checking_can_spare()
+    {
+        // DECISIONS.md 264. Nov 17, living on the Nov 6 check; the next is Nov 23, 6 days away, and the month has 20 left.
+        var today = new DateOnly(2026, 11, 17);
+        var month = new SmoothBudget.Core.Budgeting.BudgetMonthRange(new DateOnly(2026, 11, 6), new DateOnly(2026, 12, 6), new DateOnly(2026, 11, 1));
+        static CheckDto Check(DateOnly pay, bool current, long? spare) => new(pay, pay.AddDays(-14), pay.AddDays(-1), true, 0, 0, 0, 0, 0, false, [], [], [], [], [],
+            current ? new PlanDto([], 0, SpareCents: spare) : null, IsCurrent: current);
+        SmoothBudget.Core.Budgeting.LeftToSpendResult Month(long left, long perDay) =>
+            new(month, today, left, 900_00, 0, 0, 0, 0, 20, perDay, left < 0 ? SmoothBudget.Core.Budgeting.LeftToSpendStatus.Overspent : SmoothBudget.Core.Budgeting.LeftToSpendStatus.Healthy, 0, []);
+        UntilPaydayDto? Until(long? spare, long left = 1_200_00, long perDay = 60_00, int nextIn = 6) =>
+            HomeSummaryService.UntilPayday([Check(new DateOnly(2026, 11, 6), true, spare), Check(today.AddDays(nextIn), false, null)], today, Month(left, perDay));
+
+        // $60 a day for 6 days is $360, held to the $200 checking can spare.
+        var u = Until(200_00)!;
+        Assert.Equal((new DateOnly(2026, 11, 23), 6, 200_00L, 360_00L, (long?)200_00), (u.PayDate, u.Days, u.Cents, u.BudgetCents, u.SpareCents));
+        // DECISIONS.md 266: the ring is out of this pay period's share of the $900 of limits (17 of the month's 31 days),
+        // and the status is the period's: $200 of $493.54 is on track; under 15% of it is low; short accounts are over.
+        Assert.Equal((493_54L, "healthy"), (u.PeriodBudgetCents, u.Status));
+        Assert.Equal("low", Until(70_00)!.Status);
+        Assert.Equal("low", Until(0)!.Status);
+        Assert.Equal("overspent", Until(-50_00)!.Status);
+        Assert.Equal("overspent", Until(null, left: -10_00)!.Status);
+        Assert.Equal(360_00, Until(5_000_00)!.Cents); // plenty in checking: the budget's share
+        Assert.Equal(0, Until(-50_00)!.Cents); // already short: zero, never below
+        Assert.Equal(360_00, Until(null)!.Cents); // checking not synced: the budget's share
+        Assert.Equal(100_00, Until(null, left: 100_00)!.Cents); // never more than Left to Spend
+        Assert.Null(Until(200_00, nextIn: 20)); // payday after the month ends: Left to Spend is the number
+    }
+
+    [Fact]
     public async Task A_check_keeps_money_for_the_next_one_when_that_one_cannot_cover_its_bills()
     {
         // Feb 24, 2027: living on the Feb 22 check; the next is Mar 8, and rent is due Mar 10.
@@ -414,10 +444,48 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal((0L, 300_00L, new DateOnly(2027, 2, 22)), (next.Plan!.ShortCents, next.Plan.HeldEarlierCents, next.Plan.HeldOn!.Value));
         Assert.DoesNotContain(next.Plan.Items, i => i.Kind == "hold" && i.Cents == 0);
 
+        // DECISIONS.md 264: checking can spare its balance less the $300 it keeps for the Mar 8 check's bills (rent is
+        // after Mar 8, so nothing is due before it), and less a charge still pending.
+        Assert.Equal(1_700_00L, now.Plan.SpareCents);
+        Assert.Null(next.Plan.SpareCents);
+        var pendingId = Guid.NewGuid();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.Add(new Transaction
+            {
+                Id = pendingId, HouseholdId = me.HouseholdId, AccountId = checkingId, Date = new DateOnly(2027, 2, 24), AmountCents = 50_00, Merchant = "TEST SHOP",
+                Description = "TEST", Kind = TransactionKind.Purchase, Pending = true, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(1_650_00L, (await Payday(c)).Checks[0].Plan!.SpareCents);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Transactions.Where(t => t.Id == pendingId).ExecuteDeleteAsync();
+        }
+
+        // DECISIONS.md 263: a bonus expected with the Mar 8 check counts toward it, so this check keeps only what's still
+        // missing, and nothing once the bonus covers it all.
+        var added = await c.PostAsJsonAsync("/api/payday/expected", new { name = "Test bonus", amountCents = 200_00, expectedDate = "2027-03-09" }, Json);
+        added.EnsureSuccessStatusCode();
+        hold = (await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "hold");
+        Assert.Equal(100_00, hold.Cents);
+        Assert.Contains("plus Test bonus $200.00 expected Mar 9", hold.Why);
+        await c.PostAsJsonAsync("/api/payday/expected", new { name = "Test bonus 2", amountCents = 500_00, expectedDate = "2027-03-12" }, Json);
+        p = await Payday(c);
+        Assert.DoesNotContain(p.Checks[0].Plan!.Items, i => i.Kind == "hold");
+        Assert.Equal(0L, p.Checks[1].Plan!.ShortCents);
+        foreach (var x in (await c.GetFromJsonAsync<List<SmoothBudget.Api.Payday.ExpectedIncomeDto>>("/api/payday/expected", Json))!)
+            await c.DeleteAsync($"/api/payday/expected/{x.Id}");
+        Assert.Equal(300_00, (await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "hold").Cents);
+
         // Spent down: the task is open again, and says how far short the account is.
         await BalanceAsync(100_00);
         hold = (await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "hold");
         Assert.Equal((false, "Test Checking has $100.00: $200.00 short of this."), (hold.Done, hold.Status));
+        Assert.Equal(-200_00L, (await Payday(c)).Checks[0].Plan!.SpareCents);
 
         // On Mar 9 you're on the Mar 8 check. The money you kept is in the account, so it isn't short; with the account
         // empty, it's short what the check itself can't cover.

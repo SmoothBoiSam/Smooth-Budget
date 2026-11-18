@@ -375,7 +375,7 @@ function Group({
           const items = live.filter((b) => b.categoryId === c.id)
           return (
             <li key={c.id}>
-              <a href={planHref ?? `#/budget/c/${c.id}`} className="block px-4 py-3">
+              <a href={planHref ?? `#/budget/c/${c.id}`} className="block px-4 py-1.5">
                 {c.partOfCardPayments ? (
                   <InterestRow line={c} />
                 ) : (
@@ -412,7 +412,7 @@ function BillItems({
 }) {
   const [open, setOpen] = useRemembered(`budget.items.${lineId}`, items.length <= 3)
   return (
-    <div className="mb-2 ml-4 mr-4 border-l-2 border-ink/10 pl-3">
+    <div className="mb-1.5 ml-4 mr-4 border-l-2 border-ink/10 pl-3">
       {items.length > 3 && (
         <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-center gap-1 py-1 text-xs font-medium text-ink-soft">
           <Caret open={open} />
@@ -445,12 +445,11 @@ function BillItemRow({ b, month, today, onOpen }: { b: RecurringItem; month: { s
             : [`Next ${formatDay(b.nextExpected)}`, 'text-ink-faint']
   return (
     <li>
-      <button type="button" onClick={onOpen} className="flex w-full items-baseline justify-between gap-3 py-2 text-left text-sm">
-        <span className="min-w-0">
-          <span className="block truncate">{b.name}</span>
-          <span className={`block text-xs ${cls}`}>
-            {text}
-          </span>
+      <button type="button" onClick={onOpen} className="flex w-full items-baseline justify-between gap-3 py-1.5 text-left text-sm">
+        {/* The date right after the name, on one line (DECISIONS.md 265); it wraps under a name too long to share it. */}
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <span className="max-w-full truncate">{b.name}</span>
+          <span className={`whitespace-nowrap text-xs ${cls}`}>{text}</span>
         </span>
         <span className="shrink-0 tabular-nums">
           {formatCents(b.amountCents)}
@@ -469,17 +468,25 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
   const barColor = spending ? healthBar[c.health] : c.health === 'over' ? 'bg-danger' : 'bg-gold'
   return (
     <>
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="truncate text-sm font-medium">{c.name}</span>
-        <RemainingLabel line={c} spending={spending} />
+      {/* Two lines (DECISIONS.md 265): the name with spent of limit right after it, then the bar with what's left at its
+          end. All three on one line didn't fit a phone ("Credit card payment $200.00 of $2,000.00 $1,800.00 to go"). The
+          amount wraps under a name too long to share its line. */}
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+        <span className="max-w-full truncate text-sm font-medium">{c.name}</span>
+        <span className="whitespace-nowrap text-xs tabular-nums text-ink-soft">
+          {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
+        </span>
+        {c.hasMonthOverride && <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap text-ink-soft">this month only</span>}
       </div>
-      <div className="mt-2 h-2 overflow-hidden rounded-full neu-inset" aria-hidden>
-        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${used * 100}%` }} />
+      <div className="mt-1 flex items-center gap-3">
+        <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full neu-inset" aria-hidden>
+          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${used * 100}%` }} />
+        </div>
+        {/* A set width, so the bars line up from row to row. */}
+        <span className="min-w-26 shrink-0 text-right text-sm leading-5">
+          <RemainingLabel line={c} spending={spending} />
+        </span>
       </div>
-      <p className="mt-1 text-xs tabular-nums text-ink-soft">
-        {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
-        {c.hasMonthOverride && <span className="ml-1 rounded bg-ink/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-ink-soft">this month only</span>}
-      </p>
       {c.partnerOffsetCents > 0 && (
         <p className="mt-0.5 text-xs tabular-nums text-ink-soft">
           A friend covers {formatCents(c.partnerOffsetCents)} · your share <span className="font-medium text-ink-soft">{formatCents(c.limitCents - c.partnerOffsetCents)}</span>

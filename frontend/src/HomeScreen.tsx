@@ -32,16 +32,22 @@ const ringColors: Record<'good' | 'gold' | 'danger', Level[]> = { good: ['plenty
 // that it shows straight away and glides when it changes.
 let introPlayed = false
 
-/** Left to Spend as shown: counting up on the first open, gliding after; its level follows the number as it moves. */
+/**
+ * The big number as shown: counting up on the first open, gliding after; its level follows the number as it moves.
+ * Between paydays it's Until payday, with the ring and status out of the pay period's share (DECISIONS.md 264, 266);
+ * otherwise Left to Spend, out of the month's limits.
+ */
 function useShownLeft(s: HomeSummary) {
   const [intro] = useState(() => !introPlayed)
   useEffect(() => {
     introPlayed = true
   }, [])
-  const left = Math.round(useTween(s.leftToSpendCents, intro ? 900 : 500, intro ? 0 : s.leftToSpendCents))
-  const share = s.totalVariableLimitCents > 0 ? Math.max(0, Math.min(1, left / s.totalVariableLimitCents)) : 0
+  const u = s.untilPayday ?? null
+  const [target, total, status] = u ? [u.cents, u.periodBudgetCents, u.status] : [s.leftToSpendCents, s.totalVariableLimitCents, s.status]
+  const left = Math.round(useTween(target, intro ? 900 : 500, intro ? 0 : target))
+  const share = total > 0 ? Math.max(0, Math.min(1, left / total)) : 0
   // At rest it's the server's status; on the way there, the same lines applied to the number shown.
-  const level = left === s.leftToSpendCents ? (s.status === 'overspent' ? 'over' : s.status === 'low' ? 'near-zero' : levelAt(left, s.totalVariableLimitCents)) : levelAt(left, s.totalVariableLimitCents)
+  const level = left === target ? (status === 'overspent' ? 'over' : status === 'low' ? 'near-zero' : levelAt(left, total)) : levelAt(left, total)
   return { left, share, level, intro }
 }
 
@@ -276,15 +282,6 @@ function describeBankUpdate(r: BankUpdate): string {
   return parts.join(' ')
 }
 
-/** Whole days from one ISO date to another. */
-function daysBetween(from: string, to: string) {
-  const day = (iso: string) => {
-    const [y, m, d] = iso.split('-').map(Number)
-    return Date.UTC(y, m - 1, d) / 86_400_000
-  }
-  return Math.round(day(to) - day(from))
-}
-
 /**
  * Every spending category as a thin row under Left to Spend (DECISIONS.md 254, 255): its name, what's left, and a bar
  * filled and colored the way its line on the Budget tab is (how much of the limit is used; green, gold when low, red
@@ -351,7 +348,9 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
   const style = levels[shown.level]
   // The amount fits inside the ring (DECISIONS.md 262): full size while it fits, smaller for a big one (a bonus on the way).
   // Sized from the final amount, so the count-up doesn't change size as it runs.
-  const amount = formatCents(s.leftToSpendCents)
+  // Between paydays the big number, ring and status are what's safe until the next one (DECISIONS.md 264, 266).
+  const until = s.untilPayday ?? null
+  const amount = formatCents(until ? until.cents : s.leftToSpendCents)
   const { box: fitBox, probe: fitProbe, size: fitSize } = useFitText(amount, 36)
   const r = 88
   const arc = 2 * Math.PI * r * 0.75 // a three-quarter ring, open at the bottom
@@ -409,7 +408,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
           })}
         </div>
         <h2 id="lts-label" className="mt-1 text-xs font-medium text-ink-soft">
-          Left to Spend
+          {until ? `Until payday ${formatDay(until.payDate)}` : 'Left to Spend'}
         </h2>
         <p
           data-testid="left-to-spend"
@@ -420,7 +419,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
           {formatCents(shown.left)}
         </p>
         <p className="mt-0.5 text-xs text-ink-faint">
-          {s.daysRemaining} {s.daysRemaining === 1 ? 'day' : 'days'} left
+          {until ? `${until.days} ${until.days === 1 ? 'day' : 'days'} to payday` : `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'} left`}
         </p>
       </div>
     </div>
@@ -493,12 +492,9 @@ function CashCheckRow({ cash: c, shortCents, pickUp }: { cash: CashCheck; shortC
 function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }) {
   const shown = useShownLeft(s)
   const style = levels[shown.level]
-  // What lasts until the next check: the safe daily amount for each day before payday (DECISIONS.md 148).
-  const daysToPayday = s.nextPayday ? daysBetween(s.today, s.nextPayday.payDate) : 0
-  const untilPayday =
-    s.nextPayday && daysToPayday > 0 && daysToPayday < s.daysRemaining
-      ? { date: s.nextPayday.payDate, cents: Math.max(0, Math.min(s.leftToSpendCents, s.safeToSpendPerDayCents * daysToPayday)) }
-      : null
+  // Until payday is the big number between paydays (DECISIONS.md 264); then the month's Left to Spend takes the tile.
+  const until = s.untilPayday ?? null
+  const heldByCash = until !== null && until.spareCents !== null && until.spareCents < until.budgetCents
 
   // Everything that wants a tap, most urgent first: problems, then things to do, then good news.
   const notices: { key: string; tone: 'danger' | 'todo' | 'good'; href?: string; text: React.ReactNode }[] = []
@@ -565,6 +561,14 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
         <div className="mt-4 text-center">
           <Pill tone={style.tone}>{style.label}</Pill>
         </div>
+        {until && heldByCash && (
+          <p className="mx-auto mt-3 max-w-72 text-center text-xs text-ink-soft">
+            Held to what checking can spare before {formatDay(until.payDate)}: bills, card payments and savings from this check come first.{' '}
+            <a href="#/tasks/payday" className="font-medium text-primary">
+              Payday tasks
+            </a>
+          </p>
+        )}
         <dl className="mt-5 grid grid-cols-2 gap-3">
           <div className="neu-inset rounded-2xl px-4 py-3">
             <dt className="text-xs text-ink-soft">Safe per day</dt>
@@ -573,8 +577,10 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
             </dd>
           </div>
           <div className="neu-inset rounded-2xl px-4 py-3">
-            <dt className="text-xs text-ink-soft">{untilPayday ? `Until payday ${formatDay(untilPayday.date)}` : 'Days left'}</dt>
-            <dd className="text-lg font-semibold tabular-nums">{untilPayday ? <Cents cents={untilPayday.cents} countUp={shown.intro} /> : s.daysRemaining}</dd>
+            <dt className="text-xs text-ink-soft">{until ? 'Left this month' : 'Days left'}</dt>
+            <dd className={`text-lg font-semibold tabular-nums ${until && s.leftToSpendCents < 0 ? 'text-danger' : ''}`}>
+              {until ? <Cents cents={s.leftToSpendCents} countUp={shown.intro} /> : s.daysRemaining}
+            </dd>
           </div>
         </dl>
         {s.spending && s.spending.length > 0 && <SpendingRows items={s.spending} />}

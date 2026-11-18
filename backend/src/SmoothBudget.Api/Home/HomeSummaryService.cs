@@ -48,7 +48,21 @@ public record HomeSummaryDto(
     // When the accounts come up short: the flight hours that would make it up (DECISIONS.md 192).
     Payday.PickUpDto? PickUp = null,
     // Each spending category, in your budget's order, for the small tiles under Left to Spend (DECISIONS.md 254).
-    IReadOnlyList<HomeCategoryDto>? Spending = null);
+    IReadOnlyList<HomeCategoryDto>? Spending = null,
+    // What's safe to spend until the next payday, when it comes before the month ends (DECISIONS.md 264).
+    UntilPaydayDto? UntilPayday = null);
+
+/// <summary>
+/// What's safe to spend until the next payday (DECISIONS.md 264): the lower of the budget's share for those days and what
+/// checking can spare before then, never below zero.
+/// </summary>
+/// <param name="BudgetCents">Safe per day for each day before payday, never more than Left to Spend.</param>
+/// <param name="SpareCents">What checking can spare before payday (the payday plan's), or null when it isn't known.</param>
+/// <param name="PeriodBudgetCents">This pay period's share of the month's spending limits, payday to payday: the ring is
+/// how much of it is left (DECISIONS.md 266).</param>
+/// <param name="Status">"healthy", "low" or "overspent", by the same lines as Left to Spend, against the period's share;
+/// overspent when the accounts are already short or the month is overspent.</param>
+public record UntilPaydayDto(DateOnly PayDate, int Days, long Cents, long BudgetCents, long? SpareCents, long PeriodBudgetCents, string Status);
 
 /// <summary>One spending category on Home: its limit, what's spent, what's left (negative when over), and its health,
 /// the same numbers and colors as its line on the Budget tab (DECISIONS.md 255).</summary>
@@ -231,6 +245,7 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
         var data = await loader.LoadAsync(householdId, ct);
         var (today, lastUpdated) = (data.Today, data.LastUpdatedUtc);
         var r = data.LeftToSpend();
+        var checks = (await payday.GetAsync(householdId, ct)).Checks;
 
         return new HomeSummaryDto(
             BudgetMonth: data.MonthDto,
@@ -256,14 +271,38 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             NextPayday: await payday.NextAsync(householdId, ct) is { } n
                 ? new NextPaydayDto(n.Period.PayDate, n.HasSchedule, n.NetCents, n.LowNetCents, n.HighNetCents, n.LowConfidence)
                 : null,
-            CashWarnings: await CashWarningsAsync(householdId, ct),
+            CashWarnings: CashWarnings(checks),
             UnfiledSpendingCents: r.UnfiledSpendingCents,
             OverplannedCents: r.OverplannedCents,
             IncomeUnknown: MonthData.MoneyIn(data.Row, data.Contributions) <= 0 && data.Categories.Any(c => c.LimitCents > 0),
             CashShortCents: r.CashShortCents,
             Cash: r.Cash,
             PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct),
-            Spending: SpendingRows(data));
+            Spending: SpendingRows(data),
+            UntilPayday: UntilPayday(checks, today, r));
+    }
+
+    /// <summary>
+    /// What's safe until the next payday (DECISIONS.md 264), when that's before the month ends: the budget's share for the
+    /// days until then, held to what checking can spare before it.
+    /// </summary>
+    public static UntilPaydayDto? UntilPayday(IReadOnlyList<Payday.CheckDto> checks, DateOnly today, LeftToSpendResult r)
+    {
+        var i = checks.ToList().FindIndex(c => c.IsCurrent);
+        var next = i >= 0 && i + 1 < checks.Count ? checks[i + 1].PayDate : checks.FirstOrDefault(c => c.PayDate > today)?.PayDate;
+        if (next is not { } pay) return null;
+        var days = pay.DayNumber - today.DayNumber;
+        if (days <= 0 || days >= r.DaysRemaining) return null;
+        var budget = Math.Max(0, Math.Min(r.LeftToSpendCents, r.SafeToSpendPerDayCents * days));
+        var spare = i >= 0 ? checks[i].Plan?.SpareCents : null;
+        var cents = spare is { } s ? Math.Max(0, Math.Min(budget, s)) : budget;
+        // The ring and status are this pay period's (DECISIONS.md 266): what's left of its share of the month's limits.
+        var periodDays = pay.DayNumber - (i >= 0 ? checks[i].PayDate : today).DayNumber;
+        var monthDays = r.Month.End.DayNumber - r.Month.Start.DayNumber + 1;
+        var periodBudget = r.TotalVariableLimitCents * Math.Min(periodDays, monthDays) / monthDays;
+        var shortest = Math.Min(spare ?? 0, r.LeftToSpendCents);
+        var status = LeftToSpendCalculator.StatusFor(shortest < 0 ? shortest : cents, periodBudget);
+        return new UntilPaydayDto(pay, days, cents, budget, spare, periodBudget, CurrentMonthData.StatusName(status));
     }
 
     /// <summary>The spending categories as the Budget tab shows them (its calculator), in your budget's order.</summary>
@@ -280,9 +319,8 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
     }
 
     /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>
-    private async Task<IReadOnlyList<CashWarningDto>> CashWarningsAsync(Guid householdId, CancellationToken ct)
+    private static IReadOnlyList<CashWarningDto> CashWarnings(IReadOnlyList<Payday.CheckDto> checks)
     {
-        var checks = (await payday.GetAsync(householdId, ct)).Checks;
         var i = checks.ToList().FindIndex(c => c.IsCurrent);
         if (i < 0 || checks[i].Plan is not { } plan) return [];
         DateOnly? next = i + 1 < checks.Count ? checks[i + 1].PayDate : null;
