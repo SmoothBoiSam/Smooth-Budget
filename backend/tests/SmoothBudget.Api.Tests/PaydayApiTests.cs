@@ -426,6 +426,37 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Savings_a_bonus_still_to_come_pays_for_waits_for_it_in_what_checking_can_spare()
+    {
+        // DECISIONS.md 274. Feb 24, 2027: living on the Feb 22 check, with $400 a month of savings and $2,000 in checking.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var me = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AddRange(
+                new Account { Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = "test-chk-bonus", CurrentBalanceCents = 2_000_00, CreatedUtc = DateTime.UtcNow },
+                new Category { Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 400_00 });
+            await db.SaveChangesAsync();
+        }
+        long Of(PaydayDto p, string kind) => p.Checks[0].Plan!.Items.Where(i => i.Kind == kind).Sum(i => i.Cents);
+
+        // Without a bonus this check sends half the month's savings, and keeps what the Mar 8 check can't cover of its own
+        // plan: checking can spare the rest.
+        var p = await Payday(c);
+        Assert.Equal((new DateOnly(2027, 2, 22), 200_00L), (p.Checks[0].PayDate, Of(p, "savings")));
+        Assert.Equal(2_000_00L - 200_00 - Of(p, "hold"), p.Checks[0].Plan!.SpareCents);
+
+        // A bonus expected Feb 26 pays for the month's savings (263), so this check's savings is all of it. It isn't in
+        // checking yet, and neither does its savings have to come out before it lands: only the hold comes off the $2,000.
+        (await c.PostAsJsonAsync("/api/payday/expected", new { name = "Test bonus", amountCents = 1_000_00, expectedDate = "2027-02-26" }, Json)).EnsureSuccessStatusCode();
+        p = await Payday(c);
+        Assert.Equal(400_00L, Of(p, "savings"));
+        Assert.Equal(2_000_00L - Of(p, "hold"), p.Checks[0].Plan!.SpareCents);
+    }
+
+    [Fact]
     public async Task A_check_keeps_money_for_the_next_one_when_that_one_cannot_cover_its_bills()
     {
         // Feb 24, 2027: living on the Feb 22 check; the next is Mar 8, and rent is due Mar 10.

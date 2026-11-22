@@ -505,7 +505,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
 
         // One check's plan before anything is carried between checks. It reads nothing from the database, so the loop
         // below can ask for the checks either side of the one it's on (DECISIONS.md 253).
-        (PaydayPlanResult Plan, long NetCents, bool Current, DateOnly Pay, DateOnly Next, List<ExpectedIncome> Bonuses)? Draft(int i)
+        (PaydayPlanResult Plan, long NetCents, bool Current, DateOnly Pay, DateOnly Next, List<ExpectedIncome> Bonuses, long BonusFunded)? Draft(int i)
         {
             var f = checks[i];
             var pay = f.Period.PayDate;
@@ -530,14 +530,18 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             var flex = debtExtra + savingsMonthly;
             var funded = Math.Min(flex, bonusMonth);
             var lastWithBonus = bonusEach.FindLastIndex(b => b > 0);
-            long Split(long line, long extra)
+            bool BySplit() => funded > 0 && flex > 0 && inMonth.IndexOf(pay) >= 0;
+            // The part of a line's extra that this check's bonus pays for (zero without one still to come).
+            long BonusPart(long extra)
             {
-                if (funded <= 0 || flex <= 0 || inMonth.IndexOf(pay) < 0) return PaydayPlan.Share(line, inMonth.Count, index);
+                if (!BySplit()) return 0;
                 var byBonus = extra * funded / flex;
                 long Part(int k) => byBonus * bonusEach[k] / bonusMonth;
-                var mine = index == lastWithBonus ? byBonus - Enumerable.Range(0, bonusEach.Count).Where(k => k != index).Sum(Part) : Part(index);
-                return PaydayPlan.Share(line - byBonus, inMonth.Count, index) + mine;
+                return index == lastWithBonus ? byBonus - Enumerable.Range(0, bonusEach.Count).Where(k => k != index).Sum(Part) : Part(index);
             }
+            long Split(long line, long extra) => BySplit()
+                ? PaydayPlan.Share(line - extra * funded / flex, inMonth.Count, index) + BonusPart(extra)
+                : PaydayPlan.Share(line, inMonth.Count, index);
             var bonusNote = funded <= 0 || inMonth.IndexOf(pay) < 0 ? ""
                 : bonusEach[index] > 0 ? $" It includes the {PayEngine.Dollars(funded)} of the month's extra card payment and savings that {(coming.Count == 1 ? coming[0].Name : "your bonuses")} pays for."
                 : " The part your bonus pays for comes from the check it lands with.";
@@ -607,7 +611,8 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 (inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(savingsMonthly)} savings in your budget." : $"Your budget's {PayEngine.Dollars(savingsMonthly)} savings.") + bonusNote));
 
             var net = landedNet ?? f.NetCents;
-            return (PaydayPlan.Build(net + coming.Sum(x => x.AmountCents), bills, transfers), net, current, pay, next, coming);
+            return (PaydayPlan.Build(net + coming.Sum(x => x.AmountCents), bills, transfers), net, current, pay, next, coming,
+                BonusPart(debtExtra) + BonusPart(savingsMonthly));
         }
         // What a check has to pay from its own money (not a friend's part of a bill, or card charges paid from spending money).
         static long Own(PaydayPlanResult p) => p.Items.Sum(x => x.Cents - x.FromOthersCents);
@@ -617,7 +622,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         for (var i = 0; i < checks.Count; i++)
         {
             if (Draft(i) is not { } draft) { result.Add(null); continue; }
-            var (plan, net, current, pay, next, coming) = draft;
+            var (plan, net, current, pay, next, coming, bonusFunded) = draft;
             var bonusCents = coming.Sum(x => x.AmountCents);
 
             // Money carried between checks (DECISIONS.md 253). When the next check can't pay for everything planned for it
@@ -781,10 +786,13 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var held = all.Where(x => x.Kind == "hold").Sum(x => x.Cents);
                 var toCards = Math.Max(0, all.Where(x => x.Kind is "debt" or "cardspend" && !x.Skipped).Sum(x => x.Cents) - cardPaid);
                 var toSavings = Math.Max(0, all.Where(x => x.Kind == "savings").Sum(x => x.Cents) - intoSavings);
+                // The extra card payment and savings a bonus still to come pays for (DECISIONS.md 263) wait for it: they
+                // don't come out of checking before it lands, and neither does the bonus count until then (274).
+                var waitForBonus = Math.Min(bonusFunded, toCards + toSavings);
                 var sweeps = all.Where(x => x.Kind == "sweep" && !x.Done).Sum(x => x.Cents);
                 var arrivedForLater = after is { } an ? an.Plan.Items.Where(y => y.Kind == "keep").SelectMany(y => y.Bills ?? []).Sum(b => b.ArrivedCents) : 0;
                 var chargedSince = Math.Max(0, charged.Where(t => t.Date >= paidOn && t.Date <= c.Today).Sum(t => t.AmountCents));
-                return checking.Sum(a => a.CurrentBalanceCents) - pending - bills - held - toCards - toSavings - sweeps - arrivedForLater - chargedSince;
+                return checking.Sum(a => a.CurrentBalanceCents) - pending - bills - held - toCards - toSavings + waitForBonus - sweeps - arrivedForLater - chargedSince;
             }
         }
         return result;
