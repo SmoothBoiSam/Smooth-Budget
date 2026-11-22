@@ -569,14 +569,9 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
             </a>
           </p>
         )}
-        <dl className="mt-5 grid grid-cols-2 gap-3">
-          <div className="neu-inset rounded-2xl px-4 py-3">
-            <dt className="text-xs text-ink-soft">Safe per day</dt>
-            <dd className="text-lg font-semibold tabular-nums">
-              <Cents cents={s.safeToSpendPerDayCents} countUp={shown.intro} />
-            </dd>
-          </div>
-          <div className="neu-inset rounded-2xl px-4 py-3">
+        {/* Safe per day is gone from Home (DECISIONS.md 267): Until payday already says what's safe. */}
+        <dl className="mt-5">
+          <div className="neu-inset flex items-baseline justify-between gap-3 rounded-2xl px-4 py-3">
             <dt className="text-xs text-ink-soft">{until ? 'Left this month' : 'Days left'}</dt>
             <dd className={`text-lg font-semibold tabular-nums ${until && s.leftToSpendCents < 0 ? 'text-danger' : ''}`}>
               {until ? <Cents cents={s.leftToSpendCents} countUp={shown.intro} /> : s.daysRemaining}
