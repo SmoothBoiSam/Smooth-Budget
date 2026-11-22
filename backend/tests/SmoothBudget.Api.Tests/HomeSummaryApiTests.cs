@@ -237,14 +237,15 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
 
         var s = await SummaryAsync(client);
 
-        // All variable spending: 890.97. Eating out 172.35 vs 150.00 -> over by 22.35.
-        // Left to Spend = 1,010.00 - 890.97 - 42.50 carried - 15.00 not filed yet (DECISIONS.md 177) = 61.53, under 15% of 1,010 -> low.
-        // The plan uses exactly the month's 3,260.86, so nothing is planned beyond it.
+        // All variable spending: 890.97. Eating out spent 172.35 of 150.00, so its limit is raised to 172.35 (DECISIONS.md
+        // 268) and nothing shows as over. The plan used exactly the month's 3,260.86, so the 22.35 is now planned beyond it.
+        // Left to Spend = 1,032.35 - 890.97 - 42.50 carried - 15.00 not filed yet (DECISIONS.md 177) - 22.35 = 61.53, low.
         Assert.Equal(890_97, s.TotalVariableSpentCents);
-        Assert.Equal((15_00L, 0L), (s.UnfiledSpendingCents, s.OverplannedCents));
+        Assert.Equal(1_032_35, s.TotalVariableLimitCents);
+        Assert.Equal((15_00L, 22_35L), (s.UnfiledSpendingCents, s.OverplannedCents));
         Assert.Equal(61_53, s.LeftToSpendCents);
-        Assert.Equal(1, s.OverBudgetCategoryCount);
-        Assert.Equal(22_35, s.OverBudgetCents);
+        Assert.Equal(0, s.OverBudgetCategoryCount);
+        Assert.Equal(0, s.OverBudgetCents);
         Assert.Equal(2, s.DaysRemaining);
         Assert.Equal(30_76, s.SafeToSpendPerDayCents);
         Assert.Equal(1, s.UncategorizedCount); // the farmers market purchase
@@ -300,7 +301,9 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
 
         var b = await BudgetAsync(client);
 
-        Assert.Equal((-22_35L, "over"), (Cat(b, "Eating out").RemainingCents, Cat(b, "Eating out").Health));
+        // Eating out spent 172.35 of 150.00: its limit is raised to what's spent (DECISIONS.md 268), so it's used up, not over.
+        Assert.Equal((172_35L, 0L), (Cat(b, "Eating out").LimitCents, Cat(b, "Eating out").RemainingCents));
+        Assert.NotEqual("over", Cat(b, "Eating out").Health);
         Assert.Equal((30_48L, "low"), (Cat(b, "Groceries").RemainingCents, Cat(b, "Groceries").Health)); // 6.8% left
         // The $300 card payment only covered this month's card purchases, which already count in their categories.
         Assert.Equal(0, Cat(b, "Credit card payment").SpentCents);

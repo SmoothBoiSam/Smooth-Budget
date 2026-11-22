@@ -172,8 +172,21 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
 
         var transactions = await TransactionsAsync(db, householdId, range.Start, range.End, ct);
 
-        var carried = await CarriedInAsync(householdId, row, ct, depth);
+        // A month still running: a line that's overspent has its limit raised to what's spent (DECISIONS.md 268), so it
+        // isn't over and the money comes out of the plan instead: the automatic budget squeezes the other lines, or
+        // Left to Spend loses what the plan now needs beyond the month's money. That covers a limit you set yourself, for
+        // this month only. Not the card lines: the payments and Card interest are one pot, checked together. Only with
+        // income on record: without it there's no plan to take the money from, and raising would hide the overspending.
         var contributions = await ContributionsAsync(householdId, range, ct);
+        if (!perMonth.Any(p => p.ClosingLimitCents is not null) && MonthData.MoneyIn(row, contributions) > 0)
+        {
+            var forCalculator = categories.Select(c => c.ForCalculator).ToList();
+            var pool = CategoryBreakdownCalculator.CardPool(forCalculator);
+            var spent = CategoryBreakdownCalculator.Calculate(range, forCalculator, transactions).ToDictionary(l => l.CategoryId, l => l.SpentCents);
+            categories = categories.Select(c => !pool.Contains(c.Id) && spent[c.Id] > c.LimitCents ? c with { LimitCents = spent[c.Id] } : c).ToList();
+        }
+
+        var carried = await CarriedInAsync(householdId, row, ct, depth);
         return new MonthData(row, range, categories, transactions, carried, contributions, contributions.Sum(c => c.ShortfallCents));
     }
 

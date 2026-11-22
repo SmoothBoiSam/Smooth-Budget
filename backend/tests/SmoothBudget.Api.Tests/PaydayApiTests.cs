@@ -368,33 +368,61 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public void Until_payday_is_the_budgets_share_held_to_what_checking_can_spare()
+    public async Task A_paycheck_that_lands_early_is_the_check_youre_on_and_its_tasks_open()
     {
-        // DECISIONS.md 264. Nov 17, living on the Nov 6 check; the next is Nov 23, 6 days away, and the month has 20 left.
+        // DECISIONS.md 270: Nov 22, the Nov 23 check is due tomorrow.
+        var c = await NewUserAsync(new DateTimeOffset(2026, 11, 22, 19, 0, 0, TimeSpan.Zero));
+        var nov = PayFixtures.Csv.Replace("/2027", "/2026").Replace(",02/", ",11/");
+        Assert.Equal(HttpStatusCode.OK, (await Schedule(c, nov, "schedule.csv", confirm: true)).StatusCode);
+        var check = (await Payday(c)).Checks.Single(x => x.PayDate == new DateOnly(2026, 11, 23));
+        Assert.False(check.IsCurrent);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PutAsJsonAsync("/api/payday/plan/2026-11-23/savings", new ChecklistRequest(true), Json)).StatusCode);
+
+        // It lands a day early: it's the check you're on now, the one before it drops off, and its tasks open.
+        var checking = (await (await c.PostAsJsonAsync("/api/accounts", new { name = "Test Checking", type = "Checking", mask = "1111" }, Json)).Content.ReadFromJsonAsync<AccountDto>(Json))!.Id;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var acct = await db.Accounts.SingleAsync(a => a.Id == checking);
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = acct.HouseholdId, AccountId = checking, Date = new DateOnly(2026, 11, 22), AmountCents = -check.NetCents,
+                Merchant = "TEST AIRLINE PAYROLL", Description = "TEST AIRLINE PAYROLL", Kind = TransactionKind.Income, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var p = await Payday(c);
+        Assert.Equal((new DateOnly(2026, 11, 23), true, (long?)check.NetCents), (p.Checks[0].PayDate, p.Checks[0].IsCurrent, p.Checks[0].LandedNetCents));
+        Assert.Single(p.Checks, x => x.IsCurrent);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/payday/plan/2026-11-23/savings", new ChecklistRequest(true), Json)).StatusCode);
+        using (var scope = app.Services.CreateScope())
+            Assert.True(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PaydayChecklistItems.AnyAsync(x => x.PayDate == new DateOnly(2026, 11, 23) && x.Key == "savings"));
+    }
+
+    [Fact]
+    public void Home_warns_before_payday_only_when_checking_cant_keep_up_with_left_to_spend()
+    {
+        // DECISIONS.md 272. Nov 17, living on the Nov 6 check; the next is Nov 23, 6 days away, and the month has 20 left.
+        // Left to Spend's pace is $60 a day: $360 by payday.
         var today = new DateOnly(2026, 11, 17);
         var month = new SmoothBudget.Core.Budgeting.BudgetMonthRange(new DateOnly(2026, 11, 6), new DateOnly(2026, 12, 6), new DateOnly(2026, 11, 1));
         static CheckDto Check(DateOnly pay, bool current, long? spare) => new(pay, pay.AddDays(-14), pay.AddDays(-1), true, 0, 0, 0, 0, 0, false, [], [], [], [], [],
             current ? new PlanDto([], 0, SpareCents: spare) : null, IsCurrent: current);
         SmoothBudget.Core.Budgeting.LeftToSpendResult Month(long left, long perDay) =>
-            new(month, today, left, 900_00, 0, 0, 0, 0, 20, perDay, left < 0 ? SmoothBudget.Core.Budgeting.LeftToSpendStatus.Overspent : SmoothBudget.Core.Budgeting.LeftToSpendStatus.Healthy, 0, []);
-        UntilPaydayDto? Until(long? spare, long left = 1_200_00, long perDay = 60_00, int nextIn = 6) =>
-            HomeSummaryService.UntilPayday([Check(new DateOnly(2026, 11, 6), true, spare), Check(today.AddDays(nextIn), false, null)], today, Month(left, perDay));
+            new(month, today, left, 900_00, 0, 0, 0, 0, 20, perDay, SmoothBudget.Core.Budgeting.LeftToSpendStatus.Healthy, 0, []);
+        BeforePaydayDto? Warn(long? spare, long left = 1_200_00, long perDay = 60_00, int nextIn = 6) =>
+            HomeSummaryService.BeforePayday([Check(new DateOnly(2026, 11, 6), true, spare), Check(today.AddDays(nextIn), false, null)], today, Month(left, perDay));
 
-        // $60 a day for 6 days is $360, held to the $200 checking can spare.
-        var u = Until(200_00)!;
-        Assert.Equal((new DateOnly(2026, 11, 23), 6, 200_00L, 360_00L, (long?)200_00), (u.PayDate, u.Days, u.Cents, u.BudgetCents, u.SpareCents));
-        // DECISIONS.md 266: the ring is out of this pay period's share of the $900 of limits (17 of the month's 31 days),
-        // and the status is the period's: $200 of $493.54 is on track; under 15% of it is low; short accounts are over.
-        Assert.Equal((493_54L, "healthy"), (u.PeriodBudgetCents, u.Status));
-        Assert.Equal("low", Until(70_00)!.Status);
-        Assert.Equal("low", Until(0)!.Status);
-        Assert.Equal("overspent", Until(-50_00)!.Status);
-        Assert.Equal("overspent", Until(null, left: -10_00)!.Status);
-        Assert.Equal(360_00, Until(5_000_00)!.Cents); // plenty in checking: the budget's share
-        Assert.Equal(0, Until(-50_00)!.Cents); // already short: zero, never below
-        Assert.Equal(360_00, Until(null)!.Cents); // checking not synced: the budget's share
-        Assert.Equal(100_00, Until(null, left: 100_00)!.Cents); // never more than Left to Spend
-        Assert.Null(Until(200_00, nextIn: 20)); // payday after the month ends: Left to Spend is the number
+        // Checking can spare only $200 of the $360: warn.
+        Assert.Equal((new DateOnly(2026, 11, 23), 6, 200_00L, 360_00L), Warn(200_00) is { } w ? (w.PayDate, w.Days, w.SafeCents, w.PaceCents) : default);
+        Assert.Equal(0, Warn(-50_00)!.SafeCents); // already short: nothing is safe
+        // Usually it isn't a problem, and there's nothing to show.
+        Assert.Null(Warn(5_000_00)); // plenty in checking
+        Assert.Null(Warn(355_00)); // a few dollars under the pace isn't worth a warning
+        Assert.Null(Warn(null)); // checking not bank-synced: can't tell
+        Assert.Null(Warn(200_00, nextIn: 20)); // payday after the month ends: Left to Spend already stops there
+        Assert.Null(Warn(200_00, left: 0, perDay: 0)); // nothing left to spend anyway
+        Assert.Equal(150_00, Warn(100_00, left: 150_00)!.PaceCents); // never more than Left to Spend
     }
 
     [Fact]
@@ -444,7 +472,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal((0L, 300_00L, new DateOnly(2027, 2, 22)), (next.Plan!.ShortCents, next.Plan.HeldEarlierCents, next.Plan.HeldOn!.Value));
         Assert.DoesNotContain(next.Plan.Items, i => i.Kind == "hold" && i.Cents == 0);
 
-        // DECISIONS.md 264: checking can spare its balance less the $300 it keeps for the Mar 8 check's bills (rent is
+        // DECISIONS.md 272: checking can spare its balance less the $300 it keeps for the Mar 8 check's bills (rent is
         // after Mar 8, so nothing is due before it), and less a charge still pending.
         Assert.Equal(1_700_00L, now.Plan.SpareCents);
         Assert.Null(next.Plan.SpareCents);
@@ -465,6 +493,7 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.Transactions.Where(t => t.Id == pendingId).ExecuteDeleteAsync();
         }
+
 
         // DECISIONS.md 263: a bonus expected with the Mar 8 check counts toward it, so this check keeps only what's still
         // missing, and nothing once the bonus covers it all.

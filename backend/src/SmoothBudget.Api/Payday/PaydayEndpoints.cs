@@ -92,11 +92,13 @@ public static class PaydayEndpoints
         g.MapPut("/plan/{payDate}/{key}", async (DateOnly payDate, string key, ChecklistRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
-            // A check's tasks open on its payday (DECISIONS.md 221): before then the money isn't there yet. Unticking is fine.
+            // A check's tasks open on its payday (DECISIONS.md 221), or when it lands early (270): before then the money isn't
+            // there yet. Unticking is fine.
             if (req.Done || req.Skipped == true)
             {
                 var zone = await db.Households.Where(h => h.Id == householdId).Select(h => h.TimeZoneId).SingleAsync(ct);
-                if (payDate > SmoothBudget.Api.Home.HomeSummaryService.TodayIn(zone, clock))
+                var today = SmoothBudget.Api.Home.HomeSummaryService.TodayIn(zone, clock);
+                if (payDate > today && !(await PaydayService.ArrivedEarlyAsync(db, householdId, today, ct)).ContainsKey(payDate))
                     return Results.Problem($"These open on payday, {payDate:MMM d}.", statusCode: StatusCodes.Status409Conflict);
             }
             if (req.Skipped is { } skip)

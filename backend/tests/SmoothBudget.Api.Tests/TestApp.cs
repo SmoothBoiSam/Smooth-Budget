@@ -56,6 +56,10 @@ public class TestApp : WebApplicationFactory<Program>
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);
+            // Tests sign in at fixed dates (October 2026, say), but the test client drops a cookie past its expiry by the
+            // real date: with the app's 30 days, every such sign-in stopped working once that date was a month gone.
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>(
+                Microsoft.AspNetCore.Identity.IdentityConstants.ApplicationScheme, o => o.ExpireTimeSpan = TimeSpan.FromDays(3650));
             // Never reach a real push service; notifications are on with throwaway keys.
             services.RemoveAll<SmoothBudget.Api.Notifications.PushOptions>();
             services.AddSingleton(new SmoothBudget.Api.Notifications.PushOptions { PublicKey = TestPushKeys.Public, PrivateKey = TestPushKeys.Private });

@@ -46,18 +46,8 @@ export interface HomeSummary {
   pickUp: PickUp | null
   /** Each spending category in your budget's order, for the tiles under Left to Spend (DECISIONS.md 254). */
   spending: { id: string; name: string; limitCents: number; spentCents: number; leftCents: number; health: Health }[] | null
-  // What's safe until the next payday, when it's before the month ends (DECISIONS.md 264): the budget's share for those
-  // days, held to what checking can spare before then (null when a checking account isn't bank-synced).
-  // Its ring and status are the pay period's (DECISIONS.md 266): what's left of the period's share of the month's limits.
-  untilPayday?: {
-    payDate: string
-    days: number
-    cents: number
-    budgetCents: number
-    spareCents: number | null
-    periodBudgetCents: number
-    status: HomeSummary['status']
-  } | null
+  // Only when spending at Left to Spend's pace would run checking short before the next payday (DECISIONS.md 272).
+  beforePayday?: { payDate: string; days: number; safeCents: number; paceCents: number } | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */

@@ -22,7 +22,8 @@ public sealed record FittedBudget(BudgetProposal Proposal, long ShortCents, long
 /// as far as what's already spent (DECISIONS.md 226), so the limits never add up to more than there is to spend.</item>
 /// </list>
 /// Within a step, categories give in proportion to the room each has.
-/// Bill, card and savings lines are first raised to whatever was already paid on them this month.
+/// Every line is first raised to whatever was already spent or paid on it this month (DECISIONS.md 173, 268), so an
+/// overspent category takes its room from the others, from extra card payments and from savings.
 /// Nothing goes below what's already been spent this month, limits you set yourself are never touched, and bills and
 /// card minimums aren't squeezed. Whatever is still missing (bills and minimums alone cost more than the month brings in)
 /// is reported as a shortfall.
@@ -41,14 +42,15 @@ public static class BudgetFitter
         long holdBackCents = 0)
     {
         long Spent(Guid id) => Math.Max(0, spentThisMonth.GetValueOrDefault(id));
-        // DECISIONS.md 173: money already paid this month toward a bill, a card or savings is gone, so its line is at least
-        // that much (a bill that went up, a yearly charge, an extra card payment). Spending lines don't need it: going over
-        // one already comes off Left to Spend.
-        var lines = p.Categories.Select(l => l.Type != CategoryType.Variable && !locked.Contains(l.CategoryId) && Spent(l.CategoryId) > l.ProposedCents
+        // DECISIONS.md 173, 268: money already spent or paid this month is gone, so every line is at least that much: a bill
+        // that went up, an extra card payment, and an overspent category too. The plan then fits around it, so the overspend
+        // comes out of the other categories, extra card payments and savings. A limit you set yourself is raised here
+        // only for the plan; the month's limit is raised where it's loaded, and yours stays as you set it.
+        var lines = p.Categories.Select(l => Spent(l.CategoryId) > l.ProposedCents
             ? l with
             {
                 ProposedCents = Spent(l.CategoryId),
-                Explanation = $"{l.Explanation} Raised to {Money(Spent(l.CategoryId))}, what's already been paid this month.",
+                Explanation = $"{l.Explanation} Raised to {Money(Spent(l.CategoryId))}, what's already been {(l.Type == CategoryType.Variable ? "spent" : "paid")} this month.",
             }
             : l).ToList();
         if (!lines.SequenceEqual(p.Categories))

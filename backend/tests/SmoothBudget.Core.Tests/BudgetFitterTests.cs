@@ -115,25 +115,25 @@ public class BudgetFitterTests
     }
 
     [Fact]
-    public void Bills_and_card_payments_are_at_least_what_was_already_paid_this_month()
+    public void Every_line_is_at_least_what_was_already_spent_or_paid_this_month()
     {
-        // DECISIONS.md 173: rent went up to $1,800 and $300 already went to the card; those are gone, so the plan holds
-        // them, and the $290 more comes off nice-to-have spending, leaving $10 of its $300; the savings habit stays.
-        // Overspending on groceries doesn't raise its line: it already comes off Left to Spend.
+        // DECISIONS.md 173, 268: rent went up to $1,800, $300 already went to the card and groceries are $50 over; that money
+        // is gone, so the plan holds it. The $340 more takes all $300 of nice-to-have spending, then $40 of the savings habit.
         var spent = new Dictionary<Guid, long> { [Rent] = 1_800_00, [Card] = 300_00, [Groceries] = 450_00 };
         var f = BudgetFitter.Fit(Plan(2_760_00), spent, new HashSet<Guid>(), savingsFromGoals: false);
-        Assert.Equal((1_800_00L, 300_00L, 400_00L), (Limit(f, Rent), Limit(f, Card), Limit(f, Groceries)));
-        Assert.Equal((100_00L, 10_00L), (Limit(f, Save), Limit(f, EatingOut) + Limit(f, Shopping)));
-        Assert.Equal((0L, 290_00L), (f.ShortCents, f.SqueezedCents));
+        Assert.Equal((1_800_00L, 300_00L, 450_00L), (Limit(f, Rent), Limit(f, Card), Limit(f, Groceries)));
+        Assert.Equal((60_00L, 0L), (Limit(f, Save), Limit(f, EatingOut) + Limit(f, Shopping)));
+        Assert.Equal((0L, 340_00L), (f.ShortCents, f.SqueezedCents));
         Assert.EndsWith("Raised to $1,800.00, what's already been paid this month.", f.Proposal.Categories.Single(c => c.CategoryId == Rent).Explanation);
+        Assert.EndsWith("Raised to $450.00, what's already been spent this month.", f.Proposal.Categories.Single(c => c.CategoryId == Groceries).Explanation);
         // DECISIONS.md 223: the unsqueezed plan keeps the raise but not the squeeze, even when both happen.
         var before = f.Unsqueezed!.Categories;
         Assert.Equal((1_800_00L, 200_00L, 100_00L),
             (before.Single(c => c.CategoryId == Rent).ProposedCents, before.Single(c => c.CategoryId == EatingOut).ProposedCents, before.Single(c => c.CategoryId == Shopping).ProposedCents));
 
-        // A limit you set stays even when more was paid.
+        // A limit you set is raised too, so the others make room; the automatic budget never writes it, so yours stays.
         var mine = BudgetFitter.Fit(Plan(3_000_00), spent, new HashSet<Guid> { Rent }, savingsFromGoals: false);
-        Assert.Equal(1_650_00, Limit(mine, Rent));
+        Assert.Equal(1_800_00, Limit(mine, Rent));
     }
 
     [Fact]

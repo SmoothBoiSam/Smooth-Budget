@@ -90,6 +90,37 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
         }, locked.Keys.ToHashSet());
     }
 
+    /// <summary>
+    /// A limit you set that's overspent becomes a "this month only" limit of what's been spent (DECISIONS.md 271), so the
+    /// Budget tab shows it as this month's override and next month starts from yours again. The automatic budget raises
+    /// its own limits itself (268); with it off, every limit is yours. Same lines as 268: only with income on record, and
+    /// not the card lines.
+    /// </summary>
+    private async Task OverrideOverspentAsync(Guid householdId, bool auto, CancellationToken ct)
+    {
+        var current = await months.EnsureCurrentAsync(householdId, ct);
+        var range = new BudgetMonthRange(current.StartDate, current.EndDate, new DateOnly(current.StartDate.Year, current.StartDate.Month, 1));
+        if (MonthData.MoneyIn(current, await months.ContributionsAsync(householdId, range, ct)) <= 0) return;
+        var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && !c.IsHidden).ToListAsync(ct);
+        var rows = await db.BudgetMonthCategories.Where(x => x.BudgetMonthId == current.Id).ToDictionaryAsync(x => x.CategoryId, ct);
+        long LimitOf(Category c) => rows.TryGetValue(c.Id, out var r) && r.LimitOverrideCents is { } o ? o : c.MonthlyLimitCents;
+        var forCalculator = categories.Select(c => new BudgetCategory(c.Id, c.Type, LimitOf(c), Core.Transactions.CardInterest.IsInterestCategory(c.Name, c.Type))).ToList();
+        var pool = CategoryBreakdownCalculator.CardPool(forCalculator);
+        var txns = await BudgetMonthService.TransactionsAsync(db, householdId, current.StartDate, current.EndDate, ct);
+        var spent = CategoryBreakdownCalculator.Calculate(range, forCalculator, txns).ToDictionary(l => l.CategoryId, l => l.SpentCents);
+        var changed = false;
+        foreach (var c in categories)
+        {
+            var yours = !auto || c.LimitSetByUser || (rows.TryGetValue(c.Id, out var had) && had.LimitOverrideCents is not null);
+            if (!yours || pool.Contains(c.Id) || spent[c.Id] <= LimitOf(c)) continue;
+            if (!rows.TryGetValue(c.Id, out var row))
+                db.BudgetMonthCategories.Add(rows[c.Id] = row = new BudgetMonthCategory { Id = Guid.NewGuid(), BudgetMonthId = current.Id, CategoryId = c.Id });
+            row.LimitOverrideCents = spent[c.Id];
+            changed = true;
+        }
+        if (changed) await db.SaveChangesAsync(ct);
+    }
+
     public async Task RefreshAsync(Guid householdId, CancellationToken ct)
     {
         await interest.EnsureAsync(householdId, ct); // card interest is a bill line, not spending (DECISIONS.md 159)
@@ -97,6 +128,7 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
         if (await categorization.ReleaseHiddenAsync(householdId, ct) > 0) // spending left in a hidden category (DECISIONS.md 177)
             await categorization.RunAsync(householdId, ct);
         var household = await db.Households.SingleAsync(h => h.Id == householdId, ct);
+        await OverrideOverspentAsync(householdId, household.AutoBudget, ct);
         if (!household.AutoBudget) return;
         if (!await db.Categories.AnyAsync(c => c.HouseholdId == householdId && !c.IsHidden, ct)) return; // set up categories first
 

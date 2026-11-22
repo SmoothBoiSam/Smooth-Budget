@@ -120,6 +120,55 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(Math.Max(0, 2_300_00 - after.IncomeExpectedCents), after.Auto!.ShortCents);
     }
 
+    /// <summary>A purchase this month (Feb 10) in a category, put straight in the database.</summary>
+    private async Task SpendAsync(Guid category, long cents)
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var cat = await db.Categories.FindAsync(category);
+        var acct = db.Accounts.First(a => a.HouseholdId == cat!.HouseholdId);
+        db.Transactions.Add(new Transaction
+        {
+            Id = Guid.NewGuid(), HouseholdId = cat!.HouseholdId, AccountId = acct.Id, CategoryId = category, Date = new DateOnly(2027, 2, 10),
+            AmountCents = cents, Merchant = "TEST", Kind = TransactionKind.Purchase, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            CategorySource = CategorySource.User,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task An_overspent_category_is_raised_to_whats_spent_and_the_others_make_room()
+    {
+        // DECISIONS.md 268: groceries spent $700 of $400. Its limit becomes $700; the $300 more takes the $200 the plan
+        // had spare, then $100 off eating out. Left to Spend is what eating out has left, with nothing over.
+        var (c, rent, groceries, eating) = await NewHouseholdAsync();
+        await SpendAsync(groceries, 700_00);
+        var s = await Summary(c);
+        Assert.Equal((2_300_00L, 700_00L, 200_00L), (Limit(s, rent), Limit(s, groceries), Limit(s, eating)));
+        Assert.Equal(200_00, s.LeftToSpendCents);
+        Assert.Equal(0, s.OverplannedCents);
+
+        // DECISIONS.md 271: a limit you set that's overspent becomes this month's override of what's spent, and the others
+        // still make room; your usual limit stays as you set it, for next month.
+        await c.PutAsJsonAsync($"/api/budget/categories/{groceries}", new UpdateCategoryRequest("Groceries", CategoryType.Variable, 450_00, null, false, "permanent"), Json);
+        s = await Summary(c);
+        Assert.Contains(groceries, s.Auto!.SetByYou);
+        Assert.Equal((700_00L, 200_00L), (Limit(s, groceries), Limit(s, eating)));
+        Assert.True(s.Groups.SelectMany(g => g.Categories).Single(x => x.Id == groceries).HasMonthOverride);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(450_00, (await db.Categories.FindAsync(groceries))!.MonthlyLimitCents);
+            Assert.Equal(700_00, db.BudgetMonthCategories.Single(x => x.CategoryId == groceries).LimitOverrideCents);
+        }
+
+        // Spending more moves the override with it.
+        await SpendAsync(groceries, 50_00);
+        await c.PutAsJsonAsync("/api/settings/budget", new BudgetSettingsDto(SweepTarget.Debt, 50, AutoBudget: true), Json); // any save: the budget refreshes
+        s = await Summary(c);
+        Assert.Equal((750_00L, 150_00L), (Limit(s, groceries), Limit(s, eating)));
+    }
+
     [Fact]
     public async Task A_limit_you_set_stays_until_you_hand_it_back()
     {

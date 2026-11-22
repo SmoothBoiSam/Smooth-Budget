@@ -49,20 +49,15 @@ public record HomeSummaryDto(
     Payday.PickUpDto? PickUp = null,
     // Each spending category, in your budget's order, for the small tiles under Left to Spend (DECISIONS.md 254).
     IReadOnlyList<HomeCategoryDto>? Spending = null,
-    // What's safe to spend until the next payday, when it comes before the month ends (DECISIONS.md 264).
-    UntilPaydayDto? UntilPayday = null);
+    // Only when spending at Left to Spend's pace would run checking short before the next payday (DECISIONS.md 272).
+    BeforePaydayDto? BeforePayday = null);
 
 /// <summary>
-/// What's safe to spend until the next payday (DECISIONS.md 264): the lower of the budget's share for those days and what
-/// checking can spare before then, never below zero.
+/// A warning that checking can't keep up with Left to Spend until the next payday (DECISIONS.md 272).
 /// </summary>
-/// <param name="BudgetCents">Safe per day for each day before payday, never more than Left to Spend.</param>
-/// <param name="SpareCents">What checking can spare before payday (the payday plan's), or null when it isn't known.</param>
-/// <param name="PeriodBudgetCents">This pay period's share of the month's spending limits, payday to payday: the ring is
-/// how much of it is left (DECISIONS.md 266).</param>
-/// <param name="Status">"healthy", "low" or "overspent", by the same lines as Left to Spend, against the period's share;
-/// overspent when the accounts are already short or the month is overspent.</param>
-public record UntilPaydayDto(DateOnly PayDate, int Days, long Cents, long BudgetCents, long? SpareCents, long PeriodBudgetCents, string Status);
+/// <param name="SafeCents">What checking can spare before payday: the most to spend until then (never below zero).</param>
+/// <param name="PaceCents">What Left to Spend's pace (safe per day) adds up to by then.</param>
+public record BeforePaydayDto(DateOnly PayDate, int Days, long SafeCents, long PaceCents);
 
 /// <summary>One spending category on Home: its limit, what's spent, what's left (negative when over), and its health,
 /// the same numbers and colors as its line on the Budget tab (DECISIONS.md 255).</summary>
@@ -208,7 +203,7 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
         if (rules is not null && cardCharges.Count > 0)
         {
             var skips = await db.PaydayChecklistItems.AsNoTracking()
-                .Where(x => x.HouseholdId == householdId && x.Key.StartsWith(Payday.PaydayService.SkipPrefix + "cardspend:") && x.PayDate > cardsFrom && x.PayDate <= today)
+                .Where(x => x.HouseholdId == householdId && x.Key.StartsWith(Payday.PaydayService.SkipPrefix + "cardspend:") && x.PayDate > cardsFrom && x.PayDate <= today.AddDays(3))
                 .Select(x => new { x.PayDate, x.Key }).ToListAsync(ct);
             foreach (var skip in skips)
             {
@@ -279,30 +274,29 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             Cash: r.Cash,
             PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct),
             Spending: SpendingRows(data),
-            UntilPayday: UntilPayday(checks, today, r));
+            BeforePayday: BeforePayday(checks, today, r));
     }
 
+    /// <summary>Under this, a gap between checking and the pace isn't worth a warning.</summary>
+    public const long BeforePaydayMinGapCents = 10_00;
+
     /// <summary>
-    /// What's safe until the next payday (DECISIONS.md 264), when that's before the month ends: the budget's share for the
-    /// days until then, held to what checking can spare before it.
+    /// Whether checking might run short before the next payday (DECISIONS.md 272). Left to Spend counts the whole month's
+    /// money, including checks still to come; spending it at its own pace (safe per day) until the next payday is fine as
+    /// long as checking can spare that much after the bills, card payments and savings due from it first. Only when it
+    /// can't, by $10 or more, is there a warning. Nothing when the next payday is next month's (Left to Spend already
+    /// ends there), or when checking isn't bank-synced.
     /// </summary>
-    public static UntilPaydayDto? UntilPayday(IReadOnlyList<Payday.CheckDto> checks, DateOnly today, LeftToSpendResult r)
+    public static BeforePaydayDto? BeforePayday(IReadOnlyList<Payday.CheckDto> checks, DateOnly today, LeftToSpendResult r)
     {
         var i = checks.ToList().FindIndex(c => c.IsCurrent);
-        var next = i >= 0 && i + 1 < checks.Count ? checks[i + 1].PayDate : checks.FirstOrDefault(c => c.PayDate > today)?.PayDate;
-        if (next is not { } pay) return null;
+        if (i < 0 || i + 1 >= checks.Count || checks[i].Plan?.SpareCents is not { } spare) return null;
+        var pay = checks[i + 1].PayDate;
         var days = pay.DayNumber - today.DayNumber;
         if (days <= 0 || days >= r.DaysRemaining) return null;
-        var budget = Math.Max(0, Math.Min(r.LeftToSpendCents, r.SafeToSpendPerDayCents * days));
-        var spare = i >= 0 ? checks[i].Plan?.SpareCents : null;
-        var cents = spare is { } s ? Math.Max(0, Math.Min(budget, s)) : budget;
-        // The ring and status are this pay period's (DECISIONS.md 266): what's left of its share of the month's limits.
-        var periodDays = pay.DayNumber - (i >= 0 ? checks[i].PayDate : today).DayNumber;
-        var monthDays = r.Month.End.DayNumber - r.Month.Start.DayNumber + 1;
-        var periodBudget = r.TotalVariableLimitCents * Math.Min(periodDays, monthDays) / monthDays;
-        var shortest = Math.Min(spare ?? 0, r.LeftToSpendCents);
-        var status = LeftToSpendCalculator.StatusFor(shortest < 0 ? shortest : cents, periodBudget);
-        return new UntilPaydayDto(pay, days, cents, budget, spare, periodBudget, CurrentMonthData.StatusName(status));
+        var pace = Math.Max(0, Math.Min(r.LeftToSpendCents, r.SafeToSpendPerDayCents * days));
+        if (pace <= 0 || spare > pace - BeforePaydayMinGapCents) return null;
+        return new BeforePaydayDto(pay, days, Math.Max(0, spare), pace);
     }
 
     /// <summary>The spending categories as the Budget tab shows them (its calculator), in your budget's order.</summary>
