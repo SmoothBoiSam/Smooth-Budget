@@ -506,7 +506,8 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
           {formatCents(shown.left)}
         </p>
         <p className="mt-0.5 text-xs text-ink-faint">
-          {s.safeToSpend ? `until ${s.safeToSpend.until}` : `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'} left`}
+          {/* Just the day; the line under the ring says what lands then (DECISIONS.md 292). */}
+          {s.safeToSpend ? `until ${formatDay(s.safeToSpend.untilDate)}` : `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'} left`}
         </p>
       </div>
     </div>

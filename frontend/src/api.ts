@@ -58,7 +58,7 @@ export interface HomeSummary {
   spending: { id: string; name: string; limitCents: number; spentCents: number; leftCents: number; health: Health }[] | null
   // Safe to Spend: only when checking can't cover Left to Spend until the next payday (DECISIONS.md 276).
   // until: the first money still to land (277): "payday Dec 4", "Bonus lands Nov 24", "Jane sends $800.00".
-  safeToSpend?: { payDate: string; days: number; safeCents: number; until: string } | null
+  safeToSpend?: { payDate: string; days: number; safeCents: number; until: string; untilDate: string } | null
   /** Home's Month overview (DECISIONS.md 286): money in, minus each kind of plan, down to what isn't planned yet. */
   overview?: MonthOverview | null
   /** The next paycheck, once a schedule or pay stub is in. */

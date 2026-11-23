@@ -425,11 +425,15 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Null(Warn(1_500_00, nextIn: 25));
 
         // DECISIONS.md 277: it says what it's waiting for, the first money still to land before payday, or else payday.
-        Assert.Equal("payday Nov 23", Warn(1_000_00)!.Until);
+        Assert.Equal(("payday Nov 23", new DateOnly(2026, 11, 23)), (Warn(1_000_00)!.Until, Warn(1_000_00)!.UntilDate));
         string? Until(params ComingDto[] coming) => HomeSummaryService.SafeToSpend(
             [Check(new DateOnly(2026, 11, 6), true, 1_000_00, coming), Check(new DateOnly(2026, 11, 23), false, null)], today, Month(1_200_00, 60_00))?.Until;
         Assert.Equal("Bonus lands Nov 20", Until(new ComingDto("Bonus lands Nov 20", 500_00, new DateOnly(2026, 11, 20)), new ComingDto("Jane sends $800.00", 800_00, new DateOnly(2026, 11, 21))));
         Assert.Equal("payday Nov 23", Until(new ComingDto("Bonus lands Nov 25", 500_00, new DateOnly(2026, 11, 25))));
+        // Home's ring gives just the day (DECISIONS.md 292): the bonus's, not payday's.
+        Assert.Equal(new DateOnly(2026, 11, 20), HomeSummaryService.SafeToSpend(
+            [Check(new DateOnly(2026, 11, 6), true, 1_000_00, [new ComingDto("Bonus lands Nov 20", 500_00, new DateOnly(2026, 11, 20))]), Check(new DateOnly(2026, 11, 23), false, null)],
+            today, Month(1_200_00, 60_00))!.UntilDate);
     }
 
     [Fact]
