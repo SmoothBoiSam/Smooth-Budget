@@ -57,6 +57,12 @@ public class Household
     /// <summary>Notification types you turned off in More → Settings (DECISIONS.md 163). Everything else is on.</summary>
     public List<string> NotificationsOff { get; set; } = [];
 
+    /// <summary>
+    /// When bill categories became one line per bill (DECISIONS.md 279): done once per household, so a bill that later
+    /// lands in another bill's line isn't moved without asking.
+    /// </summary>
+    public DateTime? BillLinesSplitUtc { get; set; }
+
     /// <summary>A copy of the demo started from the sign-in screen (DECISIONS.md 213): deleted after this time. Null for real households.</summary>
     public DateTime? DemoUntilUtc { get; set; }
 

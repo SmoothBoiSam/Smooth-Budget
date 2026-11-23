@@ -69,7 +69,7 @@ export function Alert({
         </p>
         <div className={actions}>
           <button type="button" onClick={() => onTrackAsBill(i)} className={smallBtnOn}>
-            Make it a Bill Category
+            Make it a bill
           </button>
           {i.categoryName && (
             <button type="button" onClick={() => onUpdate({ key: i.key, confirmed: true }, `${i.name} stays under ${i.categoryName}.`)} className={`${smallBtn} text-ink`}>

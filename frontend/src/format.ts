@@ -51,3 +51,12 @@ export function ordinal(n: number): string {
 
 /** The bar color for a category's health, on the Budget tab and Home. */
 export const healthBar: Record<Health, string> = { onTrack: 'bg-good', low: 'bg-gold', over: 'bg-danger' }
+
+/**
+ * Maxed (DECISIONS.md 280): a spending category with nothing left of what it can have. Limits grow to fit what's spent
+ * (268), so "$0 left" is as full as it gets: the bar goes red and it says Maxed.
+ */
+export const isMaxed = (spentCents: number, leftCents: number) => spentCents > 0 && leftCents <= 0
+
+/** A spending category's bar color: red when it's maxed, else by its health. */
+export const spendingBar = (health: Health, spentCents: number, leftCents: number) => (isMaxed(spentCents, leftCents) ? 'bg-danger' : healthBar[health])

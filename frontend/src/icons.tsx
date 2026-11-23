@@ -95,6 +95,23 @@ export const icons = {
       <rect x="5.5" y="25.8" width="21" height="1.4" rx="0.7" fill={C.ring} />
     </>,
   ),
+  /** A list under a magnifier with a gold coin for its lens: Money → Transactions and search (DECISIONS.md 282). */
+  search: art(
+    <>
+      {outlined(<rect x="3.5" y="4" width="19" height="22" rx="3" fill={C.body} />)}
+      <rect x="7" y="8.5" width="12" height="2.2" rx="1.1" fill={C.ring} />
+      <rect x="7" y="13.5" width="8" height="2.2" rx="1.1" fill={C.ring} />
+      <rect x="7" y="18.5" width="5" height="2.2" rx="1.1" fill={C.ring} />
+      {outlined(
+        <>
+          <rect x="24.2" y="21.5" width="3.6" height="8.5" rx="1.8" transform="rotate(-45 26 25.75)" fill={C.body} />
+          <circle cx="20.5" cy="19.5" r="6" fill={C.coinRim} />
+        </>,
+      )}
+      <circle cx="20.5" cy="19.5" r="4.5" fill={C.coin} />
+      <path d="M18 17.6a3.2 3.2 0 0 1 2.4-1.4" stroke="#fff" strokeOpacity={0.8} strokeWidth={1.3} strokeLinecap="round" fill="none" />
+    </>,
+  ),
   /** A wallet with a coin peeking out: the Money tab, once Plan (DECISIONS.md 256). */
   money: art(
     <>

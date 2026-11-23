@@ -9,6 +9,16 @@ export interface PickUp {
   takeHomePerHourCents: number
 }
 
+/** Home's Month overview (DECISIONS.md 286). notPlannedCents is below zero when the plan is more than the month's money. */
+export interface MonthOverview {
+  incomeExpectedCents: number
+  incomeReceivedCents: number
+  lines: { key: 'bills' | 'spending' | 'debt' | 'savings'; label: string; limitCents: number; spentCents: number }[]
+  carriedOverCents: number
+  notInCategoryCents: number
+  notPlannedCents: number
+}
+
 export interface HomeSummary {
   budgetMonth: { start: string; end: string; label: string }
   today: string
@@ -49,6 +59,8 @@ export interface HomeSummary {
   // Safe to Spend: only when checking can't cover Left to Spend until the next payday (DECISIONS.md 276).
   // until: the first money still to land (277): "payday Dec 4", "Bonus lands Nov 24", "Jane sends $800.00".
   safeToSpend?: { payDate: string; days: number; safeCents: number; until: string } | null
+  /** Home's Month overview (DECISIONS.md 286): money in, minus each kind of plan, down to what isn't planned yet. */
+  overview?: MonthOverview | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */
@@ -361,6 +373,8 @@ export interface BudgetCategoryLine {
   spentCents: number
   remainingCents: number
   health: Health
+  /** For Card interest: each card's expected interest this month (DECISIONS.md 285). */
+  expectedInterest?: { card: string; cents: number; aprBps: number }[] | null
   transactionCount: number
   /** What the partner's fixed contribution covers of this line (Rent: the $800). */
   partnerOffsetCents: number

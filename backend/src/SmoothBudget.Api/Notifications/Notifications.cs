@@ -92,8 +92,12 @@ public class NotificationService(
     AppDbContext db, TimeProvider clock, IPushSender sender, Home.HomeSummaryService home, Budget.BudgetSummaryService budget,
     Bills.RecurringService recurring, Payday.PaydayService payday)
 {
-    /// <summary>No buzzing at night: news waits for the morning.</summary>
+    /// <summary>
+    /// Reminders on a schedule (payday, bills due tomorrow, the weekly review) wait for these daytime hours. Alerts about
+    /// something that just happened come any time (DECISIONS.md 291).
+    /// </summary>
     public const int FirstHour = 8, LastHour = 21;
+    public static readonly string[] Scheduled = ["payday", "bills", "review"];
     /// <summary>The weekly review reminder: Sunday, from this hour.</summary>
     public const int ReviewHour = 17;
 
@@ -101,7 +105,7 @@ public class NotificationService(
     [
         ("payday", "Payday", "The day a paycheck lands, with about how much."),
         ("bills", "Bills due tomorrow", "The day before a bill or subscription is charged."),
-        ("over", "Category over budget", "When a spending category goes over its limit, once a month each."),
+        ("over", "Category maxed", "When a spending category's limit is all spent, or it goes over, once a month each."),
         ("low", "Left to Spend running low", "When under 15% of this month's spending money is left, and again if it drops below zero."),
         ("cash", "Safe to Spend", "When checking can't cover Left to Spend before your next check, so it's adjusted."),
         ("price", "Bill price went up", "When a bill or subscription charges more than it used to."),
@@ -132,15 +136,15 @@ public class NotificationService(
         var household = await db.Households.AsNoTracking().SingleAsync(h => h.Id == householdId, ct);
         var zone = TimeZoneInfo.FindSystemTimeZoneById(household.TimeZoneId);
         var local = TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone);
-        if (local.Hour < FirstHour || local.Hour >= LastHour) return 0;
+        var night = local.Hour < FirstHour || local.Hour >= LastHour;
 
         var sent = (await db.NotificationLogs.Where(l => l.HouseholdId == householdId).Select(l => l.Key).ToListAsync(ct)).ToHashSet();
         var news = new List<(string Key, PushMessage Message)>();
         // A type you turned off isn't logged as sent either, so turning it back on picks up what's still true.
         foreach (var n in await WhatsNewAsync(household, local, ct))
-            if (!sent.Contains(n.Key) && !household.NotificationsOff.Contains(n.Type)) news.Add((n.Key, n.Message));
-        // Several over-budget categories (or price rises) at once arrive as one notification.
-        Merge(news, "over:", "Over budget", "#/budget", "over");
+            if (!sent.Contains(n.Key) && !household.NotificationsOff.Contains(n.Type) && !(night && Scheduled.Contains(n.Type))) news.Add((n.Key, n.Message));
+        // Several maxed categories (or price rises) at once arrive as one notification.
+        Merge(news, "over:", "Categories maxed", "#/budget", "over");
         Merge(news, "price:", "Bill prices went up", "#/budget", "price");
 
         foreach (var (key, message) in news)
@@ -185,9 +189,14 @@ public class NotificationService(
                 string.Join(", ", due.Select(b => $"{b.Name} {PayEngine.Dollars(b.AmountCents)}")), "#/budget", "bills")));
 
         var b = await budget.GetAsync(householdId, ct);
-        foreach (var line in b.Groups.Where(g => g.CountsTowardLeftToSpend).SelectMany(g => g.Categories).Where(c => c.RemainingCents < 0 && c.LimitCents > 0))
-            list.Add(("over", $"over:{b.BudgetMonth.Start:yyyy-MM-dd}:{line.Id}", new PushMessage("Over budget",
-                $"{line.Name} is {PayEngine.Dollars(-line.RemainingCents)} over this month.", "#/budget", "over")));
+        // Maxed (DECISIONS.md 280): the limit is all spent, or more. Once a month each, so going over after it's maxed
+        // doesn't buzz again.
+        foreach (var line in b.Groups.Where(g => g.CountsTowardLeftToSpend).SelectMany(g => g.Categories)
+                     .Where(c => c.LimitCents > 0 && c.SpentCents > 0 && c.RemainingCents <= 0))
+            list.Add(("over", $"over:{b.BudgetMonth.Start:yyyy-MM-dd}:{line.Id}", new PushMessage("Category maxed",
+                line.RemainingCents < 0
+                    ? $"{line.Name} is maxed, {PayEngine.Dollars(-line.RemainingCents)} over this month."
+                    : $"{line.Name} is maxed: its {PayEngine.Dollars(line.LimitCents)} is all spent this month.", "#/budget", "over")));
 
         // Left to Spend: once when it runs low, and once more if it goes below zero, each budget month.
         var month = $"{h.BudgetMonth.Start:yyyy-MM-dd}";
@@ -235,7 +244,7 @@ public class NotificationService(
     public async Task SendTestAsync(Guid householdId, CancellationToken ct)
     {
         foreach (var device in await db.PushDevices.Where(d => d.HouseholdId == householdId).ToListAsync(ct))
-            if (!await sender.SendAsync(device, new PushMessage("Smooth Budget", "Notifications are on. Choose which kinds you get in More → Settings.", "#/", "test"), ct))
+            if (!await sender.SendAsync(device, new PushMessage("Smooth Budget", "Notifications are on. Choose which kinds you get in More → Notifications.", "#/", "test"), ct))
                 db.PushDevices.Remove(device);
         await db.SaveChangesAsync(ct);
     }

@@ -99,8 +99,8 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         var categories = DefaultCategories(householdId);
         db.Categories.AddRange(categories);
         Category C(string name) => categories.Single(c => c.Name == name);
-        var (rent, phone, insurance, utilities, subscriptions, cardPayment, rainyDay) =
-            (C("Rent"), C("Phone"), C("Car insurance"), C("Utilities & internet"), C("Subscriptions"), C("Credit card payment"), C("Rainy-day fund"));
+        var (rent, phone, insurance, internet, power, subscriptions, cardPayment, rainyDay) =
+            (C("Rent"), C("Phone"), C("Car insurance"), C("Internet"), C("Power"), C("Subscriptions"), C("Credit card payment"), C("Rainy-day fund"));
         // Her $800 toward rent as a fixed contribution (milestone 7), for every demo month.
         db.PartnerArrangements.Add(new PartnerArrangement
         {
@@ -122,8 +122,8 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             (3, visa, phone, "Example Wireless", 65_00, false),
             (5, mastercard, subscriptions, "StreamCo", 15_49, false),
             (10, checking, insurance, "Acme Auto Insurance", 120_00, false),
-            (12, visa, utilities, "Front Range Internet", 70_00, false),
-            (14, checking, utilities, "City Power & Light", 68_40, false),
+            (12, visa, internet, "Front Range Internet", 70_00, false),
+            (14, checking, power, "City Power & Light", 68_40, false),
 
             // Transfers: both legs excluded from spending.
             (1, checking, rainyDay, "Transfer to Demo Savings", 100_00, true),
@@ -259,7 +259,9 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             New("Rent", CategoryType.FixedBill, 1_650_00),
             New("Phone", CategoryType.FixedBill, 65_00),
             New("Car insurance", CategoryType.FixedBill, 120_00),
-            New("Utilities & internet", CategoryType.FixedBill, 140_00),
+            // One line per bill (DECISIONS.md 279).
+            New("Internet", CategoryType.FixedBill, 70_00),
+            New("Power", CategoryType.FixedBill, 70_00),
             New("Subscriptions", CategoryType.FixedBill, 35_00),
             // What's left of the month's $3,260.86 after everything else, so the plan uses exactly the money coming in
             // (a plan beyond it comes off Left to Spend, DECISIONS.md 178).

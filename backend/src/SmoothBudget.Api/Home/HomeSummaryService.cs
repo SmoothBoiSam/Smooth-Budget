@@ -48,7 +48,21 @@ public record HomeSummaryDto(
     // Each spending category, in your budget's order, for the small tiles under Left to Spend (DECISIONS.md 254).
     IReadOnlyList<HomeCategoryDto>? Spending = null,
     // Safe to Spend: only when checking can't cover Left to Spend until the next payday (DECISIONS.md 276).
-    SafeToSpendDto? SafeToSpend = null);
+    SafeToSpendDto? SafeToSpend = null,
+    // Home's Month overview (DECISIONS.md 286): the month's money in, minus each kind of plan, down to what isn't planned yet.
+    MonthOverviewDto? Overview = null);
+
+/// <summary>
+/// Home's Month overview (DECISIONS.md 286): money in at the top (received of expected), then each group's limit and
+/// what's spent or paid, then carried-over overspending and spending not in a category, down to what's left unplanned.
+/// </summary>
+/// <param name="NotPlannedCents">Money in minus every limit, the carried-over amount and the unfiled spending. Below zero
+/// when the plan is more than the month's money.</param>
+public record MonthOverviewDto(long IncomeExpectedCents, long IncomeReceivedCents, IReadOnlyList<OverviewLineDto> Lines,
+    long CarriedOverCents, long NotInCategoryCents, long NotPlannedCents);
+
+/// <param name="Key">bills, spending, debt or savings: the Budget tab group it adds up.</param>
+public record OverviewLineDto(string Key, string Label, long LimitCents, long SpentCents);
 
 /// <summary>
 /// Safe to Spend (DECISIONS.md 276): Left to Spend is more than checking can cover until the next payday, so Home shows
@@ -269,7 +283,29 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             Cash: r.Cash,
             PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct),
             Spending: SpendingRows(data),
-            SafeToSpend: SafeToSpend(checks, today, r));
+            SafeToSpend: SafeToSpend(checks, today, r),
+            Overview: Overview(data, r));
+    }
+
+    /// <summary>Home's Month overview (DECISIONS.md 286), from the Budget tab's own groups so the two always agree.</summary>
+    public static MonthOverviewDto Overview(CurrentMonthData data, LeftToSpendResult r)
+    {
+        var groups = Budget.BudgetSummaryService.GroupsFor(data, []);
+        OverviewLineDto Line(Core.Budgeting.CategoryType type, string key, string label)
+        {
+            var g = groups.FirstOrDefault(x => x.Type == type.ToString());
+            return new OverviewLineDto(key, label, g?.LimitCents ?? 0, g?.SpentCents ?? 0);
+        }
+        var lines = new[]
+        {
+            Line(Core.Budgeting.CategoryType.FixedBill, "bills", "Bills"),
+            Line(Core.Budgeting.CategoryType.Variable, "spending", "Spending"),
+            Line(Core.Budgeting.CategoryType.DebtPayment, "debt", "Debt"),
+            Line(Core.Budgeting.CategoryType.SavingsTransfer, "savings", "Savings"),
+        };
+        var (expected, received) = Budget.BudgetSummaryService.MoneyInSoFar(data);
+        var notPlanned = expected - lines.Sum(l => l.LimitCents) - r.CarriedInDeficitCents - r.UnfiledSpendingCents;
+        return new MonthOverviewDto(expected, received, lines, r.CarriedInDeficitCents, r.UnfiledSpendingCents, notPlanned);
     }
 
     /// <summary>Under this, a gap between checking and Left to Spend isn't worth a warning.</summary>

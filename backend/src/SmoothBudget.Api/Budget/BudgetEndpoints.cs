@@ -78,7 +78,8 @@ public static class BudgetEndpoints
             return Results.Ok(new { c.Id, Categorization = filed });
         });
 
-        g.MapPut("/categories/{id:guid}", async (Guid id, UpdateCategoryRequest req, HttpContext ctx, AppDbContext db, BudgetMonthService months, CategorizationService categorization, CancellationToken ct) =>
+        g.MapPut("/categories/{id:guid}", async (Guid id, UpdateCategoryRequest req, HttpContext ctx, AppDbContext db, BudgetMonthService months, CategorizationService categorization,
+            Bills.RecurringService recurring, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
             var c = await db.Categories.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
@@ -88,6 +89,7 @@ public static class BudgetEndpoints
             if (await db.Categories.AnyAsync(x => x.HouseholdId == householdId && x.Name == name && x.Id != id, ct))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["A category with that name already exists."] });
 
+            var renamedBill = c.Type == CategoryType.FixedBill && req.Type == CategoryType.FixedBill && c.Name != name;
             c.Name = name;
             c.Type = req.Type;
             if (req.Priority is { } priority) c.Priority = priority;
@@ -117,6 +119,7 @@ public static class BudgetEndpoints
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["applyTo"] = ["Use \"month\" or \"permanent\"."] });
             }
             await db.SaveChangesAsync(ct);
+            if (renamedBill) await recurring.NameBillAfterLineAsync(householdId, id, name, ct); // a bill and its line share a name (DECISIONS.md 279)
             await categorization.RunAsync(householdId, ct); // a renamed, retyped or hidden category changes what fits
             return Results.NoContent();
         });

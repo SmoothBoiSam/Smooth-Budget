@@ -111,7 +111,8 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
 
     public async Task<bool> UpdateAsync(Guid householdId, RecurringUpdateRequest req, CancellationToken ct)
     {
-        var series = (await DetectAsync(householdId, ct)).FirstOrDefault(s => s.Key == req.Key);
+        var detected = await DetectAsync(householdId, ct);
+        var series = detected.FirstOrDefault(s => s.Key == req.Key);
         var row = await db.RecurringItems.SingleOrDefaultAsync(r => r.HouseholdId == householdId && r.Key == req.Key, ct);
         if (series is null && row is null)
             return false;
@@ -120,7 +121,21 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
             row = new RecurringItem { Id = Guid.NewGuid(), HouseholdId = householdId, Key = req.Key };
             db.RecurringItems.Add(row);
         }
-        if (req.Name is not null) row.Name = string.IsNullOrWhiteSpace(req.Name) ? null : req.Name.Trim();
+        if (req.Name is not null)
+        {
+            row.Name = string.IsNullOrWhiteSpace(req.Name) ? null : req.Name.Trim();
+            // A bill and its line are one thing (DECISIONS.md 279): renaming the bill renames its line, when it's the
+            // line's only bill and no other line has that name.
+            var newName = row.Name ?? series?.Name;
+            if (newName is not null && series?.CategoryId is { } lineId && detected.Count(s => s.CategoryId == lineId) == 1)
+            {
+                newName = newName.Length > 100 ? newName[..100] : newName;
+                var line = await db.Categories.SingleOrDefaultAsync(c => c.Id == lineId && c.HouseholdId == householdId && c.Type == CategoryType.FixedBill, ct);
+                if (line is not null && line.Name != CardInterest.CategoryName && line.Name != newName
+                    && !await db.Categories.AnyAsync(c => c.HouseholdId == householdId && c.Id != lineId && c.Name.ToLower() == newName.ToLower(), ct))
+                    line.Name = newName;
+            }
+        }
         if (req.Kind is { } kind) row.Kind = kind;
         if (req.DueDay is { } day) row.DueDay = day;
         if (req.ClearDueDay) row.DueDay = null;
@@ -201,6 +216,63 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         return (cat.Id, cat.Name);
     }
 
+    /// <summary>
+    /// One bill per line (DECISIONS.md 279): there are no bill categories any more, just your bills. Done once per
+    /// household. A line holding several bills keeps one (the one it's named after, or else the biggest) and takes its
+    /// name; every other bill still going gets a line of its own, named after it, and its charges move there, with a
+    /// merchant rule for future ones. A limit you set on the old line comes down by what moved out. Bills that have
+    /// stopped stay where they are, as history. Card interest isn't a bill of yours, so it's left alone.
+    /// </summary>
+    /// <returns>How many bills got a line of their own.</returns>
+    public async Task<int> SplitBillLinesAsync(Guid householdId, CancellationToken ct)
+    {
+        var household = await db.Households.SingleAsync(h => h.Id == householdId, ct);
+        if (household.BillLinesSplitUtc is not null) return 0;
+        static bool Stopped(Item i) => i.Dto.Status is "canceled" or "possiblyCanceled";
+        var items = (await ItemsAsync(householdId, ct))
+            .Where(i => !i.Dismissed && i.Dto.InBillCategory && i.Dto.CategoryId is not null && i.Dto.ReplacedBy is null && !Stopped(i)).ToList();
+        var split = 0;
+        foreach (var group in items.GroupBy(i => i.Dto.CategoryId!.Value).Where(g => g.Count() > 1))
+        {
+            var line = await db.Categories.SingleOrDefaultAsync(c => c.Id == group.Key && c.HouseholdId == householdId, ct);
+            if (line is null || CardInterest.IsInterestCategory(line.Name, line.Type)) continue;
+            var keep = group.FirstOrDefault(i => string.Equals(i.Dto.Name, line.Name, StringComparison.OrdinalIgnoreCase))
+                       ?? group.MaxBy(i => i.Dto.MonthlyCents)!;
+            foreach (var other in group.Where(i => i != keep))
+            {
+                var own = await BillLineAsync(householdId, other.Dto.Name, other.Dto.MonthlyCents, ct);
+                if (own.Id == line.Id) continue;
+                await FileUnderAsync(householdId, other, own.Id, "Its own line: each bill has one now.", ct);
+                if (line.LimitSetByUser) line.MonthlyLimitCents = Math.Max(0, line.MonthlyLimitCents - other.Dto.MonthlyCents);
+                split++;
+            }
+            var name = keep.Dto.Name.Length > 100 ? keep.Dto.Name[..100] : keep.Dto.Name;
+            if (!await db.Categories.AnyAsync(c => c.HouseholdId == householdId && c.Id != line.Id && c.Name.ToLower() == name.ToLower(), ct))
+                line.Name = name;
+            await db.SaveChangesAsync(ct);
+        }
+        household.BillLinesSplitUtc = clock.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(ct);
+        return split;
+    }
+
+    /// <summary>
+    /// A bill line you renamed (DECISIONS.md 279): its bill takes the same name, when it's the line's only bill.
+    /// </summary>
+    public async Task NameBillAfterLineAsync(Guid householdId, Guid lineId, string name, CancellationToken ct)
+    {
+        var inLine = (await DetectAsync(householdId, ct)).Where(s => s.CategoryId == lineId).ToList();
+        if (inLine.Count != 1) return;
+        var key = inLine[0].Key;
+        var row = await db.RecurringItems.SingleOrDefaultAsync(r => r.HouseholdId == householdId && r.Key == key, ct);
+        if (row is null)
+            db.RecurringItems.Add(row = new RecurringItem { Id = Guid.NewGuid(), HouseholdId = householdId, Key = key });
+        if (row.Name == name) return;
+        row.Name = name;
+        row.UpdatedUtc = clock.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>The bill category with this name (shown again if hidden), or a new one at the end of your budget.</summary>
     private async Task<Category> BillLineAsync(Guid householdId, string name, long monthlyCents, CancellationToken ct)
     {
@@ -241,7 +313,9 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
         var lines = await db.Categories.AsNoTracking()
             .Where(c => c.HouseholdId == householdId && c.Type == CategoryType.FixedBill && !c.IsHidden && c.Name != CardInterest.CategoryName)
             .OrderBy(c => c.SortOrder).ThenBy(c => c.Name).Select(c => new BillLineDto(c.Id, c.Name)).ToListAsync(ct);
-        lines = lines.Where(l => !bills.Any(b => b.CategoryName == l.Name && string.Equals(b.Name, l.Name, StringComparison.OrdinalIgnoreCase))).ToList();
+        // Only lines that don't have a bill yet (DECISIONS.md 279): each bill is its own line, so a charge goes in one of
+        // those as its bill, joins a bill you have, or is a new bill with a line of its own.
+        lines = lines.Where(l => !items.Any(i => i.Dto.InBillCategory && i.Dto.CategoryId == l.Id && i.Dto.Status != "canceled")).ToList();
         return new ChargeBillChoicesDto(bills, lines,
             own is { Dto.InBillCategory: true } ? own.Dto.Key : null,
             own is { Dto.InBillCategory: false } ? own.Dto.Key : null,

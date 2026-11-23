@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, api, budgetApi, onDataChanged, payBadge, paydayApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
 import HomeScreen from './HomeScreen'
+import { homeNotices } from './homeNotices'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
 import FriendsScreen from './FriendsScreen'
@@ -146,6 +147,15 @@ export default function App() {
     }, [me, reportsPlan, refreshInbox, refreshPlan]),
   )
 
+  // The Home tab's bubble (DECISIONS.md 283): the cards on Home that want a look, from Home's last summary on this phone.
+  // Until Home reports its own, the count comes from what this phone saved.
+  const [liveHomeCount, setHomeCount] = useState<number | null>(null)
+  const savedHomeCount = useMemo(() => {
+    const h = me ? saved.home(me.householdId) : null
+    return h ? homeNotices(h.summary, false).length : 0
+  }, [me])
+  const homeCount = liveHomeCount ?? savedHomeCount
+
   // Review passes the count it already has, so the badge doesn't ask the server again.
   const reviewChanged = useCallback((known?: number) => (typeof known === 'number' ? setInboxCount(known) : refreshInbox()), [refreshInbox])
 
@@ -179,7 +189,7 @@ export default function App() {
 
   if (me === undefined) {
     return (
-      <div role="status" className="flex min-h-screen items-center justify-center text-ink-faint">
+      <div role="status" className="flex min-h-dvh items-center justify-center text-ink-faint">
         Loading…
       </div>
     )
@@ -193,7 +203,7 @@ export default function App() {
       <ConfirmHost />
       {me.demo && <DemoBar onLeave={() => void api.logout().finally(() => { window.history.replaceState(null, '', '#/'); signedOut() })} />}
       <div ref={screen}>
-      {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} />}
+      {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} onNoticeCount={setHomeCount} />}
       {(route === 'budget' || route === 'transactions') && <BudgetScreen key={route} onChanged={refreshInbox} onSignedOut={signedOut} />}
       {route === 'tasks' && (
         <TasksScreen
@@ -214,7 +224,7 @@ export default function App() {
       {route === 'friend' && <FriendScreen key={window.location.hash} id={window.location.hash.slice('#/friends/'.length)} onSignedOut={signedOut} />}
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
       </div>
-      <BottomNav route={route} badges={{ tasks: inboxCount + planCount }} />
+      <BottomNav route={route} badges={{ home: homeCount, tasks: inboxCount + planCount }} />
     </>
   )
 }

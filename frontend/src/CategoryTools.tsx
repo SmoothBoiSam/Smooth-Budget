@@ -4,7 +4,7 @@ import { formatCents, formatDay } from './format'
 
 const groups: { type: Category['type']; label: string }[] = [
   { type: 'Variable', label: 'Spending Categories' },
-  { type: 'FixedBill', label: 'Bill Categories' },
+  { type: 'FixedBill', label: 'Bills' },
   { type: 'DebtPayment', label: 'Debt payments' },
   { type: 'SavingsTransfer', label: 'Savings' },
 ]

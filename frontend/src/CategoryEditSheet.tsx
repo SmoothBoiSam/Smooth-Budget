@@ -151,12 +151,12 @@ export default function CategoryEditSheet({
               too. This can’t be undone.
             </p>
             {mergeable.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-soft">There’s no other {listedType(self!) === 'FixedBill' ? 'bill category' : 'spending category'} to merge it into.</p>
+              <p className="mt-3 text-sm text-ink-soft">There’s no other {listedType(self!) === 'FixedBill' ? 'bill' : 'spending category'} to merge it into.</p>
             ) : (
               <>
                 <select value={into} onChange={(e) => setInto(e.target.value)} aria-label="Merge into" className="mt-3 block w-full rounded-xl neu-inset px-3 py-2.5 text-base">
                   <option value="" disabled>
-                    {listedType(self!) === 'FixedBill' ? 'Pick a bill category…' : 'Pick a spending category…'}
+                    {listedType(self!) === 'FixedBill' ? 'Pick a bill…' : 'Pick a spending category…'}
                   </option>
                   {mergeable.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -196,7 +196,7 @@ export default function CategoryEditSheet({
                   {(
                     [
                       ['Variable', 'Spending Category'],
-                      ['FixedBill', 'Bill Category'],
+                      ['FixedBill', 'Bill'],
                     ] as const
                   ).map(([t, label]) => (
                     <button
@@ -329,7 +329,7 @@ export default function CategoryEditSheet({
                       <button type="button" disabled={busy} onClick={() => setPart('merge')} className={action}>
                         <span>
                           Merge into another…
-                          <span className="block text-xs font-normal text-ink-soft">Combine it with another {listedType(self) === 'FixedBill' ? 'bill category' : 'spending category'}: transactions and limits together.</span>
+                          <span className="block text-xs font-normal text-ink-soft">Combine it with another {listedType(self) === 'FixedBill' ? 'bill' : 'spending category'}: transactions and limits together.</span>
                         </span>
                         <Chevron />
                       </button>

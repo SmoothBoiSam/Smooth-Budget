@@ -7,8 +7,8 @@ import { Card, Page, PageHeader, Row, Rows } from './ui'
 
 /**
  * The Tasks tab (DECISIONS.md 206): everything waiting on you, in one card like Plan's. Each part opens its own page and
- * carries its own count on its icon (the tab bar shows their sum): transactions to confirm, bills to look at, and the steps for the check you're on. Pay period
- * tasks only show once there's a paycheck forecast (schedule or pay stubs).
+ * carries its own count on its icon (the tab bar shows their sum): transactions to confirm, bills to look at, and the steps for the check you're on.
+ * Every part is always listed (DECISIONS.md 288); one with nothing to do yet is faded and doesn't open.
  */
 export default function TasksScreen({
   inboxCount,
@@ -54,7 +54,9 @@ export default function TasksScreen({
     ? steps > 0
       ? `${steps} to do for the check paid ${weekday(current.payDate)}`
       : `All done for the check paid ${weekday(current.payDate)}`
-    : 'The steps for your next check'
+    : hasPayTasks
+      ? 'The steps for your next check'
+      : 'Once Income has your schedule or a pay stub'
 
   return (
     <Page>
@@ -69,17 +71,16 @@ export default function TasksScreen({
             badge={inboxCount}
             href="#/tasks/transactions"
           />
-          {hasPayTasks && (
-            <Row
-              icon={icons.payTasks}
-              label={<span className="font-semibold">Pay period tasks</span>}
-              hint={payHint}
-              badge={steps}
-              href="#/tasks/payday"
-            />
-          )}
+          <Row
+            icon={icons.payTasks}
+            label={<span className="font-semibold">Pay period tasks</span>}
+            hint={payHint}
+            badge={steps}
+            href="#/tasks/payday"
+            disabled={!hasPayTasks}
+          />
           {/* Schedules and stubs to upload (DECISIONS.md 238): they keep the paycheck forecast right. */}
-          {uploads.length > 0 && (
+          {uploads.length > 0 ? (
             <Row
               icon={icons.payday}
               label={
@@ -91,6 +92,8 @@ export default function TasksScreen({
               badge={uploads.length}
               href="#/income"
             />
+          ) : (
+            <Row icon={icons.payday} label={<span className="font-semibold">Upload</span>} hint="Nothing to upload right now" disabled />
           )}
         </Rows>
       </Card>

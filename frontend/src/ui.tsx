@@ -7,7 +7,7 @@ import { formatDay } from './format'
 
 /** Every screen's frame: one width, one gutter, room above the bottom nav. */
 export function Page({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`mx-auto min-h-screen max-w-md px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[calc(7rem+env(safe-area-inset-bottom))] ${className}`}>{children}</div>
+  return <div className={`mx-auto max-w-md px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[calc(7rem+env(safe-area-inset-bottom))] ${className}`}>{children}</div>
 }
 
 /** Every screen's title. A sub-page gets a back pill above it; `action` sits on the right (a small button or link). */
@@ -82,8 +82,11 @@ export function Row({
   badge,
   href,
   onClick,
+  disabled,
 }: {
   label: ReactNode
+  /** Not available yet: shown faded and not a link (DECISIONS.md 288). */
+  disabled?: boolean
   icon?: ReactNode
   /** A count on the icon's corner, like the tab bar's. */
   badge?: number
@@ -117,13 +120,17 @@ export function Row({
       {value !== undefined && (
         <span className={`shrink-0 whitespace-nowrap font-semibold tabular-nums ${tone === 'danger' ? 'text-danger' : tone === 'good' ? 'text-good' : ''}`}>{value}</span>
       )}
-      {(href || onClick) && <Chevron />}
+      {(href || onClick) && !disabled && <Chevron />}
     </>
   )
   const cls = 'flex w-full items-center gap-3 px-5 py-3.5 text-left text-sm'
   return (
     <li>
-      {href ? (
+      {disabled ? (
+        <div className={cls + ' opacity-45'} aria-disabled>
+          {inner}
+        </div>
+      ) : href ? (
         <a href={href} className={cls}>
           {inner}
         </a>

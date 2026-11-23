@@ -101,6 +101,16 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal("healthy", s.Status);
         Assert.NotNull(s.LastUpdatedUtc);
         Assert.False(s.IncomeUnknown);
+
+        // Month overview (DECISIONS.md 286): the Budget tab's groups, and money in minus all of it equals what's not planned.
+        var o = s.Overview!;
+        Assert.Equal(["bills", "spending", "debt", "savings"], o.Lines.Select(l => l.Key));
+        Assert.Equal((1_010_00L, 488_83L), (o.Lines[1].LimitCents, o.Lines[1].SpentCents));
+        Assert.Equal(42_50, o.CarriedOverCents);
+        Assert.Equal(o.IncomeExpectedCents - o.Lines.Sum(l => l.LimitCents) - o.CarriedOverCents - o.NotInCategoryCents, o.NotPlannedCents);
+        var budget = (await client.GetFromJsonAsync<SmoothBudget.Api.Budget.BudgetSummaryDto>("/api/budget/summary", Json))!;
+        Assert.Equal(budget.Groups.Single(g => g.Type == "FixedBill").LimitCents, o.Lines[0].LimitCents);
+        Assert.Equal(budget.IncomeReceivedCents + budget.PartnerReceivedCents, o.IncomeReceivedCents);
     }
 
     [Fact]
@@ -286,7 +296,8 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
 
         // Bills, debt and savings show what has been paid, and never touch Left to Spend.
         Assert.Equal((1_650_00L, 0L), (Cat(b, "Rent").SpentCents, Cat(b, "Rent").RemainingCents));
-        Assert.Equal(70_00 + 68_40, Cat(b, "Utilities & internet").SpentCents);
+        Assert.Equal(70_00, Cat(b, "Internet").SpentCents);
+        Assert.Equal(68_40, Cat(b, "Power").SpentCents);
         Assert.Equal(15_49, Cat(b, "Subscriptions").SpentCents);
         Assert.Equal(0, Cat(b, "Credit card payment").SpentCents); // not paid yet on 11-20
         Assert.Equal(100_00, Cat(b, "Rainy-day fund").SpentCents);  // the transfer to savings counts here

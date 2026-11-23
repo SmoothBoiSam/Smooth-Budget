@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { recurringApi, listedType, type Category, type RecurringItem, type RecurringUpdate } from './api'
+import { recurringApi, type Category, type RecurringItem, type RecurringUpdate } from './api'
 import { dayYear, every, keepLookingMessage, price, type SheetPart } from './bills'
 import { Chevron, sheetCls, smallBtn } from './ui'
 import { formatCents, formatDay } from './format'
@@ -51,7 +51,7 @@ export default function BillSheet({
       onTrackAsBill={(i) =>
         void run(async () => {
           const r = await recurringApi.trackAsBill(i.key)
-          return `${r.name} is its own bill category now, and its charges moved there. Future charges follow it.`
+          return `${r.name} is a bill now, with its own line in your budget. Its charges moved there, and future ones follow.`
         })
       }
       onNotABill={(i, categoryId) =>
@@ -146,14 +146,10 @@ function ItemSheet({
   const [part, setPart] = useState<SheetPart>(start)
   const [name, setName] = useState(i.name)
   const [due, setDue] = useState(i.dueDay ? String(i.dueDay) : '')
-  const [categoryId, setCategoryId] = useState(i.categoryId ?? '')
-  // Its line: one of your bill lines (DECISIONS.md 228). Spending is "Not a bill"; its own new line is an option below.
-  const billLines = categories.filter((c) => listedType(c) === 'FixedBill').sort((a, b) => a.sortOrder - b.sortOrder)
-  const current = categories.find((c) => c.id === i.categoryId)
+  // Each bill is its own line (DECISIONS.md 279): no moving it into another one. Spending is "Not a bill".
   const spending = categories.filter((c) => c.type === 'Variable').sort((a, b) => a.sortOrder - b.sortOrder)
   const [spendId, setSpendId] = useState(spending.some((c) => c.id === i.categoryId) ? i.categoryId! : (spending[0]?.id ?? ''))
   const [err, setErr] = useState<string | null>(null)
-  const moved = categoryId !== '' && categoryId !== (i.categoryId ?? '')
 
   // Bills to join it with: ones sharing its first word first (another Hulu), then the rest by name.
   const word = i.name.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
@@ -166,12 +162,7 @@ function ItemSheet({
     const day = due.trim() === '' ? null : Number(due)
     if (day !== null && (!Number.isInteger(day) || day < 1 || day > 31)) return setErr('The due day is a day of the month, 1 to 31.')
     const label = name.trim() || i.detectedName
-    const to = categories.find((c) => c.id === categoryId)?.name
-    onUpdate(
-      { key: i.key, name, confirmed: true, ...(day === null ? { clearDueDay: true } : { dueDay: day }) },
-      moved ? `${label} is filed under ${to} now, past charges and future ones.` : `Saved ${label}.`,
-      moved ? categoryId : undefined,
-    )
+    onUpdate({ key: i.key, name, confirmed: true, ...(day === null ? { clearDueDay: true } : { dueDay: day }) }, `Saved ${label}.`)
   }
 
   /** The newer of the two keeps going; the older one's charges join it. */
@@ -278,27 +269,6 @@ function ItemSheet({
               </label>
             )}
 
-            <label className="mt-4 block">
-              <span className="text-sm font-medium text-ink-soft">Bill Category</span>
-              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base">
-                {categoryId === '' && <option value="">Not in a bill category yet</option>}
-                {current && listedType(current) !== 'FixedBill' && <option value={current.id}>{current.name} (as spending)</option>}
-                {billLines.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <span className="mt-1 block text-xs text-ink-soft">
-                {moved
-                  ? i.merchantWide
-                    ? 'Its past charges move there, and future ones go there too.'
-                    : 'Its past charges move there. This store bills more than one thing, so check new charges in Tasks.'
-                  : i.inBillCategory
-                    ? 'Its limit is the bill category’s: change it from that category on the Budget tab.'
-                    : 'Pick a bill category, or make it its own below.'}
-              </span>
-            </label>
 
             {err && (
               <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
@@ -325,11 +295,11 @@ function ItemSheet({
                   </button>
                 </li>
               )}
-              {!i.inBillCategory && !moved && (
+              {!i.inBillCategory && (
                 <li>
                   <button type="button" onClick={() => onTrackAsBill(i)} className={action}>
                     <span>
-                      Make it its own Bill Category
+                      Make it a bill
                       <span className="block text-xs font-normal text-ink-soft">
                         {i.categoryName ? `Filed under ${i.categoryName}` : 'No category'}, so it counts as everyday spending now.
                       </span>

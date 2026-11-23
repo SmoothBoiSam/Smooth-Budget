@@ -8,11 +8,11 @@ import { bubbleStyle, bubbleText } from './theme'
 export type Route = 'home' | 'transactions' | 'budget' | 'tasks' | 'review' | 'paytasks' | 'debt' | 'savings' | 'payday' | 'paysetup' | 'debit' | 'more' | 'friends' | 'friend'
 
 const tabs: { label: string; route: Route; icon: ReactNode; also: Route[] }[] = [
-  { label: 'Home', route: 'home', icon: icons.home, also: ['transactions'] },
+  { label: 'Home', route: 'home', icon: icons.home, also: [] },
   { label: 'Budget', route: 'budget', icon: icons.budget, also: [] },
   { label: 'Tasks', route: 'tasks', icon: icons.tasks, also: ['review', 'paytasks'] },
   // Debit, Debt, Savings and Income live under Money (once Plan, DECISIONS.md 256); Friends under More.
-  { label: 'Money', route: 'payday', icon: icons.money, also: ['paysetup', 'debit', 'debt', 'savings'] },
+  { label: 'Money', route: 'payday', icon: icons.money, also: ['paysetup', 'debit', 'debt', 'savings', 'transactions'] },
   { label: 'More', route: 'more', icon: icons.more, also: ['friends', 'friend'] },
 ]
 

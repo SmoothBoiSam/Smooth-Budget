@@ -26,13 +26,13 @@ import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
 import { ArchivedCategories, ResetCategories, UnusedCategories } from './CategoryTools'
 import BillSheet from './BillSheet'
-import { centsToInput, formatCents, formatDay, formatSigned, formatTime, ordinal, parseDollars, titleCase, healthBar } from './format'
+import { centsToInput, formatCents, formatDay, formatSigned, formatTime, ordinal, parseDollars, titleCase, spendingBar, isMaxed } from './format'
 import { TransactionEditSheet } from './ReviewScreen'
 
 // Sub-views of the Budget tab, from the URL hash:
 //   #/budget            categories overview
 //   (#/budget/inbox moved to Tasks, #/tasks/transactions)
-//   #/transactions      every transaction and search, opened from Home (DECISIONS.md 171; #/budget/all still works);
+//   #/transactions      every transaction and search, opened from Money (DECISIONS.md 171, 282; #/budget/all still works);
 //                       ?type=, accountId=, accountType=, unconfirmed=1, debtId= and back= open it filtered (DECISIONS.md 259)
 //   #/budget/c/<id>     one category's transactions
 //   #/budget/plan       budget settings and the budget generator
@@ -48,11 +48,6 @@ function viewFromHash(): View {
   return { kind: 'overview' }
 }
 
-const statusText: Record<BudgetSummary['status'], string> = {
-  healthy: 'text-good',
-  low: 'text-gold-ink',
-  overspent: 'text-danger',
-}
 
 export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: () => void; onSignedOut: () => void }) {
   const [view, setView] = useState<View>(viewFromHash)
@@ -216,6 +211,18 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {summary && view.kind === 'category' && line && (
         <>
           <CategoryHeader line={line} />
+          {/* Each bill is its own line (DECISIONS.md 279): its bill is here, to change its name, due day and the rest. */}
+          {line.type === 'FixedBill' && bills.some((b) => b.categoryId === line.id && b.status !== 'canceled') && (
+            <div className="mt-3 rounded-2xl neu px-4 py-1">
+              <ul className="divide-y divide-ink/[0.07]">
+                {bills
+                  .filter((b) => b.categoryId === line.id && b.status !== 'canceled')
+                  .map((b) => (
+                    <BillItemRow key={b.key} b={b} month={summary.budgetMonth} today={summary.today} onOpen={() => setBill(b)} />
+                  ))}
+              </ul>
+            </div>
+          )}
           <CategoryMonths key={line.id} line={line} month={month} onSelect={setSelected} onError={searchFailed} />
         </>
       )}
@@ -282,18 +289,11 @@ function Overview({
   onOpenBill: (b: RecurringItem) => void
   onDone: (message: string) => void
 }) {
-  // Home has the big number; here it's one line above the categories (DECISIONS.md 149).
+  // Home has Left to Spend and the month's numbers; here it's just the categories (DECISIONS.md 281).
   const trimmed = !!s.auto?.on && s.auto.shortCents > 0
   const short = Math.max(s.overplannedCents, trimmed ? s.auto!.shortCents : 0)
   return (
     <>
-      <p className="mt-3 text-sm text-ink-soft">
-        <span className={`font-semibold tabular-nums ${statusText[s.status]}`}>{formatCents(s.leftToSpendCents)}</span> left to spend ·{' '}
-        {formatCents(s.totalVariableSpentCents)} of {formatCents(s.totalVariableLimitCents)} spent
-        {s.carriedInDeficitCents > 0 && <> · {formatCents(s.carriedInDeficitCents)} carried over</>}
-        {s.unfiledSpendingCents > 0 && <> · {formatCents(s.unfiledSpendingCents)} not filed yet</>}
-        {s.cashShortCents > 0 && <> · {formatCents(s.cashShortCents)} more than your accounts cover</>}
-      </p>
       {/* Managing the budget sits right under its numbers, one tap away (DECISIONS.md 169, 187). */}
       <div className="mt-4 grid grid-cols-2 gap-3">
         <button type="button" onClick={onAdd} className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
@@ -359,20 +359,18 @@ function Group({
             <Caret open={open} />
             {g.label}
           </span>
-          <span className="text-xs font-normal tabular-nums text-ink-soft">
-            {formatCents(g.spentCents)} {spending ? 'spent' : 'paid'} of {formatCents(g.limitCents)}
-          </span>
         </button>
       </h2>
       {open && (
         <>
-      {!spending && <p className="px-1 text-xs text-ink-faint">Not part of Left to Spend</p>}
       {g.type === 'DebtPayment' && (
         <p className="px-1 text-xs text-ink-faint">Only what you pay beyond this month’s card purchases counts.</p>
       )}
       <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
         {g.categories.map((c) => {
           const items = live.filter((b) => b.categoryId === c.id)
+          // One bill per line (DECISIONS.md 279): its due date sits under the line, and the bill opens from the line's page.
+          const only = items.length === 1 ? billStatus(items[0], month, today) : null
           return (
             <li key={c.id}>
               <a href={planHref ?? `#/budget/c/${c.id}`} className="block px-4 py-1.5">
@@ -381,11 +379,12 @@ function Group({
                 ) : (
                   <CategoryRow line={c} spending={spending} />
                 )}
+                {only && <span className={`mt-0.5 block text-xs ${only[1]}`}>{only[0]}</span>}
                 {c.interestIncludedCents > 0 && (
                   <span className="mt-1 block text-xs text-ink-faint">Your card minimums, with about {formatCents(c.interestIncludedCents)} of interest in them</span>
                 )}
               </a>
-              {items.length > 0 && <BillItems lineId={c.id} items={items} month={month} today={today} onOpen={onOpenBill} />}
+              {items.length > 1 && <BillItems lineId={c.id} items={items} month={month} today={today} onOpen={onOpenBill} />}
             </li>
           )
         })}
@@ -430,19 +429,23 @@ function BillItems({
   )
 }
 
+/** A bill's state this budget month, and its color: paid, due (or late), or next due after it. */
+function billStatus(b: RecurringItem, month: { start: string; end: string }, today: string): [string, string] {
+  const paidThisMonth = b.lastDate >= month.start && b.lastDate <= month.end
+  return b.status === 'possiblyCanceled'
+    ? [`Stopped? Last ${formatDay(b.lastDate)}`, 'text-ink-faint']
+    : paidThisMonth
+      ? [`Paid ${formatDay(b.lastDate)}`, 'text-good']
+      : b.nextExpected < today
+        ? [`Due ${formatDay(b.nextExpected)}: not seen yet`, 'text-gold-ink']
+        : b.nextExpected <= month.end
+          ? [`Due ${formatDay(b.nextExpected)}`, 'text-ink-soft']
+          : [`Next ${formatDay(b.nextExpected)}`, 'text-ink-faint']
+}
+
 /** One bill or subscription: paid this budget month, due (or late), or next due after it. */
 function BillItemRow({ b, month, today, onOpen }: { b: RecurringItem; month: { start: string; end: string }; today: string; onOpen: () => void }) {
-  const paidThisMonth = b.lastDate >= month.start && b.lastDate <= month.end
-  const [text, cls] =
-    b.status === 'possiblyCanceled'
-      ? [`Stopped? Last ${formatDay(b.lastDate)}`, 'text-ink-faint']
-      : paidThisMonth
-        ? [`Paid ${formatDay(b.lastDate)}`, 'text-good']
-        : b.nextExpected < today
-          ? [`Due ${formatDay(b.nextExpected)}: not seen yet`, 'text-gold-ink']
-          : b.nextExpected <= month.end
-            ? [`Due ${formatDay(b.nextExpected)}`, 'text-ink-soft']
-            : [`Next ${formatDay(b.nextExpected)}`, 'text-ink-faint']
+  const [text, cls] = billStatus(b, month, today)
   return (
     <li>
       <button type="button" onClick={onOpen} className="flex w-full items-baseline justify-between gap-3 py-1.5 text-left text-sm">
@@ -465,7 +468,14 @@ function BillItemRow({ b, month, today, onOpen }: { b: RecurringItem; month: { s
 function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending: boolean }) {
   // Bar width is display only: how much of the limit is used, capped at full.
   const used = c.limitCents > 0 ? Math.min(1, Math.max(0, c.spentCents / c.limitCents)) : c.spentCents > 0 ? 1 : 0
-  const barColor = spending ? healthBar[c.health] : c.health === 'over' ? 'bg-danger' : 'bg-gold'
+  // Spending: red once it's maxed (DECISIONS.md 280). Card payments and savings: green once they're paid in full.
+  const barColor = spending
+    ? spendingBar(c.health, c.spentCents, c.remainingCents)
+    : c.health === 'over'
+      ? 'bg-danger'
+      : c.limitCents > 0 && c.remainingCents <= 0
+        ? 'bg-good'
+        : 'bg-gold'
   return (
     <>
       {/* Two lines (DECISIONS.md 265): the name with spent of limit right after it, then the bar with what's left at its
@@ -496,17 +506,36 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
   )
 }
 
-/** Card interest under Debt (DECISIONS.md 254): what the cards charged, which the card payment above pays. Not money of its own. */
+/**
+ * Card interest under Debt (DECISIONS.md 254, 285): what the cards charged so far, and what each is expected to charge this
+ * month from its balance and APR. The card payment above pays it (its minimums include the interest), so it isn't extra.
+ */
 function InterestRow({ line: c }: { line: BudgetCategoryLine }) {
+  const expected = c.expectedInterest ?? []
+  const total = expected.reduce((n, x) => n + x.cents, 0)
   return (
     <>
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate text-sm font-medium">{c.name}</span>
-        <span className="shrink-0 text-sm tabular-nums text-ink-soft">{formatCents(c.spentCents)} charged</span>
+        <span className="shrink-0 text-sm tabular-nums text-ink-soft">
+          {formatCents(c.spentCents)} of about {formatCents(total)}
+        </span>
       </div>
-      <p className="mt-1 text-xs text-ink-faint">
-        About {formatCents(c.limitCents)} expected this month from your card balances and APRs. It’s part of the card payment above, not extra.
-      </p>
+      {expected.length > 0 ? (
+        <ul className="mt-1 space-y-0.5 text-xs text-ink-faint">
+          {expected.map((x) => (
+            <li key={x.card} className="flex justify-between gap-3">
+              <span className="truncate">
+                {x.card} at {(x.aprBps / 100).toFixed(2).replace(/\.?0+$/, '')}%
+              </span>
+              <span className="shrink-0 tabular-nums">≈ {formatCents(x.cents)}</span>
+            </li>
+          ))}
+          <li>Part of the card payment above, not extra.</li>
+        </ul>
+      ) : (
+        <p className="mt-1 text-xs text-ink-faint">Add your cards’ APRs on the Debt tab to expect it here.</p>
+      )}
     </>
   )
 }
@@ -514,6 +543,7 @@ function InterestRow({ line: c }: { line: BudgetCategoryLine }) {
 function RemainingLabel({ line: c, spending }: { line: BudgetCategoryLine; spending: boolean }) {
   if (c.remainingCents < 0)
     return <span className="shrink-0 text-sm font-semibold tabular-nums text-danger">{formatCents(-c.remainingCents)} over</span>
+  if (spending && isMaxed(c.spentCents, c.remainingCents)) return <span className="shrink-0 text-sm font-semibold text-danger">Maxed</span>
   if (!spending)
     return c.remainingCents === 0 ? (
       <span className="shrink-0 text-sm font-semibold text-good">Paid</span>
@@ -532,16 +562,15 @@ function CategoryHeader({ line: c }: { line: BudgetCategoryLine }) {
   return (
     <section className="mt-4 rounded-3xl neu p-4">
       <CategoryRow line={c} spending={spending} />
-      {!spending && <p className="mt-2 text-xs text-ink-faint">Not part of Left to Spend</p>}
     </section>
   )
 }
 
-/** The page a filtered link came from (DECISIONS.md 259), for the back button; else Home. */
+/** The page a filtered link came from (DECISIONS.md 259), for the back button; else Money, where Transactions lives (282). */
 function backFromHash(): { href: string; label: string } {
   const back = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('back')
   const pages: Record<string, string> = { income: 'Income', debt: 'Debt', savings: 'Savings', debit: 'Debit', budget: 'Budget' }
-  return back && pages[back] ? { href: `#/${back}`, label: pages[back] } : { href: '#/', label: 'Home' }
+  return back && pages[back] ? { href: `#/${back}`, label: pages[back] } : { href: '#/payday', label: 'Money' }
 }
 
 /** The filters a link opens the page with: #/transactions?type=income, say (DECISIONS.md 259). */
@@ -856,7 +885,7 @@ function SearchableList({
 
 const noFilters: SearchFilters = { q: '', categoryId: '', min: '', max: '', from: '', to: '', type: '', accountId: '', accountType: '', unconfirmed: false, debtId: '' }
 const groupOrder: Category['type'][] = ['Variable', 'FixedBill', 'DebtPayment', 'SavingsTransfer']
-const groupNames: Record<Category['type'], string> = { Variable: 'Spending Categories', FixedBill: 'Bill Categories', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
+const groupNames: Record<Category['type'], string> = { Variable: 'Spending Categories', FixedBill: 'Bills', DebtPayment: 'Debt', SavingsTransfer: 'Savings' }
 
 /** yyyy-mm-dd in the phone's own time zone. */
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

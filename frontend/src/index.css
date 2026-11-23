@@ -75,6 +75,34 @@ body,
   min-height: 100%;
 }
 
+/*
+  No scroll bars at the sides of the screen, on a computer or a phone (DECISIONS.md 278): everything still scrolls with
+  a wheel, a swipe or the keys. Nothing scrolls sideways either: anything too wide is clipped rather than letting the
+  whole page slide.
+*/
+html {
+  scrollbar-width: none;
+  overscroll-behavior-x: none;
+}
+::-webkit-scrollbar {
+  display: none;
+}
+#root {
+  overflow-x: clip;
+}
+
+/*
+  A pop-up holds the scroll (DECISIONS.md 278): while one is open the page behind it stays put, and scrolling inside
+  the pop-up never carries on into the page when it reaches the end. Every pop-up sits on the same dark backdrop.
+*/
+html:has(.bg-slate-900\/40) {
+  overflow: hidden;
+}
+.bg-slate-900\/40,
+.bg-slate-900\/40 * {
+  overscroll-behavior: contain;
+}
+
 body {
   @apply bg-surface text-ink antialiased;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

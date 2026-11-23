@@ -70,7 +70,7 @@ export default function LoginScreen({ onSignedIn }: { onSignedIn: (me: Me) => vo
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6">
       {/* Every so often the tabby peeks down from the top right, then zooms back up, startled (DECISIONS.md 218). */}
       <div aria-hidden className="pointer-events-none fixed top-0 right-5 z-10">
         <img src="/brand/cat-tabby.png" alt="" className="animate-tabby-peek w-24" />

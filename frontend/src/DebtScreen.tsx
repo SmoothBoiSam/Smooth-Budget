@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ask } from './confirm'
 import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
 import { useResume } from './offline'
 import { InterestCard } from './DebtInterest'
-import { CardLink, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
+import { CardLink, ErrorNotice, Loading, Page, PageHeader, Pill, smallBtn } from './ui'
 import { AccountsCard } from './Accounts'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
@@ -99,6 +99,29 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
     }
   }
 
+  const owedLines = (
+    <>
+      {plan ? (
+        plan.neverPaysOff ? (
+          <p role="alert" className="mt-2 text-sm font-medium text-danger">
+            At {formatCents(plan.monthlyPaymentCents)} a month the interest outruns the payments. Raise the extra below.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-ink-soft">
+            Debt-free by <span className="font-semibold">{formatMonth(plan.debtFreeBy!)}</span>
+            <span className="text-ink-soft">
+              {' '}
+              · {plural(plan.months, 'month')} · {formatCents(plan.totalInterestCents)} in interest
+            </span>
+          </p>
+        )
+      ) : (
+        s.owedCents > 0 && <p className="mt-2 text-sm text-ink-soft">Add each card’s APR and minimum to see your debt-free date.</p>
+      )}
+      {s.startingCents > 0 && <Progress summary={s} />}
+    </>
+  )
+
   return (
     <Page>
       <PageHeader title="Debt" back={{ href: '#/payday', label: 'Money' }} />
@@ -110,28 +133,19 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
       )}
       {error && <Alert text={error} />}
 
-      <section aria-label="Summary" className="mt-4 rounded-3xl neu p-5">
-        <p className="text-sm text-ink-soft">You owe</p>
-        <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.owedCents)}</p>
-        {plan ? (
-          plan.neverPaysOff ? (
-            <p role="alert" className="mt-2 text-sm font-medium text-danger">
-              At {formatCents(plan.monthlyPaymentCents)} a month the interest outruns the payments. Raise the extra below.
-            </p>
-          ) : (
-            <p className="mt-2 text-sm text-ink-soft">
-              Debt-free by <span className="font-semibold">{formatMonth(plan.debtFreeBy!)}</span>
-              <span className="text-ink-soft">
-                {' '}
-                · {plural(plan.months, 'month')} · {formatCents(plan.totalInterestCents)} in interest
-              </span>
-            </p>
-          )
-        ) : (
-          s.owedCents > 0 && <p className="mt-2 text-sm text-ink-soft">Add each card’s APR and minimum to see your debt-free date.</p>
-        )}
-        {s.startingCents > 0 && <Progress summary={s} />}
-      </section>
+      {/* One Owed card (DECISIONS.md 289): the total, when you'll be debt-free, progress, then the chart. */}
+      {plan && !plan.neverPaysOff && plan.chart.length > 1 ? (
+        <PayoffChart past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))} points={plan.chart} owedCents={s.owedCents}>
+          {owedLines}
+        </PayoffChart>
+      ) : (
+        <section aria-label="Owed" className="mt-4 rounded-3xl neu p-5">
+          <p className="text-sm font-semibold">Owed</p>
+          <p className="text-4xl font-bold tabular-nums tracking-tight">{formatCents(s.owedCents)}</p>
+          {owedLines}
+          <CardLink href="#/transactions?type=debt&back=debt">Past payments</CardLink>
+        </section>
+      )}
 
       {s.needsDetailsCount > 0 && (
         <NeedsDetails
@@ -152,9 +166,6 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
         />
       )}
 
-      {plan && !plan.neverPaysOff && plan.chart.length > 1 && (
-        <PayoffChart past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))} points={plan.chart} />
-      )}
       <InterestCard />
       <AccountsCard section="debt" />
 
@@ -187,7 +198,15 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
 
           <label className="mt-5 block">
             <span className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="font-medium">Extra each month</span>
+              <span className="flex items-baseline gap-2">
+                <span className="font-medium">Extra each month</span>
+                {/* Automatic: what the budget has left over; Manual: the amount you saved (DECISIONS.md 290). */}
+                {savedPlan && (
+                  <Pill tone={changed ? 'todo' : savedPlan.extraSource === 'you' ? undefined : 'good'}>
+                    {changed ? 'Not saved' : savedPlan.extraSource === 'you' ? 'Manual' : 'Automatic'}
+                  </Pill>
+                )}
+              </span>
               <span className="font-semibold tabular-nums">{formatCents(currentExtra)}</span>
             </span>
             <input
@@ -384,7 +403,17 @@ function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
  * recessive gridlines, and a crosshair tooltip on hover or touch.
  */
 /** What you owed over the last year (solid) running into your plan from here (dashed). */
-function PayoffChart({ past, points: plan }: { past: { month: string; balanceCents: number }[]; points: { month: string; balanceCents: number }[] }) {
+function PayoffChart({
+  past,
+  points: plan,
+  owedCents,
+  children,
+}: {
+  past: { month: string; balanceCents: number }[]
+  points: { month: string; balanceCents: number }[]
+  owedCents: number
+  children: ReactNode
+}) {
   const [hover, setHover] = useState<number | null>(null)
   const points = [...past, ...plan]
   const now = past.length
@@ -413,11 +442,15 @@ function PayoffChart({ past, points: plan }: { past: { month: string; balanceCen
 
   return (
     <figure className="mt-4 rounded-3xl neu p-4">
-      <figcaption className="flex items-baseline justify-between gap-3">
-        <span className="text-sm font-semibold">Owed</span>
-        <span className="text-xs tabular-nums text-ink-soft" aria-live="polite">
-          {h ? `${formatMonth(h.month)}: ${formatCents(h.balanceCents)}` : ''}
+      <figcaption>
+        <span className="flex items-baseline justify-between gap-3">
+          <span className="text-sm font-semibold">Owed</span>
+          <span className="text-xs tabular-nums text-ink-soft" aria-live="polite">
+            {h ? `${formatMonth(h.month)}: ${formatCents(h.balanceCents)}` : ''}
+          </span>
         </span>
+        <span className="block text-4xl font-bold tabular-nums tracking-tight">{formatCents(owedCents)}</span>
+        {children}
       </figcaption>
       <svg
         viewBox={`0 0 ${W} ${H}`}

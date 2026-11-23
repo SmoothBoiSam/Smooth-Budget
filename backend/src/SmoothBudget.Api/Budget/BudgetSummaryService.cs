@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.EntityFrameworkCore;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Core.Budgeting;
 
@@ -26,7 +27,14 @@ public record BudgetCategoryLineDto(
     long InterestIncludedCents = 0,
     // Card interest, listed with the debt payments: its interest is paid by the card payment above it, so the group's
     // totals leave it out (DECISIONS.md 254). Spent is the interest charged so far.
-    bool PartOfCardPayments = false);
+    bool PartOfCardPayments = false,
+    // For Card interest: what each card is expected to charge this month from its balance and APR (DECISIONS.md 285).
+    // The line's own limit can be squeezed to nothing when money is short, since the card payment's minimums include the
+    // interest, so this is what's shown.
+    IReadOnlyList<CardInterestDto>? ExpectedInterest = null);
+
+/// <summary>One card's expected interest this month (DECISIONS.md 285): its balance at its APR ÷ 12.</summary>
+public record CardInterestDto(string Card, long Cents, int AprBps);
 
 /// <param name="State">"expected", "received", "differentAmount" or "late".</param>
 /// <param name="ShortfallCents">What Left to Spend is missing because of it (late, or short after the window).</param>
@@ -112,7 +120,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
     private static readonly (CategoryType Type, string Label)[] GroupOrder =
     [
         (CategoryType.Variable, "Spending Categories"),
-        (CategoryType.FixedBill, "Bill Categories"),
+        (CategoryType.FixedBill, "Bills"),
         (CategoryType.DebtPayment, "Debt payments"),
         (CategoryType.SavingsTransfer, "Savings"),
     ];
@@ -121,45 +129,15 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
     {
         var data = await loader.LoadAsync(householdId, ct);
         var lts = data.LeftToSpend();
-        var lines = CategoryBreakdownCalculator.Calculate(data.Month, data.CalculatorCategories, data.Transactions)
-            .ToDictionary(l => l.CategoryId);
+        // Each card's expected interest, for the Card interest line (DECISIONS.md 285).
+        var cards = await db.DebtAccounts.AsNoTracking()
+            .Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0 && d.AprBps > 0)
+            .Select(d => new { d.Id, Name = d.Account != null ? d.Account.Name : d.Name, d.BalanceCents, Apr = d.AprBps!.Value })
+            .ToListAsync(ct);
+        var expectedInterest = Core.Transactions.CardInterest.Expected(cards.Select(c => new Core.Debt.DebtInput(c.Id, c.Name, c.BalanceCents, c.Apr, 0)))
+            .Select(x => new CardInterestDto(x.Card.Name, x.Cents, x.Card.AprBps)).ToList();
 
-        var groups = GroupOrder
-            .Select(g =>
-            {
-                // Card interest is a bill line planned from your card balances (DECISIONS.md 159), but it's the cost of the
-                // debt, so it's listed with the debt payments (DECISIONS.md 196). Only where it's listed changes.
-                static CategoryType ListedAs(MonthCategory c) =>
-                    c.Type == CategoryType.FixedBill && string.Equals(c.Name.Trim(), Core.Transactions.CardInterest.CategoryName, StringComparison.OrdinalIgnoreCase)
-                        ? CategoryType.DebtPayment : c.Type;
-                var listed = data.Categories.Where(c => ListedAs(c) == g.Type).ToList();
-                // The card minimums are one amount to pay (DECISIONS.md 254). The automatic budget plans them as the card
-                // payment line plus Card interest (172), so the payment line shows both: what the minimums come to, and
-                // what's been paid toward them, counting payments that pay the interest. Card interest stays listed as
-                // what's been charged, part of that payment.
-                var interest = g.Type == CategoryType.DebtPayment ? listed.FirstOrDefault(c => c.Type == CategoryType.FixedBill) : null;
-                var card = interest is null ? null : listed.FirstOrDefault(c => c.Type == CategoryType.DebtPayment);
-                var debtLines = listed.Where(c => c.Type == CategoryType.DebtPayment).ToList();
-                var paidExtra = card is null ? 0
-                    : CategoryBreakdownCalculator.DebtPaid(data.Month, data.CalculatorCategories, data.Transactions) - debtLines.Sum(c => lines[c.Id].SpentCents);
-                var items = listed.Select(c =>
-                {
-                    var l = lines[c.Id];
-                    var (limit, spent, included) = c == card
-                        ? (l.LimitCents + lines[interest!.Id].LimitCents, l.SpentCents + Math.Max(0, paidExtra), lines[interest.Id].LimitCents)
-                        : (l.LimitCents, l.SpentCents, 0L);
-                    var status = l with { LimitCents = limit, SpentCents = spent };
-                    return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.Priority, limit, c.HasMonthOverride,
-                        spent, status.RemainingCents, HealthName(status.Health), l.TransactionCount,
-                        (data.Contributions ?? []).Where(s => s.CategoryId == c.Id).Sum(s => s.ExpectedCents),
-                        included, card is not null && c == interest);
-                }).ToList();
-                var counted = items.Where(i => !i.PartOfCardPayments).ToList();
-                return new BudgetGroupDto(g.Type.ToString(), g.Label, g.Type == CategoryType.Variable,
-                    counted.Sum(i => i.LimitCents), counted.Sum(i => i.SpentCents), items);
-            })
-            .Where(g => g.Categories.Count > 0)
-            .ToList();
+        var groups = GroupsFor(data, expectedInterest);
 
         var planned = data.Categories.Sum(c => c.LimitCents);
         var last = await LastMonthAsync(householdId, data.Row, ct);
@@ -191,6 +169,66 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
                 db.Categories.Where(c => c.HouseholdId == householdId && c.LimitSetByUser).Select(c => c.Id).AsEnumerable()
                     .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser, row.AutoHeldBackCents),
             lts.UnfiledSpendingCents, lts.OverplannedCents, lts.CashShortCents);
+    }
+
+    /// <summary>
+    /// The Budget tab's groups: spending, bills, debt payments (with Card interest under them) and savings, each line with
+    /// its limit and what's spent or paid. Home's Month overview adds them up (DECISIONS.md 286).
+    /// </summary>
+    public static List<BudgetGroupDto> GroupsFor(CurrentMonthData data, IReadOnlyList<CardInterestDto> expectedInterest)
+    {
+        var lines = CategoryBreakdownCalculator.Calculate(data.Month, data.CalculatorCategories, data.Transactions)
+            .ToDictionary(l => l.CategoryId);
+        return GroupOrder
+            .Select(g =>
+            {
+                // Card interest is a bill line planned from your card balances (DECISIONS.md 159), but it's the cost of the
+                // debt, so it's listed with the debt payments (DECISIONS.md 196). Only where it's listed changes.
+                static CategoryType ListedAs(MonthCategory c) =>
+                    c.Type == CategoryType.FixedBill && string.Equals(c.Name.Trim(), Core.Transactions.CardInterest.CategoryName, StringComparison.OrdinalIgnoreCase)
+                        ? CategoryType.DebtPayment : c.Type;
+                var listed = data.Categories.Where(c => ListedAs(c) == g.Type).ToList();
+                // The card minimums are one amount to pay (DECISIONS.md 254). The automatic budget plans them as the card
+                // payment line plus Card interest (172), so the payment line shows both: what the minimums come to, and
+                // what's been paid toward them, counting payments that pay the interest. Card interest stays listed as
+                // what's been charged, part of that payment.
+                var interest = g.Type == CategoryType.DebtPayment ? listed.FirstOrDefault(c => c.Type == CategoryType.FixedBill) : null;
+                var card = interest is null ? null : listed.FirstOrDefault(c => c.Type == CategoryType.DebtPayment);
+                var debtLines = listed.Where(c => c.Type == CategoryType.DebtPayment).ToList();
+                var paidExtra = card is null ? 0
+                    : CategoryBreakdownCalculator.DebtPaid(data.Month, data.CalculatorCategories, data.Transactions) - debtLines.Sum(c => lines[c.Id].SpentCents);
+                var items = listed.Select(c =>
+                {
+                    var l = lines[c.Id];
+                    var (limit, spent, included) = c == card
+                        ? (l.LimitCents + lines[interest!.Id].LimitCents, l.SpentCents + Math.Max(0, paidExtra), lines[interest.Id].LimitCents)
+                        : (l.LimitCents, l.SpentCents, 0L);
+                    var status = l with { LimitCents = limit, SpentCents = spent };
+                    return new BudgetCategoryLineDto(c.Id, c.Name, c.Type.ToString(), c.Priority, limit, c.HasMonthOverride,
+                        spent, status.RemainingCents, HealthName(status.Health), l.TransactionCount,
+                        (data.Contributions ?? []).Where(s => s.CategoryId == c.Id).Sum(s => s.ExpectedCents),
+                        included, card is not null && c == interest,
+                        Core.Transactions.CardInterest.IsInterestCategory(c.Name, c.Type) ? expectedInterest : null);
+                }).ToList();
+                var counted = items.Where(i => !i.PartOfCardPayments).ToList();
+                return new BudgetGroupDto(g.Type.ToString(), g.Label, g.Type == CategoryType.Variable,
+                    counted.Sum(i => i.LimitCents), counted.Sum(i => i.SpentCents), items);
+            })
+            .Where(g => g.Categories.Count > 0)
+            .ToList();
+    }
+
+    /// <summary>
+    /// The month's money in (DECISIONS.md 286): what's expected (your income and friends' fixed contributions) and what has
+    /// come in so far, counted the way the Budget tab counts them.
+    /// </summary>
+    public static (long Expected, long Received) MoneyInSoFar(CurrentMonthData data)
+    {
+        var income = data.Transactions.Where(t => t.Kind == Core.Transactions.TransactionKind.Income && !t.IsTransfer && t.AmountCents < 0).Sum(t => -t.AmountCents);
+        var friends = data.Contributions is { Count: > 0 } fixedOnes
+            ? fixedOnes.Sum(x => x.ReceivedCents)
+            : data.Transactions.Where(t => t.Kind == Core.Transactions.TransactionKind.PartnerContribution && !t.IsTransfer && t.AmountCents < 0).Sum(t => -t.AmountCents);
+        return (MonthData.MoneyIn(data.Row, data.Contributions), income + friends);
     }
 
     private async Task<LastMonthDto?> LastMonthAsync(Guid householdId, Data.BudgetMonth current, CancellationToken ct)

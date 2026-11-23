@@ -621,6 +621,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<bool>("AutoBudget")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("BillLinesSplitUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("BudgetMonthStartDay")
                         .HasColumnType("integer");
 

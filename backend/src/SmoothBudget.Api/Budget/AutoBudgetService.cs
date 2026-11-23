@@ -125,6 +125,7 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
     {
         await interest.EnsureAsync(householdId, ct); // card interest is a bill line, not spending (DECISIONS.md 159)
         await recurring.KeepBillsTogetherAsync(householdId, ct); // a bill's charges follow the one you filed (DECISIONS.md 158)
+        await recurring.SplitBillLinesAsync(householdId, ct); // one line per bill, once (DECISIONS.md 279)
         if (await categorization.ReleaseHiddenAsync(householdId, ct) > 0) // spending left in a hidden category (DECISIONS.md 177)
             await categorization.RunAsync(householdId, ct);
         var household = await db.Households.SingleAsync(h => h.Id == householdId, ct);

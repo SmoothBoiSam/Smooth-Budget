@@ -191,7 +191,7 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
         var jane = (await c.GetFromJsonAsync<Shared.SharedOverviewDto>("/api/shared", Json))!.Friends.Single(f => f.Name == "Jane");
         var pat = (await (await c.PostAsJsonAsync("/api/shared/friends", new Shared.SetNameRequest("Pat"), Json)).Content.ReadFromJsonAsync<Shared.FriendDto>(Json))!;
         Assert.True((await c.PutAsJsonAsync("/api/settings/partner", new PartnerSettingsDto("PAT ROOMIE", pat.Id), Json)).IsSuccessStatusCode);
-        var utilities = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Utilities & internet").Id;
+        var utilities = (await c.GetFromJsonAsync<List<CategoryDto>>("/api/budget/categories", Json))!.Single(x => x.Name == "Internet").Id;
 
         // With two friends tracked, a contribution says whose it is.
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/partner/contributions", new ArrangementRequest(rent, 800_00), Json)).StatusCode);
@@ -205,7 +205,7 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
         var fromJane = txns.Single(t => t.Description.EndsWith("J1"));
         var fromPat = txns.Single(t => t.Description.EndsWith("P1"));
         Assert.Equal(("Jane", "PartnerContribution", "Jane's contribution toward Rent."), (fromJane.FriendName, fromJane.Kind, fromJane.CategoryReason));
-        Assert.Equal(("Pat", "PartnerContribution", "Pat's contribution toward Utilities & internet."), (fromPat.FriendName, fromPat.Kind, fromPat.CategoryReason));
+        Assert.Equal(("Pat", "PartnerContribution", "Pat's contribution toward Internet."), (fromPat.FriendName, fromPat.Kind, fromPat.CategoryReason));
 
         // Both count in the budget, each under its own friend.
         var b = await Budget(c);
@@ -215,7 +215,7 @@ public class PartnerApiTests(TestApp app) : IClassFixture<TestApp>
 
         // Each friend's page shows only theirs.
         var o = (await c.GetFromJsonAsync<PartnerOverviewDto>($"/api/partner?friendId={pat.Id}", Json))!;
-        Assert.Equal(("PAT ROOMIE", "Utilities & internet", "received"), (o.PartnerName, Assert.Single(o.Contributions).CategoryName, o.Contributions[0].ThisMonth!.State));
+        Assert.Equal(("PAT ROOMIE", "Internet", "received"), (o.PartnerName, Assert.Single(o.Contributions).CategoryName, o.Contributions[0].ThisMonth!.State));
         Assert.Equal(100_00L * -1, Assert.Single(o.Recent).AmountCents);
 
         // Removing Pat takes their contribution with them; Jane's stays.

@@ -315,9 +315,11 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
             return app.Push.Sent.Where(s => s.Endpoint == endpoint).Skip(before).Select(s => s.Message).ToList();
         }
 
-        // City Electric is paid on the 12th. At 10 p.m. Denver time on the 11th: nothing; the next morning would be too late,
-        // so the check at 10 a.m. on the 11th is the one that tells you, and it says so only once.
-        Assert.Empty(await CheckAt(new DateTimeOffset(2026, 11, 12, 5, 0, 0, TimeSpan.Zero)));
+        // City Electric is paid on the 12th. At 10 p.m. Denver time on the 11th: no reminders, though alerts about what just
+        // happened may come (DECISIONS.md 291). The next morning would be too late, so the check at 10 a.m. on the 11th is the
+        // one that tells you, and it says so only once.
+        Assert.DoesNotContain(await CheckAt(new DateTimeOffset(2026, 11, 12, 5, 0, 0, TimeSpan.Zero)),
+            m => SmoothBudget.Api.Notifications.NotificationService.Scheduled.Contains(m.Tag));
         var morning = await CheckAt(new DateTimeOffset(2026, 11, 11, 17, 0, 0, TimeSpan.Zero));
         var bill = Assert.Single(morning, m => m.Tag == "bills");
         Assert.Equal("Bill due tomorrow", bill.Title);
@@ -329,6 +331,40 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync("/api/push/test", null)).StatusCode);
         using (var scope = app.Services.CreateScope())
             Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PushDevices.AnyAsync(d => d.Endpoint == endpoint));
+    }
+
+    [Fact]
+    public async Task A_category_that_is_maxed_buzzes_once_even_at_night()
+    {
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 11, 17, 0, 0, TimeSpan.Zero));
+        var c = await NewUserAsync();
+        var household = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+        var card = await AccountAsync(c, "CreditCard", "4321");
+        await ImportAsync(c, card, ChaseCard, ["11/11/2026,11/11/2026,CORNER TREATS,Food & Drink,Sale,-60.00,"]);
+        var endpoint = $"https://fcm.googleapis.com/fcm/send/test-{Guid.NewGuid():N}";
+        await c.PostAsJsonAsync("/api/push/subscribe", new { endpoint, keys = new { p256dh = "k", auth = "a" } }, Json);
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var treats = new Category { Id = Guid.NewGuid(), HouseholdId = household, Name = "Treats", Type = SmoothBudget.Core.Budgeting.CategoryType.Variable, MonthlyLimitCents = 60_00, LimitSetByUser = true, SortOrder = 99 };
+            db.Categories.Add(treats);
+            var t = await db.Transactions.SingleAsync(x => x.HouseholdId == household && x.AmountCents == 60_00);
+            (t.CategoryId, t.NeedsReview) = (treats.Id, false);
+            await db.SaveChangesAsync();
+        }
+        async Task<List<SmoothBudget.Api.Notifications.PushMessage>> CheckAt(DateTimeOffset utc)
+        {
+            app.Clock.SetUtcNow(utc);
+            var before = app.Push.Sent.Count(s => s.Endpoint == endpoint);
+            using var scope = app.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<SmoothBudget.Api.Notifications.NotificationService>().CheckAsync(household);
+            return app.Push.Sent.Where(s => s.Endpoint == endpoint).Skip(before).Select(s => s.Message).ToList();
+        }
+
+        // $60 of $60 spent: $0 left is Maxed (DECISIONS.md 280), and an alert like that comes at 11 p.m. too (291).
+        var maxed = Assert.Single(await CheckAt(new DateTimeOffset(2026, 11, 12, 6, 0, 0, TimeSpan.Zero)), m => m.Tag == "over");
+        Assert.Equal(("Category maxed", "Treats is maxed: its $60.00 is all spent this month."), (maxed.Title, maxed.Body));
+        Assert.DoesNotContain(await CheckAt(new DateTimeOffset(2026, 11, 12, 17, 0, 0, TimeSpan.Zero)), m => m.Tag == "over");
     }
 
     [Fact]
@@ -377,6 +413,53 @@ public class BillsApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Contains(await CheckAt(new DateTimeOffset(2026, 11, 11, 19, 0, 0, TimeSpan.Zero)), m => m.Tag == "bills");
         Assert.Equal(HttpStatusCode.NotFound, (await c.PutAsJsonAsync("/api/push/types/nope", new SmoothBudget.Api.Notifications.NotificationTypeRequest(false), Json)).StatusCode);
     }
+    [Fact]
+    public async Task Each_bill_gets_its_own_line_once()
+    {
+        // DECISIONS.md 279. A "Utilities" line holding two bills, water $40 and power $100, with a $150 limit you set.
+        var c = await NewUserAsync();
+        var household = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+        var utilities = Guid.NewGuid();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var checking = new Account { Id = Guid.NewGuid(), HouseholdId = household, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+            db.AddRange(checking, new Category
+            {
+                Id = utilities, HouseholdId = household, Name = "Utilities", Type = SmoothBudget.Core.Budgeting.CategoryType.FixedBill, MonthlyLimitCents = 150_00, LimitSetByUser = true, SortOrder = 99,
+            });
+            foreach (var m in new[] { 7, 8, 9, 10 })
+                foreach (var (day, merchant, cents) in new[] { (10, "TEST WATER CO", 40_00L), (20, "TEST POWER CO", 100_00L) })
+                    db.Transactions.Add(new Transaction
+                    {
+                        Id = Guid.NewGuid(), HouseholdId = household, AccountId = checking.Id, Date = new DateOnly(2026, m, day), AmountCents = cents, Merchant = merchant,
+                        Description = "TEST", Kind = TransactionKind.Purchase, CategoryId = utilities, CategorySource = CategorySource.User, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+                    });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/budget/summary")).StatusCode);
+        var bills = (await Bills(c))!.Items;
+        var power = bills.Single(b => b.Name.Contains("Power", StringComparison.OrdinalIgnoreCase));
+        var water = bills.Single(b => b.Name.Contains("Water", StringComparison.OrdinalIgnoreCase));
+        // The bigger bill keeps the line and its name; the other has a line of its own, with its charges.
+        Assert.Equal((utilities, power.Name), (power.CategoryId, power.CategoryName));
+        Assert.NotEqual(utilities, water.CategoryId);
+        Assert.Equal((water.Name, true), (water.CategoryName, water.InBillCategory));
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // The $150 you set comes down by the $40 that moved out.
+            Assert.Equal(110_00, (await db.Categories.SingleAsync(x => x.Id == utilities)).MonthlyLimitCents);
+            Assert.Equal(4, await db.Transactions.CountAsync(t => t.HouseholdId == household && t.CategoryId == water.CategoryId));
+            Assert.NotNull((await db.Households.SingleAsync(h => h.Id == household)).BillLinesSplitUtc);
+        }
+
+        // Renaming the bill renames its line, and the other way round.
+        Assert.True((await c.PutAsJsonAsync("/api/recurring", new RecurringUpdateRequest(water.Key, Name: "Water"), Json)).IsSuccessStatusCode);
+        Assert.Equal("Water", (await Bills(c))!.Items.Single(b => b.Key == water.Key).CategoryName);
+    }
+
 }
 
 public class PushKeyTests

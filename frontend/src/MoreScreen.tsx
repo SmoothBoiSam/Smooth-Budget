@@ -67,6 +67,16 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
       </Page>
     )
 
+  if (sub === 'notifications')
+    return (
+      <Page>
+        <PageHeader title="Notifications" back={back} />
+        <Card>
+          <NotificationSetting />
+        </Card>
+      </Page>
+    )
+
   if (sub === 'import')
     return (
       <Page>
@@ -111,7 +121,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         <Rows>
           <Row label="Bank connections" href="#/more/banks" />
           <Row label="Import a CSV" hint={lastImport ? `Last: ${lastImport.fileName}` : undefined} href="#/more/import" />
-          <Row label="Friends" hint="People you split costs with" href="#/friends" />
+          <Row label="Friends" href="#/friends" />
         </Rows>
       </Card>
 
@@ -120,9 +130,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
           <li>
             <AppearanceSetting />
           </li>
-          <li>
-            <NotificationSetting />
-          </li>
+          <Row label="Notifications" href="#/more/notifications" />
           <li className="flex items-center gap-3 px-5 py-3.5 text-sm">
             <span className="min-w-0 flex-1 truncate text-ink-soft">{me.email}</span>
             <button type="button" onClick={signOut} className={headerActionCls + ' text-danger!'}>
@@ -142,7 +150,9 @@ const subFromHash = () => {
     ? 'import'
     : h.startsWith('#/more/banks')
       ? 'banks'
-      : null
+      : h.startsWith('#/more/notifications')
+        ? 'notifications'
+        : null
 }
 
 function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Account[]; onImported: () => void; onAccountAdded: () => void }) {

@@ -179,6 +179,7 @@ function DebtSavingsLinks({ debt, savings, payday }: { debt: DebtSummary | null;
         <MenuRow icon={icons.debt} label={<span className="font-semibold">Debt</span>} hint={debtLine} href="#/debt" />
         <MenuRow icon={icons.savings} label={<span className="font-semibold">Savings</span>} hint={savingsLine} href="#/savings" />
         <MenuRow icon={icons.payday} label={<span className="font-semibold">Income</span>} hint={payLine} href="#/income" />
+        <MenuRow icon={icons.search} label={<span className="font-semibold">Transactions</span>} hint="Every transaction, with search" href="#/transactions" />
       </Rows>
     </Card>
   )

@@ -105,7 +105,7 @@ export default function NotificationSetting() {
           </p>
           <p className="text-xs text-ink-soft">
             {state.kind === 'ready' && state.on
-              ? 'On for this phone. Never at night.'
+              ? 'On for this phone. Alerts come any time; reminders only in the daytime.'
               : 'Paydays, bills, overspending and more.'}
           </p>
         </div>

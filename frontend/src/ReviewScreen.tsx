@@ -326,7 +326,8 @@ function ReviewCard({
   const [goalPick, setGoalPick] = useState('')
   // Interest: "debt:<id>" or "savings:<id>".
   const [interestPick, setInterestPick] = useState<string | null>(null)
-  // A bill (DECISIONS.md 225): one of your bills ("bill:<key>"), or a new bill with its name and bill category.
+  // A bill (DECISIONS.md 225, 279): one of your bills ("bill:<key>"), a bill line with no bill yet ("line:<id>"), or a new
+  // bill with a line of its own.
   const [billChoices, setBillChoices] = useState<ChargeBillChoices | null>(null)
   const [billPick, setBillPick] = useState('')
   const [billName, setBillName] = useState('')
@@ -354,9 +355,9 @@ function ReviewCard({
       .then((c) => {
         if (!live) return
         setBillChoices(c)
-        // Already in a bill category but not one of your bills yet: a new bill, in that category.
+        // Already in a bill line that has no bill yet: that's its bill.
         const line = t.categoryId && c.lines.some((l) => l.id === t.categoryId) ? t.categoryId : null
-        setBillPick(c.current ? `bill:${c.current}` : line || c.detected || c.bills.length === 0 ? NEW : '')
+        setBillPick(c.current ? `bill:${c.current}` : line ? `line:${line}` : c.detected || c.bills.length === 0 ? NEW : '')
         setBillCat(line ?? OWN)
         setBillName(c.suggested ?? titleCase(t.merchant))
       })
@@ -437,9 +438,11 @@ function ReviewCard({
   const interestSavings = interestOn.startsWith('savings:') ? savingsAccounts.find((a) => `savings:${a.id}` === interestOn) : undefined
 
   const pickedBill = billChoices?.bills.find((b) => `bill:${b.key}` === billPick)
-  const billReady = billPick === NEW ? billName.trim().length > 0 : !!pickedBill
+  // A bill line with no bill yet (DECISIONS.md 279): this charge becomes its bill.
+  const pickedLine = billChoices?.lines.find((l) => `line:${l.id}` === billPick)
+  const billReady = billPick === NEW ? billName.trim().length > 0 : !!pickedBill || !!pickedLine
   // The bill picked, or (a new bill) the repeating charge it's part of.
-  const billShown = billItems.find((i) => i.key === (pickedBill ? pickedBill.key : billPick === NEW ? billChoices?.detected : null))
+  const billShown = billItems.find((i) => i.key === (pickedBill ? pickedBill.key : billPick === NEW || pickedLine ? billChoices?.detected : null))
 
   const ready =
     tab === 'spending'
@@ -502,11 +505,15 @@ function ReviewCard({
     if (tab === 'bill') {
       const r = await recurringApi.fileAsBill({
         transactionId: t.id,
-        ...(pickedBill ? { billKey: pickedBill.key } : { name: billName.trim(), ...(billCat !== OWN ? { categoryId: billCat } : {}) }),
+        ...(pickedBill
+          ? { billKey: pickedBill.key }
+          : pickedLine
+            ? { name: pickedLine.name, categoryId: pickedLine.id }
+            : { name: billName.trim(), ...(billCat !== OWN ? { categoryId: billCat } : {}) }),
       })
       const moved = r.moved > 0 ? ` ${r.moved} other ${r.moved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
       if (billPick === NEW) await onCategoryCreated()
-      return [`${pickedBill ? pickedBill.name : `New bill: ${billName.trim()}, in ${r.categoryName}`}.${moved}`, true]
+      return [`${pickedBill ? pickedBill.name : pickedLine ? `${pickedLine.name}: your bill there` : `New bill: ${billName.trim()}`}.${moved}`, true]
     }
     const r = await budgetApi.updateTransaction(t.id, spendingPick, false)
     const moved = r.billChargesMoved > 0 ? ` ${r.billChargesMoved} earlier ${r.billChargesMoved === 1 ? 'charge' : 'charges'} of this bill moved there too.` : ''
@@ -679,6 +686,11 @@ function ReviewCard({
                     {b.name} · {formatCents(b.amountCents)}
                   </option>
                 ))}
+                {billChoices.lines.map((l) => (
+                  <option key={l.id} value={`line:${l.id}`}>
+                    {l.name}
+                  </option>
+                ))}
                 <option value={NEW}>+ New bill…</option>
               </select>
               {billPick === NEW ? (
@@ -692,18 +704,7 @@ function ReviewCard({
                       className="mt-1 block w-full rounded-2xl neu-inset px-4 py-3 text-base"
                     />
                   </label>
-                  <label className="block">
-                    <span className="text-xs font-medium text-ink-soft">Bill Category</span>
-                    <select value={billCat} onChange={(e) => setBillCat(e.target.value)} className="mt-1 block w-full rounded-2xl neu-inset px-4 py-3 text-base">
-                      {billChoices.lines.map((l) => (
-                        <option key={l.id} value={l.id}>
-                          {l.name}
-                        </option>
-                      ))}
-                      <option value={OWN}>+ Its own new bill category{billName.trim() ? ` (${billName.trim()})` : ''}</option>
-                    </select>
-                    <span className="mt-1 block text-xs text-ink-faint">Its earlier charges go there too.</span>
-                  </label>
+                  <p className="px-1 text-xs text-ink-faint">It gets its own line in your budget, and its earlier charges go there too.</p>
                 </div>
               ) : (
                 pickedBill && hint('Its charges stay together on that bill.')
@@ -1092,7 +1093,7 @@ function mostLikely(t: Transaction, categories: Category[]): string {
 const NEW = '__new'
 /** A transfer to or from an account that isn't in Smooth Budget: counted nowhere. */
 const OUTSIDE = '__outside'
-/** A new bill's own new bill category, named after it. */
+/** A new bill's own new line, named after it. */
 const OWN = '__own'
 
 /** The app's most likely answer, as a question: "Groceries?" */

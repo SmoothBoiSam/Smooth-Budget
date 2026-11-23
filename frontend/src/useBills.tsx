@@ -57,7 +57,7 @@ export function useBills(onSignedOut: () => void, onCount: (needsLook: number) =
   async function trackAsBill(i: RecurringItem) {
     try {
       const r = await recurringApi.trackAsBill(i.key)
-      setNotice(`${r.name} is its own bill category now, and its charges moved there. Future charges follow it.`)
+      setNotice(`${r.name} is a bill now, with its own line in your budget. Its charges moved there, and future ones follow.`)
       setOpen(null)
       onAfter?.()
       await load()

@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ApiError, api, budgetApi, plaidApi, type BankUpdate, type CashCheck, type Category, type HomeSummary, type Me, type PickUp, type Transaction } from './api'
-import { TransactionList } from './BudgetScreen'
-import { TransactionEditSheet } from './ReviewScreen'
-import { formatCents, formatDay, formatTime, healthBar } from './format'
+import { ApiError, api, plaidApi, type BankUpdate, type CashCheck, type HomeSummary, type Me, type MonthOverview, type PickUp } from './api'
+import { homeNotices } from './homeNotices'
+import { formatCents, formatDay, formatTime, isMaxed, spendingBar } from './format'
 import { useArrivals, useTween } from './motion'
 import { saved, useOnline, useResume } from './offline'
-import { Card, Chevron, Loading, Notice, Pill, Row, Rows } from './ui'
+import { Card, Chevron, Loading, Notice, Pill, Rows } from './ui'
 
 /**
  * How Left to Spend looks (DECISIONS.md 188): green with plenty left, yellow once it's getting low (under 40% of the
@@ -46,13 +45,15 @@ function useShownLeft(s: HomeSummary) {
   const [target, total, status] = [adjusted ? adjusted.safeCents : s.leftToSpendCents, s.totalVariableLimitCents, s.status]
   const left = Math.round(useTween(target, intro ? 900 : 500, intro ? 0 : target))
   const share = total > 0 ? Math.max(0, Math.min(1, left / total)) : 0
+  // While it's Safe to Spend, Left to Spend shows behind it as a grey ghost ring (DECISIONS.md 284).
+  const ghost = adjusted && total > 0 ? Math.max(0, Math.min(1, s.leftToSpendCents / total)) : 0
   // At rest it's the server's status (the month's, so not while adjusted); on the way there, the same lines applied to the number shown.
   const level =
     left === target && !adjusted ? (status === 'overspent' ? 'over' : status === 'low' ? 'near-zero' : levelAt(left, total)) : levelAt(left, total)
-  return { left, target, share, level, intro, adjusted: adjusted !== null }
+  return { left, target, share, ghost, level, intro, adjusted: adjusted !== null }
 }
 
-export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: () => void }) {
+export default function HomeScreen({ me, onSignedOut, onNoticeCount }: { me: Me; onSignedOut: () => void; onNoticeCount?: (n: number) => void }) {
   // Opens straight to the last summary saved on this phone, then refreshes it (milestone 10).
   const [summary, setSummary] = useState<HomeSummary | null>(() => saved.home(me.householdId)?.summary ?? null)
   const [savedAt, setSavedAt] = useState<string | null>(null) // set while showing a saved summary because the server can't be reached
@@ -84,6 +85,10 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
     void load()
   }, [load])
   useResume(load)
+  // The bubble on the Home tab (DECISIONS.md 283): how many cards here want a look.
+  useEffect(() => {
+    if (summary) onNoticeCount?.(homeNotices(summary, !!savedAt).length)
+  }, [summary, savedAt, onNoticeCount])
 
   // Pull to refresh (SPEC section 4.2) and the Refresh link both sync connected banks, then reload.
   async function refresh() {
@@ -161,7 +166,7 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+    <div className="mx-auto flex min-h-dvh max-w-md flex-col" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
       {/* Easter egg (DECISIONS.md 139): the tabby hangs down from the top of the screen as you pull to sync, and swings while it syncs. */}
       <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center">
         <div className={pull > 0 ? '' : 'transition-transform duration-300 ease-out'} style={{ transform: `translateY(${(syncing ? 100 : pull * 1.1) - 143}px)` }}>
@@ -214,7 +219,6 @@ export default function HomeScreen({ me, onSignedOut }: { me: Me; onSignedOut: (
         )}
 
         {summary && <Summary summary={summary} stale={!!savedAt} />}
-        {summary && online && <RecentTransactions summary={summary} onChanged={() => void load()} />}
 
         {/* With banks connected: one button that has Plaid check them all now (DECISIONS.md 242). Pull to refresh stays free. */}
         {summary && summary.sync.state !== 'none' && online && (
@@ -288,25 +292,92 @@ function describeBankUpdate(r: BankUpdate): string {
  * filled and colored the way its line on the Budget tab is (how much of the limit is used; green, gold when low, red
  * when over). A tap opens the category.
  */
+const overviewHref = { bills: '#/budget', spending: '#/budget', debt: '#/debt', savings: '#/savings' } as const
+
+/**
+ * Home's Month overview (DECISIONS.md 286): the month's math in one place. Money in at the top (received of expected),
+ * then minus each kind of plan (spent or paid of its limit), minus carried-over overspending and spending not in a
+ * category when there is any, equals what isn't planned yet. Each line opens its tab.
+ */
+function MonthOverviewLines({ o }: { o: MonthOverview }) {
+  const short = o.notPlannedCents < 0
+  return (
+    <ul aria-label="This month's money" className="text-xs">
+      <OverviewLine label="Income" href="#/income" done={o.incomeReceivedCents} of={o.incomeExpectedCents} bar="bg-good" />
+      {o.lines.map((l) => {
+        const over = l.spentCents > l.limitCents && l.limitCents > 0
+        const filled = l.limitCents > 0 && l.spentCents >= l.limitCents
+        const bar = over && (l.key === 'spending' || l.key === 'bills') ? 'bg-danger' : l.key === 'spending' ? 'bg-accent' : filled ? 'bg-good' : 'bg-gold'
+        return <OverviewLine key={l.key} minus label={l.label} href={overviewHref[l.key]} done={l.spentCents} of={l.limitCents} bar={bar} />
+      })}
+      {o.carriedOverCents > 0 && <OverviewLine minus label="Carried over" href="#/budget" amount={o.carriedOverCents} danger />}
+      {o.notInCategoryCents > 0 && <OverviewLine minus label="Not in a category" href="#/tasks/transactions" amount={o.notInCategoryCents} danger />}
+      <li className="mt-1 border-t border-ink/10 pt-1">
+        <a href="#/budget/plan" className="flex items-baseline justify-between gap-3 py-1.5">
+          <span className="font-semibold">= {short ? 'Planned beyond your money' : 'Not planned yet'}</span>
+          <span className={`font-semibold tabular-nums ${short ? 'text-danger' : ''}`}>
+            {short ? '−' : ''}
+            {formatCents(Math.abs(o.notPlannedCents))}
+          </span>
+        </a>
+      </li>
+    </ul>
+  )
+}
+
+/** One Month overview line: name, a bar of done ÷ of, and "$X of $Y"; or just an amount for a line with no plan. */
+function OverviewLine(p: { label: string; href: string; minus?: boolean; done?: number; of?: number; bar?: string; amount?: number; danger?: boolean }) {
+  const used = p.of && p.of > 0 ? Math.min(1, Math.max(0, (p.done ?? 0) / p.of)) : 0
+  return (
+    <li>
+      <a href={p.href} className="grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-3 py-1.5">
+        <span className="truncate text-ink-soft">
+          <span aria-hidden className="inline-block w-3 text-ink-faint">
+            {p.minus ? '−' : ''}
+          </span>
+          {p.label}
+        </span>
+        {p.amount === undefined ? (
+          <span aria-hidden className="block h-2 overflow-hidden rounded-full neu-inset">
+            <span className={`block h-full rounded-full ${p.bar}`} style={{ width: `${used * 100}%` }} />
+          </span>
+        ) : (
+          <span />
+        )}
+        <span className={`text-right tabular-nums ${p.danger ? 'font-semibold text-danger' : ''}`}>
+          {p.amount !== undefined ? (
+            formatCents(p.amount)
+          ) : (
+            <>
+              <span className="font-semibold">{formatCents(p.done ?? 0)}</span> <span className="text-ink-faint">of {formatCents(p.of ?? 0)}</span>
+            </>
+          )}
+        </span>
+      </a>
+    </li>
+  )
+}
+
 function SpendingRows({ items }: { items: NonNullable<HomeSummary['spending']> }) {
   return (
     <ul aria-label="Left in each spending category" className="mt-4">
       {items.map((c) => {
         const used = c.limitCents > 0 ? Math.min(1, Math.max(0, c.spentCents / c.limitCents)) : c.spentCents > 0 ? 1 : 0
         const over = c.leftCents < 0
+        const maxed = !over && isMaxed(c.spentCents, c.leftCents) // DECISIONS.md 280
         return (
           <li key={c.id}>
             <a
               href={`#/budget/c/${c.id}`}
-              aria-label={`${c.name}: ${over ? `${formatCents(-c.leftCents)} over` : `${formatCents(c.leftCents)} left of ${formatCents(c.limitCents)}`}`}
+              aria-label={`${c.name}: ${over ? `${formatCents(-c.leftCents)} over` : maxed ? 'maxed' : `${formatCents(c.leftCents)} left of ${formatCents(c.limitCents)}`}`}
               className="grid grid-cols-[minmax(0,1fr)_auto_5rem] items-center gap-3 py-1.5 text-xs"
             >
               <span className="truncate text-ink-soft">{c.name}</span>
-              <span aria-hidden className={`text-right font-semibold tabular-nums ${over ? 'text-danger' : ''}`}>
-                {over ? `${formatCents(-c.leftCents)} over` : formatCents(c.leftCents)}
+              <span aria-hidden className={`text-right font-semibold tabular-nums ${over || maxed ? 'text-danger' : ''}`}>
+                {over ? `${formatCents(-c.leftCents)} over` : maxed ? 'Maxed' : formatCents(c.leftCents)}
               </span>
               <span aria-hidden className="block h-2 overflow-hidden rounded-full neu-inset">
-                <span className={`block h-full rounded-full ${healthBar[c.health]}`} style={{ width: `${used * 100}%` }} />
+                <span className={`block h-full rounded-full ${spendingBar(c.health, c.spentCents, c.leftCents)}`} style={{ width: `${used * 100}%` }} />
               </span>
             </a>
           </li>
@@ -366,6 +437,18 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
         </defs>
         <g transform="rotate(135 100 100)">
           <circle cx="100" cy="100" r={r} fill="none" strokeWidth="10" strokeLinecap="round" className="stroke-ink/10" strokeDasharray={`${arc} 999`} />
+          {shown.ghost > 0 && (
+            <circle
+              cx="100"
+              cy="100"
+              r={r}
+              fill="none"
+              strokeWidth="10"
+              strokeLinecap="round"
+              className="stroke-ink-faint/35 transition-[stroke-dasharray] duration-500"
+              strokeDasharray={`${arc * shown.ghost} 999`}
+            />
+          )}
           {/* One ring per color, cross-fading as the level changes. */}
           {shown.share > 0 &&
             (['good', 'gold', 'danger'] as const).map((c) => (
@@ -496,49 +579,7 @@ function CashCheckRow({ cash: c, shortCents, pickUp }: { cash: CashCheck; shortC
 function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }) {
   const shown = useShownLeft(s)
   const style = levels[shown.level]
-
-  // Everything that wants a tap, most urgent first: problems, then things to do, then good news.
-  const notices: { key: string; tone: 'danger' | 'todo' | 'good'; href?: string; text: React.ReactNode }[] = []
-  if (!stale && (s.sync.state === 'stale' || s.sync.state === 'error'))
-    notices.push({ key: 'sync', tone: s.sync.state === 'error' ? 'danger' : 'todo', href: '#/more/banks', text: s.sync.message ?? 'Bank sync needs a look.' })
-  for (const f of (s.contributions ?? []).filter((f) => f.state === 'late' || (f.state === 'differentAmount' && f.shortfallCents > 0)))
-    notices.push({
-      key: `partner-${f.arrangementId}`,
-      tone: 'danger',
-      href: f.friendId ? `#/friends/${f.friendId}` : '#/friends',
-      text:
-        f.state === 'late'
-          ? `${formatCents(f.expectedCents)} for ${f.categoryName} hasn’t come yet`
-          : `Only ${formatCents(f.receivedCents)} of ${formatCents(f.expectedCents)} came for ${f.categoryName}`,
-    })
-  if (s.overBudgetCategoryCount > 0)
-    notices.push({
-      key: 'over',
-      tone: 'danger',
-      href: '#/budget',
-      text: (
-        <>
-          Over by <b className="tabular-nums">{formatCents(s.overBudgetCents)}</b> in {s.overBudgetCategoryCount}{' '}
-          {s.overBudgetCategoryCount === 1 ? 'category' : 'categories'}
-        </>
-      ),
-    })
-  if (s.incomeUnknown) notices.push({ key: 'income', tone: 'todo', href: '#/budget/plan', text: 'Set this month’s income' })
-  if (s.uncategorizedCount > 0)
-    notices.push({ key: 'uncat', tone: 'todo', href: '#/tasks/transactions', text: `${s.uncategorizedCount} ${s.uncategorizedCount === 1 ? 'purchase needs' : 'purchases need'} a category` })
-  if (s.reviewCount > 0)
-    notices.push({ key: 'review', tone: 'todo', href: '#/tasks/transactions', text: `${s.reviewCount} ${s.reviewCount === 1 ? 'purchase' : 'purchases'} to confirm` })
-  for (const p of s.pendingSweeps)
-    notices.push({
-      key: `sweep-${p.id}`,
-      tone: 'good',
-      href: '#/tasks/payday',
-      text: (
-        <>
-          Send <b className="tabular-nums">{formatCents(p.amountCents)}</b> of {p.fromMonth.split(' ')[0]}’s leftover to {p.destination}
-        </>
-      ),
-    })
+  const notices = homeNotices(s, stale)
 
   // A notice that turns up while you're looking (after a sync, say) slides in; the ones already there don't.
   const isNew = useArrivals(notices.map((n) => n.key))
@@ -572,96 +613,29 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
         </ul>
       )}
 
-      <Card title="This month">
-        <Rows>
-          <Row
-            label="Spent"
-            value={
-              <>
-                {formatCents(s.totalVariableSpentCents)} <span className="font-normal text-ink-faint">of {formatCents(s.totalVariableLimitCents)}</span>
-              </>
-            }
-            href="#/budget"
-          />
-          {s.carriedInDeficitCents > 0 && <Row label="Carried over" value={`−${formatCents(s.carriedInDeficitCents)}`} tone="danger" />}
-          {s.unfiledSpendingCents > 0 && <Row label="Not in a category" value={`−${formatCents(s.unfiledSpendingCents)}`} tone="danger" href="#/tasks/transactions" />}
-          {s.overplannedCents > 0 && <Row label="Planned beyond your money" value={`−${formatCents(s.overplannedCents)}`} tone="danger" href="#/budget/plan" />}
-          {/* Only when the budget couldn't shrink enough to fit the accounts (DECISIONS.md 236): otherwise there's nothing to act on. */}
-          {s.cash && s.cashShortCents > 0 && <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />}
-          {s.nextPayday && (
-            <Row
-              label={`Payday ${formatDay(s.nextPayday.payDate)}`}
-              hint={
-                s.nextPayday.hasSchedule
-                  ? `${s.nextPayday.lowNetCents === s.nextPayday.highNetCents ? 'Forecast' : `${formatCents(s.nextPayday.lowNetCents)}–${formatCents(s.nextPayday.highNetCents)}`}${s.nextPayday.lowConfidence ? ' · rough guess' : ''}`
-                  : 'Import your schedule to forecast it'
-              }
-              value={s.nextPayday.hasSchedule ? `≈ ${formatCents(s.nextPayday.netCents)}` : undefined}
-              href="#/income"
-            />
-          )}
-        </Rows>
+      <Card title="Month overview">
+        {s.overview && <MonthOverviewLines o={s.overview} />}
+        {/* Only when the budget couldn't shrink enough to fit the accounts (DECISIONS.md 236): otherwise there's nothing to act on. */}
+        {s.cash && s.cashShortCents > 0 && (
+          <Rows>
+            <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />
+          </Rows>
+        )}
+        {s.nextPayday && (
+          <a href="#/income" className="mt-3 flex items-baseline justify-between gap-3 border-t border-ink/10 pt-3 text-xs text-ink-faint">
+            <span>
+              Payday {formatDay(s.nextPayday.payDate)}
+              {s.nextPayday.hasSchedule
+                ? s.nextPayday.lowNetCents === s.nextPayday.highNetCents
+                  ? ''
+                  : ` · ${formatCents(s.nextPayday.lowNetCents)}–${formatCents(s.nextPayday.highNetCents)}`
+                : ' · import your schedule to forecast it'}
+              {s.nextPayday.hasSchedule && s.nextPayday.lowConfidence ? ' · rough guess' : ''}
+            </span>
+            {s.nextPayday.hasSchedule && <span className="shrink-0 tabular-nums">≈ {formatCents(s.nextPayday.netCents)}</span>}
+          </a>
+        )}
       </Card>
     </>
-  )
-}
-
-/**
- * The newest few transactions, any month (DECISIONS.md 171). Tap one to change it; "See all" opens the full list and
- * search. Reloads whenever Home does, so a pull to refresh shows new ones.
- */
-function RecentTransactions({ summary, onChanged }: { summary: HomeSummary; onChanged: () => void }) {
-  const [items, setItems] = useState<Transaction[] | null>(null)
-  const [categories, setCategories] = useState<Category[]>([])
-  const [selected, setSelected] = useState<Transaction | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-
-  useEffect(() => {
-    let live = true
-    Promise.all([budgetApi.recent(5), budgetApi.categories()])
-      .then(([r, c]) => {
-        if (!live) return
-        setItems(r)
-        setCategories(c)
-      })
-      .catch(() => live && setItems((x) => x ?? []))
-    return () => {
-      live = false
-    }
-  }, [summary])
-
-  return (
-    <section aria-labelledby="recent-h" className="mt-6">
-      <div className="mb-2 flex items-baseline justify-between px-1">
-        <h2 id="recent-h" className="px-1 text-sm font-semibold text-ink-soft">
-          Recent transactions
-        </h2>
-        <a href="#/transactions" className="text-sm font-semibold text-accent">
-          See all
-        </a>
-      </div>
-      {notice && (
-        <div className="mb-3">
-          <Notice tone="good">{notice}</Notice>
-        </div>
-      )}
-      {items === null ? (
-        <div className="neu h-40 animate-pulse rounded-3xl" />
-      ) : (
-        <TransactionList items={items} empty="No transactions yet." onSelect={setSelected} className="" />
-      )}
-      {selected && (
-        <TransactionEditSheet
-          transaction={selected}
-          categories={categories}
-          onClose={() => setSelected(null)}
-          onSaved={(m) => {
-            setSelected(null)
-            setNotice(m)
-            onChanged()
-          }}
-        />
-      )}
-    </section>
   )
 }
