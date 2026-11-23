@@ -1,4 +1,5 @@
 using SmoothBudget.Api.Debt;
+using Card = SmoothBudget.Api.Debt.CardPayments.Card;
 
 namespace SmoothBudget.Api.Tests;
 
@@ -45,5 +46,20 @@ public class CardPaymentsTests
         Assert.Equal(Synced, CardPayments.CardFor(Sent("BIGBANK CREDIT CRD AUTOPAY", 1, 1), Cards));
         Assert.Null(CardPayments.CardFor(Sent("CREDIT CARD PAYMENT", 1, 1), Cards)); // says no card
         Assert.Null(CardPayments.CardFor(Sent("FRUIT BIGBANK PAYMENT", 1, 1), Cards)); // names two
+    }
+
+    [Fact]
+    public void The_account_you_picked_in_review_ties_it_and_a_name_counts_inside_a_longer_word()
+    {
+        // DECISIONS.md 302: the account picked in Review (no debt on the row) is the card.
+        var picked = Sent("ONLINE PAYMENT", 1, 1) with { TransferAccountId = FromCsv };
+        Assert.Equal(FromCsv, CardPayments.CardFor(picked, Cards));
+        // "FRUITCARD" names Fruit, as the bank words a payment to a card it calls by one word.
+        Assert.Equal(FromCsv, CardPayments.CardFor(Sent("FRUITCARD GSBANK PAYMENT", 1, 1), Cards));
+        // A short word only counts whole: "demo" is 4 letters, so "DEMOS" names it, but a 3-letter name inside a word doesn't.
+        Assert.Equal(Synced, CardPayments.CardFor(Sent("DEMOS PAYMENT", 1, 1), Cards));
+        Card[] shortName = [new(Synced, null, new HashSet<string> { "abc" }, [])];
+        Assert.Null(CardPayments.CardFor(Sent("ABCDEF PAYMENT", 1, 1), shortName));
+        Assert.Equal(Synced, CardPayments.CardFor(Sent("ABC PAYMENT", 1, 1), shortName));
     }
 }

@@ -11,9 +11,10 @@ public record CardPayment(Guid Id, DateOnly Date, string Merchant, long Cents, G
 /// <summary>
 /// Payments to each card (DECISIONS.md 244). The card's own account shows a payment as a credit. A card that isn't synced
 /// (an Apple Card from CSVs, say) shows it only once you upload its next statement, so a payment leaving checking counts too.
-/// It's tied to the card it names: the card you said it was toward, the card's last four digits, or a word from the card's
-/// name, its debt's name or its bank's name (only when exactly one card matches). It's skipped when the card's own side already
-/// shows the same payment: paired with it as a transfer, or the same amount within 5 days.
+/// It's tied to the card it names: the card you said it was toward (its debt, or the account you picked in Review, DECISIONS.md
+/// 302), the card's last four digits, or a word from the card's name, its debt's name or its bank's name, also inside a longer
+/// word ("FRUITCARD" names Fruit; only when exactly one card matches). It's skipped when the card's own side already shows the
+/// same payment: paired with it as a transfer, or the same amount within 5 days.
 /// </summary>
 public static partial class CardPayments
 {
@@ -30,7 +31,7 @@ public static partial class CardPayments
 
     public sealed record Card(Guid AccountId, string? Mask, IReadOnlySet<string> Words, IReadOnlyCollection<Guid> DebtIds);
     public sealed record Row(Guid Id, DateOnly Date, string Merchant, string Description, long AmountCents, Guid AccountId, bool OnCard,
-        Guid? TransferGroupId, Guid? DebtAccountId);
+        Guid? TransferGroupId, Guid? DebtAccountId, Guid? TransferAccountId = null);
 
     /// <summary>Payments to each card dated from..to (inclusive; either open), newest first.</summary>
     public static async Task<List<CardPayment>> LoadAsync(AppDbContext db, Guid householdId, DateOnly? from, DateOnly? to, CancellationToken ct)
@@ -54,7 +55,7 @@ public static partial class CardPayments
                 (t.Account.Type == AccountType.CreditCard && t.AmountCents < 0 && (t.Kind == TransactionKind.CardPayment || t.IsTransfer)) ||
                 (t.Account.Type != AccountType.CreditCard && t.AmountCents > 0 && t.Kind == TransactionKind.CardPayment)))
             .Select(t => new Row(t.Id, t.Date, t.Merchant, t.Description, t.AmountCents, t.AccountId, t.Account.Type == AccountType.CreditCard,
-                t.TransferGroupId, t.DebtAccountId))
+                t.TransferGroupId, t.DebtAccountId, t.TransferAccountId))
             .ToListAsync(ct);
         return Attribute(rows, cards).Where(p => (from is null || p.Date >= from) && (to is null || p.Date <= to)).ToList();
     }
@@ -86,16 +87,26 @@ public static partial class CardPayments
     public static Guid? CardFor(Row r, IReadOnlyList<Card> cards)
     {
         if (r.DebtAccountId is { } debt && cards.FirstOrDefault(c => c.DebtIds.Contains(debt)) is { } chosen) return chosen.AccountId;
-        var text = $"{r.Merchant} {r.Description}";
-        var digits = Digits().Replace(text, " ");
-        var byMask = cards.Where(c => c.Mask is { Length: >= 4 } m && digits.Contains(m, StringComparison.Ordinal)).ToList();
-        if (byMask.Count == 1) return byMask[0].AccountId;
-        var words = Words([text]);
-        var byWord = cards.Where(c => c.Words.Overlaps(words)).ToList();
-        return byWord.Count == 1 ? byWord[0].AccountId : null;
+        if (r.TransferAccountId is { } to && cards.Any(c => c.AccountId == to)) return to;
+        return Named($"{r.Merchant} {r.Description}", cards.Select(c => (c.AccountId, c.Mask, c.Words)).ToList());
     }
 
-    private static HashSet<string> Words(IEnumerable<string?> texts) =>
+    /// <summary>
+    /// The one account a payment's words name (DECISIONS.md 244, 302): its last four digits, else a word from its names,
+    /// whole or inside a longer word of at least as many letters. Null when none or more than one does.
+    /// </summary>
+    public static Guid? Named(string text, IReadOnlyList<(Guid Id, string? Mask, IReadOnlySet<string> Words)> accounts)
+    {
+        var digits = Digits().Replace(text, " ");
+        var byMask = accounts.Where(c => c.Mask is { Length: >= 4 } m && digits.Contains(m, StringComparison.Ordinal)).ToList();
+        if (byMask.Count == 1) return byMask[0].Id;
+        var words = Words([text]);
+        var byWord = accounts.Where(c => c.Words.Any(w => words.Any(x => x == w || (w.Length >= 4 && x.Contains(w, StringComparison.Ordinal))))).ToList();
+        return byWord.Count == 1 ? byWord[0].Id : null;
+    }
+
+    /// <summary>The words an account goes by: from its name, its bank's name and its debt's name, lowercased, minus common ones.</summary>
+    public static HashSet<string> Words(IEnumerable<string?> texts) =>
         texts.Where(t => !string.IsNullOrWhiteSpace(t))
             .SelectMany(t => NotLetters().Split(t!.ToLowerInvariant()))
             .Where(w => w.Length >= 3 && !Generic.Contains(w))

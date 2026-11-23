@@ -670,7 +670,8 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             var moves = current
                 ? await db.Transactions.AsNoTracking()
                     .Where(t => t.HouseholdId == householdId && t.Date >= paidOn && t.Date < next && (t.Kind == TransactionKind.CardPayment || t.IsTransfer))
-                    .Select(t => new { t.AmountCents, t.Kind, Type = t.Account.Type, t.CategoryId, t.AccountId }).ToListAsync(ct)
+                    .Select(t => new { t.Date, t.AmountCents, t.Kind, Type = t.Account.Type, t.CategoryId, t.AccountId, t.IsTransfer, t.TransferAccountId, t.TransferGroupId })
+                    .ToListAsync(ct)
                 : [];
             var cardPaid = moves.Where(m => m.Kind == TransactionKind.CardPayment && m.Type == AccountType.Checking && m.AmountCents > 0).Sum(m => m.AmountCents);
             // Per card (DECISIONS.md 244): the payment as the card's own account shows it, or as it left checking when the card
@@ -679,9 +680,29 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             long PaidTo(Guid? accountId) => toCards.Where(p => p.CardAccountId == accountId).Sum(p => p.Cents);
             var cardSideSeen = toCards.Count > 0;
             var allDebtLines = plan.Items.Where(x => x.Kind == "debt").Sum(x => x.Cents);
-            var intoSavings = accounts.Any(a => a.Type == AccountType.Savings)
-                ? moves.Where(m => m.Type == AccountType.Savings && m.AmountCents < 0).Sum(m => -m.AmountCents)
-                : moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.CategoryId is { } id && savingsCategories.Contains(id)).Sum(m => m.AmountCents);
+            long intoSavings;
+            var savingsIds = accounts.Where(a => a.Type == AccountType.Savings).Select(a => a.Id).ToHashSet();
+            if (savingsIds.Count > 0)
+            {
+                // Money that arrived on a savings account, and money that left checking for one (DECISIONS.md 302): you said
+                // which account in Review, or the app matched it. A savings account that isn't bank-synced shows its side only
+                // once you import its file, so the checking side counts until then; once it's there, the transfer counts once.
+                var arrived = moves.Where(m => savingsIds.Contains(m.AccountId) && m.AmountCents < 0).ToList();
+                var seen = arrived.Select(m => (m.AccountId, Cents: -m.AmountCents, m.Date, m.TransferGroupId)).ToList();
+                long sent = 0;
+                foreach (var m in moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.IsTransfer
+                                                   && (m.TransferAccountId is { } to ? savingsIds.Contains(to) : m.CategoryId is { } id && savingsCategories.Contains(id))))
+                {
+                    var twin = seen.FindIndex(s => (m.TransferGroupId is { } g && s.TransferGroupId == g)
+                                                   || (s.Cents == m.AmountCents && (m.TransferAccountId is null || s.AccountId == m.TransferAccountId)
+                                                       && Math.Abs(s.Date.DayNumber - m.Date.DayNumber) <= Transactions.TransferFiling.OtherHalfDays));
+                    if (twin >= 0) seen.RemoveAt(twin);
+                    else sent += m.AmountCents;
+                }
+                intoSavings = arrived.Sum(m => -m.AmountCents) + sent;
+            }
+            else
+                intoSavings = moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.CategoryId is { } id && savingsCategories.Contains(id)).Sum(m => m.AmountCents);
 
             Account? AccountFor(PlanItem x) => accounts.FirstOrDefault(a => Label(a) == x.Destination || a.Name == x.Destination);
             // How far the account's balance from the bank falls short of a "keep" line, for the check you're on now. A friend's

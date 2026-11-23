@@ -203,6 +203,48 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Money_you_sent_from_checking_to_a_savings_account_that_isnt_synced_counts_once()
+    {
+        // DECISIONS.md 302. Feb 24, 2027: on the Feb 22 check, whose savings is half the month's $100.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var me = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!;
+        var h = me.HouseholdId;
+        var checking = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = $"test-chk-{Guid.NewGuid():N}", CurrentBalanceCents = 2_000_00, CreatedUtc = DateTime.UtcNow };
+        var savings = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Savings", Mask = "2222", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+        Transaction T(Account a, DateOnly d, long cents, string merchant, Guid? to = null) => new()
+        {
+            Id = Guid.NewGuid(), HouseholdId = h, AccountId = a.Id, Date = d, AmountCents = cents, Merchant = merchant, Description = "TEST",
+            Kind = TransactionKind.Transfer, IsTransfer = true, TransferAccountId = to, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+        };
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AddRange(checking, savings,
+                new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 });
+            // You said in Review that it went to the savings account; the savings account's own file isn't imported yet.
+            db.Transactions.Add(T(checking, new DateOnly(2027, 2, 23), 50_00, "ONLINE TRANSFER TO SAV", to: savings.Id));
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal((50_00L, true, "Moved $50.00 to savings since payday."), await SavingsLine());
+
+        // Then its file comes in with the same transfer (not paired yet): still $50, not $100.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.Add(T(savings, new DateOnly(2027, 2, 24), -50_00, "ONLINE TRANSFER FROM CHK"));
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal((50_00L, true, "Moved $50.00 to savings since payday."), await SavingsLine());
+
+        async Task<(long, bool, string?)> SavingsLine()
+        {
+            var s = (await Payday(c)).Checks[0].Plan!.AllParts().Single(i => i.Kind == "savings");
+            return (s.Cents, s.Done, s.Status);
+        }
+    }
+
+    [Fact]
     public async Task The_plan_for_the_check_you_are_on_fills_itself_in_from_your_accounts()
     {
         // Feb 24, 2027: living on the Feb 22 check (Feb 1-15, from the February schedule) until Mar 8.
