@@ -130,3 +130,44 @@ export function DracoOnBar({ left, mid, span, onGone }: { left: number; mid: num
     document.body,
   )
 }
+
+/**
+ * On a page with no bars, Draco lies stretched out on top of a card or a button at any spot along it (like Lola). Tapped,
+ * he pulls back and slithers off toward the nearer side of the screen.
+ */
+export function DracoOnCard({ perch, spot, onGone }: { perch: HTMLElement; spot: number; onGone: () => void }) {
+  const [mode, setMode] = useState<'rest' | 'startled' | 'run'>('rest')
+  const [dir, setDir] = useState<1 | -1>(1)
+  function startle(e: MouseEvent | KeyboardEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (mode !== 'rest') return
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setDir(r.left + r.width / 2 < window.innerWidth / 2 ? -1 : 1)
+    setMode('startled')
+    if (reducedMotion()) {
+      window.setTimeout(onGone, 400)
+      return
+    }
+    window.setTimeout(() => setMode('run'), 420)
+    window.setTimeout(onGone, 420 + 1100)
+  }
+  return createPortal(
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={mode === 'rest' ? 'Draco the snake, lying on this card. Tap him.' : 'Draco slithers off'}
+      className="draco-ground draco-rest"
+      data-mode={mode}
+      style={{ left: `calc(${spot * 100}% - ${spot * 92}px)`, ['--draco-dir' as string]: dir }}
+      onClick={startle}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && startle(e)}
+    >
+      {/* He faces right; he turns round to slither off to the left. */}
+      <div style={{ transform: mode === 'run' && dir < 0 ? 'scaleX(-1)' : undefined }}>
+        <Slithering />
+      </div>
+    </div>,
+    perch,
+  )
+}

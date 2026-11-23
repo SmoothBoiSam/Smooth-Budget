@@ -352,6 +352,7 @@ details[open] > :not(summary) {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   line-height: 0;
+  animation: fade-in 700ms ease-out both;
 }
 .lola[data-mode="run"] {
   transform: translateX(calc(var(--lola-dir) * 110vw));
@@ -445,6 +446,16 @@ details[open] > :not(summary) {
 }
 .draco-ground .draco-body {
   animation: draco-wiggle 280ms ease-in-out 800ms 9 alternate;
+}
+/* On a page with no bars he lies on a card instead: he fades in and rests there. */
+.draco-ground.draco-rest {
+  animation: fade-in 700ms ease-out both;
+}
+.draco-rest .draco-body {
+  animation: none;
+}
+.draco-rest[data-mode="startled"] .draco-body {
+  animation: draco-startle 420ms ease-out both;
 }
 .draco-ground[data-mode="run"] {
   animation: none;

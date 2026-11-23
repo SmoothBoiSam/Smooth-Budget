@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { DracoOnBar, Slithering } from './Draco'
+import { DracoOnBar, DracoOnCard, Slithering } from './Draco'
 import { reducedMotion } from './motion'
 
 /**
@@ -8,7 +8,8 @@ import { reducedMotion } from './motion'
  * - Lola, the orange tabby (1 in 30, at most once a day): asleep on top of a card or a button at any spot along it, with
  *   z's drifting off her. Tap her and she hisses, then runs off the screen. She sits inside the card she's on, so on a
  *   lower card she's drawn in front of the card above.
- * - Draco, the striped snake (1 in 60, at most once a day): coiled round a progress bar (Draco.tsx).
+ * - Draco, the striped snake (1 in 60, at most once a day): coiled round a progress bar (Draco.tsx), or on a page with
+ *   no bars, lying on a card or a button.
  * - Very rarely (1 in 400), Draco slithers up to Lola while she naps. Tap either: she hisses at him and they bolt
  *   opposite ways.
  * Add ?lola, ?draco or ?meet to the address to see one every time.
@@ -31,17 +32,18 @@ function markSeen(pet: 'lola' | 'draco') {
   }
 }
 
+type Kind = 'lola' | 'meet' | 'draco'
 type Visit =
-  | { id: number; kind: 'lola' | 'meet'; perch: HTMLElement; spot: number }
+  | { id: number; kind: 'lola' | 'meet' | 'draco-card'; perch: HTMLElement; spot: number }
   | { id: number; kind: 'draco'; left: number; mid: number; span: number }
 
-const forced = (): Visit['kind'] | null => {
+const forced = (): Kind | null => {
   const q = window.location.search
   return q.includes('meet') ? 'meet' : q.includes('draco') ? 'draco' : q.includes('lola') ? 'lola' : null
 }
 
 /** Who visits this page, if anyone: one roll of the dice. */
-function roll(): Visit['kind'] | null {
+function roll(): Kind | null {
   const r = Math.random()
   const [meet, lola, draco] = [1 / ODDS.meet, 1 / ODDS.lola, 1 / ODDS.draco]
   if (r < meet) return !seenToday('lola') && !seenToday('draco') ? 'meet' : null
@@ -50,15 +52,20 @@ function roll(): Visit['kind'] | null {
   return null
 }
 
-/** Where on this page they go, or null when there's nowhere yet (the page may still be loading). */
-function place(kind: Visit['kind'], forced: boolean): Visit | null {
+/**
+ * Where on this page they go, or null when there's nowhere yet (the page may still be loading). Draco takes a bar when
+ * there is one; with none, once the page has had time to load (anyCard), he lies on a card or a button instead.
+ */
+function place(kind: Kind, forced: boolean, anyCard: boolean): Visit | null {
   const id = Date.now()
   if (kind === 'draco') {
     const bar = findBar()
-    if (bar && !forced) markSeen('draco')
-    return bar ? { id, kind, ...bar } : null
+    const perch = bar || !anyCard ? null : findPerch(110)
+    if ((bar || perch) && !forced) markSeen('draco')
+    if (bar) return { id, kind, ...bar }
+    return perch ? { id, kind: 'draco-card', perch, spot: Math.random() } : null
   }
-  // Meeting: a wide card, with Lola near one end and room for Draco at the other.
+  // Meeting: a wide card, with Lola near one end and room for Draco at the other. Lola fades in (index.css).
   const perch = findPerch(kind === 'meet' ? 230 : 90)
   if (!perch) return null
   if (!forced) {
@@ -173,7 +180,7 @@ export default function Pets() {
       const kind = force ?? roll()
       if (!kind) return
       const look = (tries: number) => {
-        const v = place(kind, !!force)
+        const v = place(kind, !!force, tries <= 3)
         if (v) setVisit(v)
         else if (tries > 0) timer = window.setTimeout(() => look(tries - 1), 900)
       }
@@ -195,6 +202,8 @@ export default function Pets() {
   const gone = () => setVisit(null)
   return visit.kind === 'draco' ? (
     <DracoOnBar key={visit.id} left={visit.left} mid={visit.mid} span={visit.span} onGone={gone} />
+  ) : visit.kind === 'draco-card' ? (
+    <DracoOnCard key={visit.id} perch={visit.perch} spot={visit.spot} onGone={gone} />
   ) : (
     <LolaNap key={visit.id} perch={visit.perch} spot={visit.spot} meet={visit.kind === 'meet'} onGone={gone} />
   )
