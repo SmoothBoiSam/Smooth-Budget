@@ -107,7 +107,7 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         var eatingHistory = await History(eating);
         Assert.NotNull(eatingHistory.UnsqueezedCents);
         Assert.True(eatingHistory.UnsqueezedCents > Limit(s, eating));
-        Assert.Contains($"(from {eatingHistory.UnsqueezedCents / 100m:C})", plan.Categories.Single(x => x.CategoryId == eating).Explanation);
+        Assert.Contains($"(from {SmoothBudget.Core.Pay.PayEngine.Dollars(eatingHistory.UnsqueezedCents!.Value)})",plan.Categories.Single(x => x.CategoryId == eating).Explanation);
         Assert.Null((await History(rent)).UnsqueezedCents);
 
         // Dropping a trip lowers the Feb 22 check: the budget follows on the next look, with no button.
