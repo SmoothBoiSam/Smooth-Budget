@@ -49,7 +49,7 @@ function viewFromHash(): View {
 }
 
 
-export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: () => void; onSignedOut: () => void }) {
+export default function BudgetScreen({ demo = false, onChanged, onSignedOut }: { demo?: boolean; onChanged: () => void; onSignedOut: () => void }) {
   const [view, setView] = useState<View>(viewFromHash)
   const [summary, setSummary] = useState<BudgetSummary | null>(null)
   const [month, setMonth] = useState<Transaction[]>([])
@@ -211,7 +211,8 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
       {view.kind === 'plan' && (
         <div className="mt-6">
           <SweepSetting />
-          <ResetCategories onDone={saved} />
+          {/* Not in the demo (DECISIONS.md 309): its categories are already the bank's. */}
+          {!demo && <ResetCategories onDone={saved} />}
         </div>
       )}
 

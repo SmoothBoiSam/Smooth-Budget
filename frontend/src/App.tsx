@@ -205,7 +205,7 @@ export default function App() {
       {me.demo && <DemoBar onLeave={() => void api.logout().finally(() => { window.history.replaceState(null, '', '#/'); signedOut() })} />}
       <div ref={screen}>
       {route === 'home' && <HomeScreen me={me} onSignedOut={signedOut} onNoticeCount={setHomeCount} />}
-      {(route === 'budget' || route === 'transactions') && <BudgetScreen key={route} onChanged={refreshInbox} onSignedOut={signedOut} />}
+      {(route === 'budget' || route === 'transactions') && <BudgetScreen key={route} demo={me.demo} onChanged={refreshInbox} onSignedOut={signedOut} />}
       {route === 'tasks' && (
         <TasksScreen
           inboxCount={inboxCount}
