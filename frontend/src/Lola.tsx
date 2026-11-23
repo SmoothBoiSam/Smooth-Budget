@@ -4,7 +4,7 @@ import { reducedMotion } from './motion'
 
 /**
  * Lola, the orange tabby (DECISIONS.md 295): once in a while (1 in 30 pages opened, at most once a day) she's asleep on top
- * of something on the page (a card, a row, a button) at any spot along it, with z's drifting off her. Tap her and she hisses, then runs off the screen. She sits inside the card she's
+ * of a card or a button at any spot along it, with z's drifting off her. Tap her and she hisses, then runs off the screen. She sits inside the card she's
  * on, so on a lower card she's drawn in front of the card above. Add ?lola to the address to see her every time.
  */
 const ODDS = 30
@@ -25,14 +25,20 @@ function markSeen() {
   }
 }
 
-/** Anything on the page she can sit on (a card, a row, a button), preferring one in view. */
+/** A card or a button on the page for her to sit on (not a row in a list), preferring one in view. */
 function findPerch(): HTMLElement | null {
   const root = document.getElementById('root')
   if (!root) return null
-  const fits = [...root.querySelectorAll<HTMLElement>('.neu, .neu-sm, .shadow-neu-sm, li, a, button')].filter((el) => {
-    if (el.closest('nav, [role="dialog"], [role="alert"], .fixed, summary, .lola')) return false
+  const fits = [...root.querySelectorAll<HTMLElement>('.neu, .neu-sm, .shadow-neu-sm, a, button')].filter((el) => {
+    if (el.closest('nav, [role="dialog"], [role="alert"], .fixed, summary, li, .lola')) return false
     const r = el.getBoundingClientRect()
     if (r.width < 90 || r.height < 28) return false
+    // A link or button only when it looks like one: raised or filled, not plain text.
+    if (el.matches('a, button') && !el.matches('.neu, .neu-sm, .shadow-neu-sm')) {
+      const s = getComputedStyle(el)
+      const filled = !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(s.backgroundColor)
+      if (s.boxShadow === 'none' && !filled) return false
+    }
     // Anything that clips above the card would cut her off.
     for (let a: HTMLElement | null = el; a && a !== root; a = a.parentElement) {
       const s = getComputedStyle(a)
