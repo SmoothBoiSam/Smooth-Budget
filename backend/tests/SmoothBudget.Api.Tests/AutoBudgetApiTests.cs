@@ -356,5 +356,23 @@ public class AutoBudgetApiTests(TestApp app) : IClassFixture<TestApp>
         var savTx = (await c.GetFromJsonAsync<List<TransactionDto>>($"/api/accounts/transactions?type=savings&accountId={savings}", Json))!;
         Assert.Equal(3, savTx.Count);
         Assert.All(savTx, t => Assert.Equal(savings, t.AccountId));
+
+        // Savings (DECISIONS.md 304): a bank-synced savings account counts money still on its way in, as its row does. The
+        // bank says $10; $50 is pending in.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var synced = new Account { Id = Guid.NewGuid(), HouseholdId = household, Name = "Test Synced Savings", Type = AccountType.Savings, Source = DataSource.Plaid,
+                PlaidAccountId = $"test-sav-{Guid.NewGuid():N}", CurrentBalanceCents = 10_00, CreatedUtc = DateTime.UtcNow };
+            db.Accounts.Add(synced);
+            db.Transactions.Add(new Transaction { Id = Guid.NewGuid(), HouseholdId = household, AccountId = synced.Id, Date = new DateOnly(2027, 2, 10), AmountCents = -50_00,
+                Merchant = "TEST", Description = "TEST", Kind = TransactionKind.Transfer, IsTransfer = true, Pending = true, Source = DataSource.Plaid, CreatedUtc = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var row = (await c.GetFromJsonAsync<List<Accounts.AccountBalanceDto>>("/api/accounts/balances?type=savings", Json))!.Single(a => a.BankSynced);
+        var saved = (await c.GetFromJsonAsync<Savings.SavingsSummaryDto>("/api/savings", Json))!;
+        Assert.Equal((60_00L, 60_00L), (row.BalanceCents, saved.Accounts.Single(a => a.BalanceFromBank).BalanceCents));
+        Assert.Equal(60_00 + 580_00, saved.TotalSavedCents);
+        Assert.Equal(60_00 + 580_00, saved.History[^1].BalanceCents);
     }
 }

@@ -49,7 +49,7 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var ids = accounts.Select(a => a.Id).ToList();
         var txns = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId))
-            .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
+            .Select(t => new { t.AccountId, t.Date, t.AmountCents, t.Pending }).ToListAsync(ct);
 
         // Pace: the last few complete budget months.
         var current = calendar.MonthContaining(today);
@@ -57,10 +57,11 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var m = current;
         for (var i = 0; i < PaceMonths; i++)
             paceMonths.Add(m = calendar.MonthContaining(m.Start.AddDays(-1)));
-        // A bank-synced balance is the bank's. Otherwise: the balance last given (by a CSV or by you), moved by every
-        // transaction after that day, or the sum of all of them if none was ever given (DECISIONS.md 189).
+        // A bank-synced balance is the bank's, with what's still pending counted, as on the account's own row (DECISIONS.md
+        // 256, 304): money on its way in is saved already. Otherwise: the balance last given (by a CSV or by you), moved by
+        // every transaction after that day, or the sum of all of them if none was ever given (DECISIONS.md 189).
         var balances = accounts.ToDictionary(a => a.Id, a => a.PlaidAccountId is not null
-            ? a.CurrentBalanceCents
+            ? a.CurrentBalanceCents - txns.Where(t => t.AccountId == a.Id && t.Pending).Sum(t => t.AmountCents)
             : a.CurrentBalanceCents - txns.Where(t => t.AccountId == a.Id && (a.BalanceAsOf is null || t.Date > a.BalanceAsOf)).Sum(t => t.AmountCents));
 
         var pace = accounts.ToDictionary(a => a.Id,
