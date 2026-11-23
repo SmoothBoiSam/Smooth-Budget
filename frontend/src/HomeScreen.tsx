@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ApiError, api, plaidApi, type BankUpdate, type CashCheck, type HomeSummary, type Me, type MonthOverview, type PickUp } from './api'
-import { homeNotices } from './homeNotices'
+import { homeBadge, homeNotices } from './homeNotices'
 import { formatCents, formatDay, formatTime, isMaxed, spendingBar } from './format'
 import { useArrivals, useTween } from './motion'
 import { saved, useOnline, useResume } from './offline'
@@ -85,9 +85,9 @@ export default function HomeScreen({ me, onSignedOut, onNoticeCount }: { me: Me;
     void load()
   }, [load])
   useResume(load)
-  // The bubble on the Home tab (DECISIONS.md 283): how many cards here want a look.
+  // The bubble on the Home tab (DECISIONS.md 283, 294): how many cards here you can do something about now.
   useEffect(() => {
-    if (summary) onNoticeCount?.(homeNotices(summary, !!savedAt).length)
+    if (summary) onNoticeCount?.(homeBadge(summary, !!savedAt))
   }, [summary, savedAt, onNoticeCount])
 
   // Pull to refresh (SPEC section 4.2) and the Refresh link both sync connected banks, then reload.
@@ -615,12 +615,15 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
       )}
 
       <Card title="Month overview">
+        <div className="px-5 py-4">
         {s.overview && <MonthOverviewLines o={s.overview} />}
         {/* Only when the budget couldn't shrink enough to fit the accounts (DECISIONS.md 236): otherwise there's nothing to act on. */}
         {s.cash && s.cashShortCents > 0 && (
-          <Rows>
-            <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />
-          </Rows>
+          <div className="-mx-5">
+            <Rows>
+              <CashCheckRow cash={s.cash} shortCents={s.cashShortCents} pickUp={s.pickUp ?? null} />
+            </Rows>
+          </div>
         )}
         {s.nextPayday && (
           <a href="#/income" className="mt-3 flex items-baseline justify-between gap-3 border-t border-ink/10 pt-3 text-xs text-ink-faint">
@@ -636,6 +639,7 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
             {s.nextPayday.hasSchedule && <span className="shrink-0 tabular-nums">≈ {formatCents(s.nextPayday.netCents)}</span>}
           </a>
         )}
+        </div>
       </Card>
     </>
   )

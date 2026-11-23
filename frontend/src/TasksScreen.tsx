@@ -22,6 +22,8 @@ export default function TasksScreen({
   onSignedOut: () => void
 }) {
   const [payday, setPayday] = useState<PaydaySummary | null>(null)
+  // Faded only once counted: the tab's count starts at 0 before it's known.
+  const [counted, setCounted] = useState(false)
   // Counted again when you come back to the app after a while (DECISIONS.md 251).
   const [again, setAgain] = useState(0)
   useResume(useCallback(() => setAgain((n) => n + 1), []))
@@ -33,7 +35,10 @@ export default function TasksScreen({
     }
     budgetApi
       .inboxCount()
-      .then((r) => onInboxCount(r.count + r.review))
+      .then((r) => {
+        onInboxCount(r.count + r.review)
+        setCounted(true)
+      })
       .catch(signedOut)
     paydayApi
       .summary()
@@ -70,6 +75,7 @@ export default function TasksScreen({
             hint={inboxCount > 0 ? `${inboxCount} ${inboxCount === 1 ? 'purchase' : 'purchases'} to confirm` : 'All caught up'}
             badge={inboxCount}
             href="#/tasks/transactions"
+            disabled={counted && inboxCount === 0}
           />
           <Row
             icon={icons.payTasks}

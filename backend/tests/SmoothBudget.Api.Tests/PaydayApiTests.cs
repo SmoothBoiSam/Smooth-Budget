@@ -459,16 +459,18 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal((new DateOnly(2027, 2, 22), 200_00L), (p.Checks[0].PayDate, Of(p, "savings")));
         Assert.Equal(2_000_00L - 200_00 - Of(p, "hold"), p.Checks[0].Plan!.SpareCents);
 
-        // A bonus expected Feb 26 pays for the month's savings (263), so this check's savings is all of it. It isn't in
-        // checking yet, and neither does its savings have to come out before it lands: only the hold comes off the $2,000.
+        // A bonus expected Feb 26 pays for the month's savings (263), so this check's savings is all of it. Its savings
+        // doesn't have to come out before it lands, and nothing is due before then: all $2,000 is spare until Feb 26
+        // (DECISIONS.md 293). After it, the $1,000 less the $400 of savings is in, and the hold comes off; that's the lower
+        // of the two only when the hold is more than $600.
         (await c.PostAsJsonAsync("/api/payday/expected", new { name = "Test bonus", amountCents = 1_000_00, expectedDate = "2027-02-26" }, Json)).EnsureSuccessStatusCode();
         p = await Payday(c);
         Assert.Equal(400_00L, Of(p, "savings"));
-        Assert.Equal(2_000_00L - Of(p, "hold"), p.Checks[0].Plan!.SpareCents);
+        Assert.Equal(Math.Min(2_000_00L, 2_000_00L + 1_000_00 - 400_00 - Of(p, "hold")), p.Checks[0].Plan!.SpareCents);
     }
 
     [Fact]
-    public async Task A_friends_part_of_a_bill_still_to_arrive_doesnt_count_as_checking_short_but_isnt_safe_to_spend()
+    public async Task A_friends_part_of_a_bill_still_to_arrive_doesnt_count_as_checking_short_and_counts_toward_safe_to_spend_when_due()
     {
         // DECISIONS.md 275, 277. Feb 24, 2027, on the Feb 22 check: $1,650 rent is due Mar 1, before the Mar 8 payday, and a
         // friend sends $800 toward it that hasn't arrived yet.
@@ -499,11 +501,11 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         var keep = await Keep();
         Assert.Equal((1_650_00L, 0L, true), (keep.Cents, keep.ShortCents, keep.Done));
         Assert.Equal("Test Checking has $1,000.00, enough for these with the $800.00 Test Friend sends still to come.", keep.Status);
-        // But until it's in, it isn't safe to spend (DECISIONS.md 277): rent counts in full, and Home says what it waits for.
-        var coming = Assert.Single((await Payday(c)).Checks[0].Plan!.Coming!);
+        // Rent comes off in full and the $800 counts from when it's due (DECISIONS.md 277, 293): $1,000 - $1,650 + $800.
+        var plan = (await Payday(c)).Checks[0].Plan!;
+        var coming = Assert.Single(plan.Coming!);
         Assert.Equal(("Test Friend sends $800.00", 800_00L), (coming.Label, coming.Cents));
-        var safe = (await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!.SafeToSpend!;
-        Assert.Equal((0L, "Test Friend sends $800.00"), (safe.SafeCents, safe.Until));
+        Assert.Equal(150_00L, plan.SpareCents);
 
         // With $500, it's short the $350 of your part.
         using (var scope = app.Services.CreateScope())

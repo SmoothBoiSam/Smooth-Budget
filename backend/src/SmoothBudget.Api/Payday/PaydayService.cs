@@ -27,10 +27,10 @@ public record PlanBillDto(string Name, long Cents, DateOnly Due);
 public record ComingDto(string Label, long Cents, DateOnly Date);
 /// <param name="ShortCents">What the check still lacks for everything planned for it, after what an earlier check keeps for it.</param>
 /// <param name="HeldEarlierCents">How much of what this check needs is kept back from the check before it, paid on <paramref name="HeldOn"/> (DECISIONS.md 253).</param>
-/// <param name="SpareCents">For the check you're on now: what checking can spare before the next payday (DECISIONS.md 272).
+/// <param name="SpareCents">For the check you're on now: what checking can spare before the next payday (DECISIONS.md 272, 293).
 /// Null when a checking account isn't bank-synced. Below zero when the accounts are already short.</param>
 /// <param name="Coming">For the check you're on now: money still to land before the next payday, soonest first (a bonus, or a
-/// friend's part of a bill). Safe to Spend doesn't count it until it's in (DECISIONS.md 277).</param>
+/// friend's part of a bill). Safe to Spend counts it from the day it's due (DECISIONS.md 277, 293).</param>
 public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents, long HeldEarlierCents = 0, DateOnly? HeldOn = null, long? SpareCents = null,
     IReadOnlyList<ComingDto>? Coming = null)
 {
@@ -796,17 +796,21 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 current ? coming.Select(x => new ComingDto($"{x.Name} lands {x.ExpectedDate:MMM d}", x.AmountCents, x.ExpectedDate))
                     .Concat(friendsComing).OrderBy(x => x.Date).ToList() : null));
 
-            // What checking can spare before the next payday (DECISIONS.md 272, 276): every checking balance, counting what's
-            // pending both ways, less the bills still due before payday (in full: a friend's part counts once it's arrived, 277), what this check still
-            // has to send to the cards and savings, what it keeps for the next check's bills, a friend's money already in
-            // for those, and what you've charged to cards since payday (the next check's plan pays that from here).
-            // Income still coming isn't counted: it can't be spent before it lands.
+            // What checking can spare before the next payday (DECISIONS.md 272, 276, 293): every checking balance, counting
+            // what's pending both ways (Debit's Cash), less what has to come out of it: the bills due before payday (in full),
+            // what this check still has to send to the cards and savings, what it keeps for the next check's bills, a friend's
+            // money already in for those, and what you've charged to cards since payday (the next check's plan pays that from
+            // here). Money still to land before payday (a bonus, a friend's part of a bill) counts from the day it's due, so
+            // until then only what's due before it comes off. It's the lowest point along the way: a later bill that money
+            // can't cover still holds some back now.
             long? Spare()
             {
                 var checking = accounts.Where(a => a.Type == AccountType.Checking).ToList();
                 if (checking.Count == 0 || checking.Any(a => a.PlaidAccountId is null)) return null;
                 var all = tasks.ToList();
-                var bills = plan.Items.Where(x => x.Kind == "keep").Sum(x => x.Cents);
+                // Each bill on its due date; a keep line without its bills is due now.
+                var bills = plan.Items.Where(x => x.Kind == "keep")
+                    .SelectMany(x => x.Bills is { Count: > 0 } list ? list.Select(b => (Due: b.Due, b.Cents)) : [(Due: c.Today, x.Cents)]).ToList();
                 var held = all.Where(x => x.Kind == "hold").Sum(x => x.Cents);
                 var toCards = Math.Max(0, all.Where(x => x.Kind is "debt" or "cardspend" && !x.Skipped).Sum(x => x.Cents) - cardPaid);
                 var toSavings = Math.Max(0, all.Where(x => x.Kind == "savings").Sum(x => x.Cents) - intoSavings);
@@ -816,7 +820,17 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var sweeps = all.Where(x => x.Kind == "sweep" && !x.Done).Sum(x => x.Cents);
                 var arrivedForLater = after is { } an ? an.Plan.Items.Where(y => y.Kind == "keep").SelectMany(y => y.Bills ?? []).Sum(b => b.ArrivedCents) : 0;
                 var chargedSince = Math.Max(0, charged.Where(t => t.Date >= paidOn && t.Date <= c.Today).Sum(t => t.AmountCents));
-                return checking.Sum(Balance) - bills - held - toCards - toSavings + waitForBonus - sweeps - arrivedForLater - chargedSince;
+                var landing = coming.Where(x => x.ExpectedDate < next).Select(x => (Date: x.ExpectedDate, Cents: x.AmountCents))
+                    .Concat(friendsComing.Where(x => x.Date < next).Select(x => (x.Date, x.Cents))).ToList();
+                // The card payment and savings a bonus pays for go out when it lands.
+                var firstBonus = coming.Where(x => x.ExpectedDate < next).Select(x => (DateOnly?)x.ExpectedDate).Min();
+                var start = checking.Sum(Balance) - toCards - toSavings + waitForBonus - sweeps;
+                // Just before money lands on a day: a bill due that day may come first, and that money isn't in yet.
+                long Before(DateOnly day) => start - bills.Where(b => b.Due <= day).Sum(b => b.Cents)
+                                             + landing.Where(x => x.Date < day).Sum(x => x.Cents) - (firstBonus < day ? waitForBonus : 0);
+                var atPayday = start - bills.Sum(b => b.Cents) - held - arrivedForLater - chargedSince
+                               + landing.Sum(x => x.Cents) - (firstBonus is null ? 0 : waitForBonus);
+                return landing.Select(x => Before(x.Date)).Append(atPayday).Min();
             }
         }
         return result;

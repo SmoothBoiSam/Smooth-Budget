@@ -120,8 +120,9 @@ function IncomeChart({ months }: { months: IncomeMonth[] }) {
           </li>
         ))}
       </ul>
-      {/* The same numbers as a table, for screen readers. */}
-      <table className="sr-only">
+      {/* The same numbers as a table, for screen readers. In a div: a table ignores sr-only's 1px width (DECISIONS.md 293). */}
+      <div className="sr-only">
+      <table>
         <caption>Income by month</caption>
         <thead>
           <tr>
@@ -142,6 +143,7 @@ function IncomeChart({ months }: { months: IncomeMonth[] }) {
           ))}
         </tbody>
       </table>
+      </div>
     </figure>
   )
 }

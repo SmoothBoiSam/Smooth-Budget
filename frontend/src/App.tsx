@@ -4,7 +4,7 @@ import BottomNav, { type Route } from './BottomNav'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
 import HomeScreen from './HomeScreen'
-import { homeNotices } from './homeNotices'
+import { homeBadge } from './homeNotices'
 import LoginScreen from './LoginScreen'
 import MoreScreen from './MoreScreen'
 import FriendsScreen from './FriendsScreen'
@@ -152,7 +152,7 @@ export default function App() {
   const [liveHomeCount, setHomeCount] = useState<number | null>(null)
   const savedHomeCount = useMemo(() => {
     const h = me ? saved.home(me.householdId) : null
-    return h ? homeNotices(h.summary, false).length : 0
+    return h ? homeBadge(h.summary, false) : 0
   }, [me])
   const homeCount = liveHomeCount ?? savedHomeCount
 

@@ -83,6 +83,8 @@ body,
 html {
   scrollbar-width: none;
   overscroll-behavior-x: none;
+  /* Also here: something placed outside #root's box (absolutely, against the page) isn't clipped by it (DECISIONS.md 293). */
+  overflow-x: clip;
 }
 ::-webkit-scrollbar {
   display: none;

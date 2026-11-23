@@ -5,7 +5,7 @@ import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import BankConnections from './BankConnections'
 import { formatCents, formatTime } from './format'
-import { Card, ErrorNotice, headerActionCls, Page, PageHeader, Row, Rows, smallBtn } from './ui'
+import { Card, Chevron, ErrorNotice, headerActionCls, Page, PageHeader, Row, Rows, smallBtn } from './ui'
 
 const accountTypeLabel: Record<Account['type'], string> = { Checking: 'Checking', Savings: 'Savings', CreditCard: 'Credit card' }
 
@@ -83,35 +83,11 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         <PageHeader title="Import a CSV" back={back} />
         {errorBox}
         <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
-        {/* Past files and their undo sit right under the import they came from (DECISIONS.md 184, 187). */}
-        <Card title="Imported files">
-          {batches.length === 0 ? (
-            <p className="px-5 py-4 text-sm text-ink-soft">Nothing imported yet.</p>
-          ) : (
-            <Rows>
-              {batches.map((b) => (
-                <li key={b.id} className="flex items-center gap-3 px-5 py-3.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{b.fileName}</p>
-                    <p className="text-xs text-ink-soft">
-                      {b.accountName} · {formatTime(b.importedUtc)} · {b.importedCount} new
-                      {b.errorCount > 0 && `, ${b.errorCount} unreadable`}
-                    </p>
-                  </div>
-                  {b.importedCount > 0 && (
-                    <button type="button" onClick={() => undo(b)} className={headerActionCls + ' text-danger!'}>
-                      Undo
-                    </button>
-                  )}
-                </li>
-              ))}
-            </Rows>
-          )}
-        </Card>
+        {/* Past files and their undo sit right under the import they came from (DECISIONS.md 184, 187), in a dropdown by month (293). */}
+        <ImportedFiles batches={batches} onUndo={undo} />
       </Page>
     )
 
-  const lastImport = batches[0]
   return (
     <Page>
       <PageHeader title="More" />
@@ -120,7 +96,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
       <Card title="Accounts">
         <Rows>
           <Row label="Bank connections" href="#/more/banks" />
-          <Row label="Import a CSV" hint={lastImport ? `Last: ${lastImport.fileName}` : undefined} href="#/more/import" />
+          <Row label="Import a CSV" href="#/more/import" />
           <Row label="Friends" href="#/friends" />
         </Rows>
       </Card>
@@ -140,6 +116,75 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         </Rows>
       </Card>
     </Page>
+  )
+}
+
+const files = (n: number) => `${n} ${n === 1 ? 'file' : 'files'}`
+
+/**
+ * Imported files (DECISIONS.md 293): one dropdown, closed until you open it, with a dropdown for each month a file was
+ * imported in, newest first. The newest month opens with it.
+ */
+function ImportedFiles({ batches, onUndo }: { batches: ImportBatch[]; onUndo: (b: ImportBatch) => void }) {
+  if (batches.length === 0)
+    return (
+      <Card title="Imported files">
+        <p className="px-5 py-4 text-sm text-ink-soft">Nothing imported yet.</p>
+      </Card>
+    )
+  const months: { key: string; label: string; items: ImportBatch[] }[] = []
+  for (const b of [...batches].sort((x, y) => y.importedUtc.localeCompare(x.importedUtc))) {
+    const d = new Date(b.importedUtc)
+    const key = `${d.getFullYear()}-${d.getMonth()}`
+    const last = months.at(-1)
+    if (last?.key === key) last.items.push(b)
+    else months.push({ key, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), items: [b] })
+  }
+  return (
+    <Card>
+      <details className="group/all">
+        <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-3.5 text-sm">
+          <span className="min-w-0 flex-1 font-semibold">Imported files</span>
+          <span className="shrink-0 text-xs text-ink-soft">{files(batches.length)}</span>
+          <span className="transition-transform group-open/all:rotate-90">
+            <Chevron />
+          </span>
+        </summary>
+        <ul className="divide-y divide-ink/[0.07] border-t border-ink/[0.07]">
+          {months.map((m, i) => (
+            <li key={m.key}>
+              <details open={i === 0} className="group/month">
+                <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-3 text-sm">
+                  <span className="min-w-0 flex-1 font-medium">{m.label}</span>
+                  <span className="shrink-0 text-xs text-ink-soft">{files(m.items.length)}</span>
+                  <span className="transition-transform group-open/month:rotate-90">
+                    <Chevron />
+                  </span>
+                </summary>
+                <ul className="divide-y divide-ink/[0.07] border-t border-ink/[0.07]">
+                  {m.items.map((b) => (
+                    <li key={b.id} className="flex items-center gap-3 py-3.5 pr-5 pl-8">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{b.fileName}</p>
+                        <p className="text-xs text-ink-soft">
+                          {b.accountName} · {formatTime(b.importedUtc)} · {b.importedCount} new
+                          {b.errorCount > 0 && `, ${b.errorCount} unreadable`}
+                        </p>
+                      </div>
+                      {b.importedCount > 0 && (
+                        <button type="button" onClick={() => onUndo(b)} className={headerActionCls + ' text-danger!'}>
+                          Undo
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </Card>
   )
 }
 
