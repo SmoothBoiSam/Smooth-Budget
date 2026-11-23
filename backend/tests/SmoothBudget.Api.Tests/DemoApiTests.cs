@@ -83,4 +83,37 @@ public class DemoApiTests(TestApp app) : IClassFixture<TestApp>
         var results = await Task.WhenAll(paths.Select(p => c.GetAsync(p)));
         Assert.All(results, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
     }
+
+    [Fact]
+    public async Task Refreshing_categories_from_the_bank_files_the_demo_the_same_way_again()
+    {
+        // DECISIONS.md 307: each demo transaction carries the bank's label for its category, as a bank's export does, so
+        // "Refresh categories from bank" files it back where it was instead of leaving everything unfiled.
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 20, 19, 0, 0, TimeSpan.Zero));
+        var (c, _) = await StartAsync();
+        async Task<(long, long, int, string)> Budget()
+        {
+            var s = (await c.GetFromJsonAsync<Budget.BudgetSummaryDto>("/api/budget/summary", Json))!;
+            var lines = string.Join(", ", s.Groups.SelectMany(g => g.Categories).Select(x => $"{x.Name} {x.LimitCents}/{x.SpentCents}"));
+            return (s.LeftToSpendCents, s.UnfiledSpendingCents, s.UncategorizedCount, lines);
+        }
+        var before = await Budget();
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync("/api/budget/categories/reset-from-bank", null)).StatusCode);
+        Assert.Equal(before, await Budget());
+    }
+
+    [Theory]
+    [InlineData(6)]
+    [InlineData(20)]
+    [InlineData(23)]
+    [InlineData(36)] // Dec 6, the month's last day
+    public async Task The_demos_cash_never_went_below_zero(int novemberDay)
+    {
+        // DECISIONS.md 307: the demo pays its cards what it charges, and today's balance follows from an opening balance and
+        // every seeded row, so Cash, worked back from today, stays positive whatever day the demo starts.
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 1, 19, 0, 0, TimeSpan.Zero).AddDays(novemberDay - 1));
+        var (c, _) = await StartAsync();
+        var cash = (await c.GetFromJsonAsync<Accounts.CashDto>("/api/accounts/cash", Json))!;
+        Assert.True(cash.History.Min(p => p.BalanceCents) > 0, $"lowest: {cash.History.Min(p => p.BalanceCents)}");
+    }
 }

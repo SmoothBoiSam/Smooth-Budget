@@ -23,6 +23,12 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
     /// <summary>Carried-over deficit from the (fictional) previous month, to exercise that line on Home.</summary>
     public const long DemoCarriedInDeficitCents = 42_50;
 
+    /// <summary>
+    /// Checking's balance the day before the oldest demo month (DECISIONS.md 307). Today's balance is this moved by every
+    /// seeded checking transaction, so Cash, worked back from today, stays positive on any day of the month.
+    /// </summary>
+    public const long DemoOpeningCheckingCents = 1_200_00;
+
     /// <summary>Creates (or resets) the demo login and its household, then seeds it.</summary>
     public async Task<Guid> SeedDemoUserAsync(string password, CancellationToken ct = default)
     {
@@ -79,7 +85,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, Type = type, Mask = mask,
             CurrentBalanceCents = balance, BalanceAsOf = today, Source = DataSource.Seed, CreatedUtc = now,
         };
-        var checking = NewAccount("Demo Checking", AccountType.Checking, "0001", 1_204_33);
+        var checking = NewAccount("Demo Checking", AccountType.Checking, "0001", DemoOpeningCheckingCents); // moved below
         var visa = NewAccount("Demo Visa", AccountType.CreditCard, "0002", -3_812_40);
         var mastercard = NewAccount("Demo Mastercard", AccountType.CreditCard, "0003", -1_455_10);
         var savings = NewAccount("Demo Savings", AccountType.Savings, "0004", 250_00);
@@ -130,6 +136,13 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
             (1, savings, null, "Transfer from Demo Checking", -100_00, true),
             (17, checking, cardPayment, "Payment to Demo Visa", 300_00, true),
             (17, visa, null, "Payment received, thank you", -300_00, true),
+            // Paying off what was charged (DECISIONS.md 179, 307): that spending already counts in its categories, so these
+            // aren't filed to the card payment line. Without them checking kept about $1,000 a month, and Cash, worked back
+            // from today's balance, was deep in the red three months ago.
+            (4, checking, null, "Payment to Demo Visa", 480_00, true),
+            (4, visa, null, "Payment received, thank you", -480_00, true),
+            (19, checking, null, "Payment to Demo Mastercard", 280_00, true),
+            (19, mastercard, null, "Payment received, thank you", -280_00, true),
 
             // Variable spending: these drive Left to Spend.
             (1, visa, groceries, "Corner Grocery", 82_17, false),
@@ -167,6 +180,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         //   0:        the plan up to today; today's and yesterday's purchases are pending.
         var calendar = new BudgetMonthCalendar(household.BudgetMonthStartDay);
         var rows = new List<BudgetMonth>();
+        long checkingFlow = 0; // money out of checking (positive) less money in, over every seeded row
         for (var back = 3; back >= 0; back--)
         {
             var label = month.Label.AddMonths(-back);
@@ -183,10 +197,14 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
                     continue;
                 var scalable = !p.Transfer && p.Category?.Type == CategoryType.Variable && p.Cents > 0;
                 var cents = scalable ? (long)Math.Round(p.Cents * scale / 100m, MidpointRounding.AwayFromZero) : p.Cents;
+                if (p.Account == checking) checkingFlow += cents;
                 db.Transactions.Add(new Transaction
                 {
                     Id = Guid.NewGuid(), HouseholdId = householdId, AccountId = p.Account.Id, CategoryId = p.Category?.Id,
                     Date = date, AmountCents = cents, Merchant = MerchantText.Normalize(p.Merchant), Description = p.Merchant, IsTransfer = p.Transfer,
+                    // The bank's label, as a bank's export carries one (DECISIONS.md 307): "Refresh categories from bank" files
+                    // each row back where it was, rather than leaving the whole demo unfiled.
+                    BankCategory = p.Transfer ? null : p.Category?.Name,
                     Kind = p.Transfer
                         ? (p.Merchant.Contains("Payment", StringComparison.OrdinalIgnoreCase) ? TransactionKind.CardPayment : TransactionKind.Transfer)
                         : p.Cents < 0
@@ -210,6 +228,7 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
                 IncomeExpectedCents = 1_700_86 + 760_00, PartnerExpectedCents = 800_00,
             }).Entity);
         }
+        checking.CurrentBalanceCents = DemoOpeningCheckingCents - checkingFlow;
         await db.SaveChangesAsync(ct);
 
         await months.CloseAsync(householdId, rows[0], ct);

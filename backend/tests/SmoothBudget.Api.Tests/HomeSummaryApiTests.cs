@@ -136,8 +136,9 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.NotNull(rich.Cash);
         Assert.Equal((0L, 478_67L), (rich.CashShortCents, rich.LeftToSpendCents));
 
-        // $100 in checking: Left to Spend is only what the accounts cover, and every part adds up to it.
-        await SetChecking(100_00);
+        // Checking $300 overdrawn: Left to Spend is only what the accounts cover, and every part adds up to it. (The demo
+        // pays its cards from checking, DECISIONS.md 307, so it takes that little to come up short.)
+        await SetChecking(-300_00);
         var poor = await SummaryAsync(client);
         var c = poor.Cash!;
         Assert.Equal(c.AvailableCents, poor.LeftToSpendCents);
@@ -152,7 +153,7 @@ public class HomeSummaryApiTests(TestApp app) : IClassFixture<TestApp>
             seedPending = await db.Transactions.Where(t => t.HouseholdId == household && t.Pending && t.Account.Type == SmoothBudget.Api.Data.AccountType.Checking).SumAsync(t => t.AmountCents);
         }
         Assert.True(seedPending > 0);
-        Assert.Equal(100_00 - seedPending, c.CheckingCents);
+        Assert.Equal(-300_00 - seedPending, c.CheckingCents);
 
         // DECISIONS.md 255: a pending charge isn't in the bank's balance yet, but the money's spent: it comes off now.
         var pendingId = Guid.NewGuid();
