@@ -400,29 +400,29 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public void Home_warns_before_payday_only_when_checking_cant_keep_up_with_left_to_spend()
+    public void Safe_to_spend_shows_only_when_checking_cant_cover_left_to_spend()
     {
-        // DECISIONS.md 272. Nov 17, living on the Nov 6 check; the next is Nov 23, 6 days away, and the month has 20 left.
-        // Left to Spend's pace is $60 a day: $360 by payday.
+        // DECISIONS.md 276. Nov 17, living on the Nov 6 check; the next is Nov 23, 6 days away. Left to Spend is $1,200.
         var today = new DateOnly(2026, 11, 17);
         var month = new SmoothBudget.Core.Budgeting.BudgetMonthRange(new DateOnly(2026, 11, 6), new DateOnly(2026, 12, 6), new DateOnly(2026, 11, 1));
         static CheckDto Check(DateOnly pay, bool current, long? spare) => new(pay, pay.AddDays(-14), pay.AddDays(-1), true, 0, 0, 0, 0, 0, false, [], [], [], [], [],
             current ? new PlanDto([], 0, SpareCents: spare) : null, IsCurrent: current);
         SmoothBudget.Core.Budgeting.LeftToSpendResult Month(long left, long perDay) =>
             new(month, today, left, 900_00, 0, 0, 0, 0, 20, perDay, SmoothBudget.Core.Budgeting.LeftToSpendStatus.Healthy, 0, []);
-        BeforePaydayDto? Warn(long? spare, long left = 1_200_00, long perDay = 60_00, int nextIn = 6) =>
-            HomeSummaryService.BeforePayday([Check(new DateOnly(2026, 11, 6), true, spare), Check(today.AddDays(nextIn), false, null)], today, Month(left, perDay));
+        SafeToSpendDto? Warn(long? spare, long left = 1_200_00, int nextIn = 6) =>
+            HomeSummaryService.SafeToSpend([Check(new DateOnly(2026, 11, 6), true, spare), Check(today.AddDays(nextIn), false, null)], today, Month(left, 60_00));
 
-        // Checking can spare only $200 of the $360: warn.
-        Assert.Equal((new DateOnly(2026, 11, 23), 6, 200_00L, 360_00L), Warn(200_00) is { } w ? (w.PayDate, w.Days, w.SafeCents, w.PaceCents) : default);
+        // Checking can spare $1,000 of the $1,200: Left to Spend counts money that isn't there yet, so it's capped.
+        Assert.Equal((new DateOnly(2026, 11, 23), 6, 1_000_00L), Warn(1_000_00) is { } w ? (w.PayDate, w.Days, w.SafeCents) : default);
         Assert.Equal(0, Warn(-50_00)!.SafeCents); // already short: nothing is safe
-        // Usually it isn't a problem, and there's nothing to show.
+        // Checking covers it: nothing to show.
         Assert.Null(Warn(5_000_00)); // plenty in checking
-        Assert.Null(Warn(355_00)); // a few dollars under the pace isn't worth a warning
+        Assert.Null(Warn(1_195_00)); // a few dollars under Left to Spend isn't worth a warning
         Assert.Null(Warn(null)); // checking not bank-synced: can't tell
-        Assert.Null(Warn(200_00, nextIn: 20)); // payday after the month ends: Left to Spend already stops there
-        Assert.Null(Warn(200_00, left: 0, perDay: 0)); // nothing left to spend anyway
-        Assert.Equal(150_00, Warn(100_00, left: 150_00)!.PaceCents); // never more than Left to Spend
+        Assert.Null(Warn(200_00, left: 0)); // nothing left to spend anyway
+        Assert.Equal(0, Warn(-50_00, left: 0)!.SafeCents); // but checking already short still warns (275)
+        Assert.Equal(200_00, Warn(200_00, nextIn: 25)!.SafeCents); // payday after the month ends counts too (275)
+        Assert.Null(Warn(1_500_00, nextIn: 25));
     }
 
     [Fact]
@@ -454,6 +454,54 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         p = await Payday(c);
         Assert.Equal(400_00L, Of(p, "savings"));
         Assert.Equal(2_000_00L - Of(p, "hold"), p.Checks[0].Plan!.SpareCents);
+    }
+
+    [Fact]
+    public async Task A_friends_part_of_a_bill_still_to_arrive_doesnt_count_as_checking_short()
+    {
+        // DECISIONS.md 275. Feb 24, 2027, on the Feb 22 check: $1,650 rent is due Mar 1, before the Mar 8 payday, and a
+        // friend sends $800 toward it that hasn't arrived yet.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var me = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!;
+        var checkingId = Guid.NewGuid();
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var h = me.HouseholdId;
+            var rent = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Rent", Type = SmoothBudget.Core.Budgeting.CategoryType.FixedBill, MonthlyLimitCents = 1_650_00 };
+            var friend = new Friend { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Friend", TransferName = "TEST FRIEND" };
+            db.AddRange(rent, friend,
+                new Account { Id = checkingId, HouseholdId = h, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = "test-chk-friend", CurrentBalanceCents = 1_000_00, CreatedUtc = DateTime.UtcNow },
+                new PartnerArrangement { Id = Guid.NewGuid(), HouseholdId = h, FriendId = friend.Id, CategoryId = rent.Id, AmountCents = 800_00, StartsOn = new DateOnly(2026, 11, 6), CreatedUtc = DateTime.UtcNow });
+            foreach (var d in new[] { new DateOnly(2026, 12, 1), new DateOnly(2027, 1, 1), new DateOnly(2027, 2, 1) })
+                db.Transactions.Add(new Transaction
+                {
+                    Id = Guid.NewGuid(), HouseholdId = h, AccountId = checkingId, Date = d, AmountCents = 1_650_00, Merchant = "TEST LANDLORD", Description = "TEST",
+                    Kind = TransactionKind.Purchase, CategoryId = rent.Id, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+                });
+            await db.SaveChangesAsync();
+        }
+        async Task<PlanItemDto> Keep() => (await Payday(c)).Checks[0].Plan!.Items.Single(i => i.Kind == "keep");
+
+        // $1,000 in checking covers the $850 that's yours: not short, though the $800 isn't in yet.
+        var keep = await Keep();
+        Assert.Equal((1_650_00L, 0L, true), (keep.Cents, keep.ShortCents, keep.Done));
+        Assert.Equal("Test Checking has $1,000.00, enough for these with the $800.00 Test Friend sends still to come.", keep.Status);
+        Assert.Null((await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!.SafeToSpend);
+
+        // With $500, it's short the $350 of your part.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Accounts.SingleAsync(a => a.Id == checkingId)).CurrentBalanceCents = 500_00;
+            await db.SaveChangesAsync();
+        }
+        keep = await Keep();
+        Assert.Equal((350_00L, false), (keep.ShortCents, keep.Done));
+        Assert.Equal("Test Checking has $500.00: $350.00 short for these with the $800.00 Test Friend sends still to come.", keep.Status);
+        // Home's one warning shows (DECISIONS.md 275): nothing is safe to spend until payday, even with nothing left to spend.
+        Assert.Equal(0L, (await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!.SafeToSpend!.SafeCents);
     }
 
     [Fact]

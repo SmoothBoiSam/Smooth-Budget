@@ -35,14 +35,14 @@ let introPlayed = false
 /**
  * Left to Spend as shown: counting up on the first open, gliding after; its level follows the number as it moves. The
  * big number, ring and status are the budget month's, payday to payday (DECISIONS.md 269), except while checking can't
- * keep up until the next payday: then they're what's safe to spend until then (272, 273).
+ * cover Left to Spend until the next payday: then they're Safe to Spend, what it can cover until then (273, 276).
  */
 function useShownLeft(s: HomeSummary) {
   const [intro] = useState(() => !introPlayed)
   useEffect(() => {
     introPlayed = true
   }, [])
-  const adjusted = s.beforePayday ?? null
+  const adjusted = s.safeToSpend ?? null
   const [target, total, status] = [adjusted ? adjusted.safeCents : s.leftToSpendCents, s.totalVariableLimitCents, s.status]
   const left = Math.round(useTween(target, intro ? 900 : 500, intro ? 0 : target))
   const share = total > 0 ? Math.max(0, Math.min(1, left / total)) : 0
@@ -407,9 +407,9 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
           })}
         </div>
         <h2 id="lts-label" className="mt-1 text-xs font-medium text-ink-soft">
-          Left to Spend
+          {shown.adjusted ? 'Safe to Spend' : 'Left to Spend'}
           {shown.adjusted && (
-            <span role="img" aria-label="Caution: adjusted" className="ml-1">
+            <span role="img" aria-label="Caution" className="ml-1">
               ⚠️
             </span>
           )}
@@ -423,7 +423,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
           {formatCents(shown.left)}
         </p>
         <p className="mt-0.5 text-xs text-ink-faint">
-          {s.beforePayday ? `until payday ${formatDay(s.beforePayday.payDate)}` : `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'} left`}
+          {s.safeToSpend ? `until payday ${formatDay(s.safeToSpend.payDate)}` : `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'} left`}
         </p>
       </div>
     </div>
@@ -501,18 +501,6 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
   const notices: { key: string; tone: 'danger' | 'todo' | 'good'; href?: string; text: React.ReactNode }[] = []
   if (!stale && (s.sync.state === 'stale' || s.sync.state === 'error'))
     notices.push({ key: 'sync', tone: s.sync.state === 'error' ? 'danger' : 'todo', href: '#/more/banks', text: s.sync.message ?? 'Bank sync needs a look.' })
-  for (const w of s.cashWarnings ?? [])
-    notices.push({
-      key: `cash-${w.account}`,
-      tone: 'danger',
-      href: '#/income',
-      text: (
-        <>
-          {w.account} is <b className="tabular-nums">{formatCents(w.shortCents)}</b> short for {w.billCount === 1 ? 'a bill' : `${w.billCount} bills`} due
-          before {w.nextPayDate ? `payday ${formatDay(w.nextPayDate)}` : 'your next payday'}
-        </>
-      ),
-    })
   for (const f of (s.contributions ?? []).filter((f) => f.state === 'late' || (f.state === 'differentAmount' && f.shortfallCents > 0)))
     notices.push({
       key: `partner-${f.arrangementId}`,
@@ -559,9 +547,12 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
     <>
       <section aria-labelledby="lts-label" className="neu mt-5 rounded-[2rem] px-5 pt-6 pb-5">
         <Gauge s={s} shown={shown} />
-        {/* While checking can't keep up until payday, the number is what's safe until then (DECISIONS.md 272, 273). */}
+        {/* Safe to Spend (DECISIONS.md 276): while checking can't cover Left to Spend until payday, the number is what it
+            can. It's Home's one cash warning (275); the payday tasks say which bills and transfers come first. */}
         {shown.adjusted && (
-          <p className="mt-3 text-center text-xs font-medium text-ink-soft">Checking balance too low. Left to Spend temporarily adjusted.</p>
+          <a href="#/tasks/payday" className="mt-3 block text-center text-xs font-medium text-ink-soft">
+            Checking can't cover Left to Spend until payday. Some of it hasn't landed yet.
+          </a>
         )}
         <div className="mt-4 text-center">
           <Pill tone={style.tone}>{style.label}</Pill>

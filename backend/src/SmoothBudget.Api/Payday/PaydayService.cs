@@ -444,6 +444,13 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         bool Paid(DateOnly pay) => pay <= c.Today || early.ContainsKey(pay);
         DateOnly Since(DateOnly pay) => early.TryGetValue(pay, out var on) ? on : pay;
         var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
+        // The bank's balance leaves out pending charges and deposits; every check of a balance here counts them
+        // (DECISIONS.md 276), so the payday tasks and Home's warning see the same money.
+        var accountIds = accounts.Select(a => a.Id).ToList();
+        var pendingBy = await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && t.Pending && accountIds.Contains(t.AccountId))
+            .GroupBy(t => t.AccountId).Select(g => new { g.Key, Cents = g.Sum(t => t.AmountCents) }).ToDictionaryAsync(x => x.Key, x => x.Cents, ct);
+        long Balance(Account a) => a.CurrentBalanceCents - pendingBy.GetValueOrDefault(a.Id);
+        string Has(Account a) => $"{a.Name} has {PayEngine.Dollars(Balance(a))}{(pendingBy.GetValueOrDefault(a.Id) != 0 ? " counting pending" : "")}";
         string Label(Account a) => a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}";
         var savingsAccount = accounts.Where(a => a.Type == AccountType.Savings).OrderBy(a => a.CreatedUtc).Select(Label).FirstOrDefault() ?? "savings";
         var cards = accounts.Where(a => a.Type == AccountType.CreditCard).SelectMany(a => new[] { a.Name, Label(a) }).ToHashSet();
@@ -665,9 +672,11 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 : moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.CategoryId is { } id && savingsCategories.Contains(id)).Sum(m => m.AmountCents);
 
             Account? AccountFor(PlanItem x) => accounts.FirstOrDefault(a => Label(a) == x.Destination || a.Name == x.Destination);
-            // How far the account's balance from the bank falls short of a "keep" line, for the check you're on now.
+            // How far the account's balance from the bank falls short of a "keep" line, for the check you're on now. A friend's
+            // part of a bill that hasn't arrived yet will be there when it's charged (DECISIONS.md 275), so it isn't counted.
             long ShortBy(PlanItem x) =>
-                current && x.Kind == "keep" && AccountFor(x) is { PlaidAccountId: not null } a && a.CurrentBalanceCents < x.Cents ? x.Cents - a.CurrentBalanceCents : 0;
+                current && x.Kind == "keep" && AccountFor(x) is { PlaidAccountId: not null } a
+                    ? Math.Max(0, x.Cents - (x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents)) - Balance(a)) : 0;
 
             (bool Auto, string? Status) Status(PlanItem x)
             {
@@ -677,10 +686,13 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                     case "keep":
                         var acct = AccountFor(x);
                         if (acct?.PlaidAccountId is null) return (false, "Check this balance yourself; it isn't bank-synced.");
-                        return acct.CurrentBalanceCents >= x.Cents
-                            ? (true, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}, enough for these.")
-                            : (false, $"{acct.Name} has {PayEngine.Dollars(acct.CurrentBalanceCents)}: {PayEngine.Dollars(x.Cents - acct.CurrentBalanceCents)} short for these."
-                                      + (x.FromOthersCents > 0 ? $" That counts the {PayEngine.Dollars(x.FromOthersCents)} {everyoneSends}, if it hasn't arrived yet." : ""));
+                        // A friend's part still to arrive will be there when the bill is charged (DECISIONS.md 275).
+                        var coming = x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents);
+                        var withFriend = coming > 0 ? $" with the {PayEngine.Dollars(coming)} {everyoneSends} still to come" : "";
+                        var gap = ShortBy(x);
+                        return gap == 0
+                            ? (true, $"{Has(acct)}, enough for these{withFriend}.")
+                            : (false, $"{Has(acct)}: {PayEngine.Dollars(gap)} short for these{withFriend}.");
                     case "debt" when x.Key.StartsWith("debt:", StringComparison.Ordinal):
                         if (x.Cents <= 0) return (true, null);
                         var card = debts.FirstOrDefault(d => x.Key == $"debt:{d.Id}");
@@ -719,15 +731,16 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                         // money that has arrived early for the later bills (it's in the balance, and spoken for).
                         var holds = AccountFor(x);
                         if (holds?.PlaidAccountId is null) return (false, "Check this balance yourself; it isn't bank-synced.");
-                        var billsHere = plan.Items.Where(y => y.Kind == "keep" && y.Destination == x.Destination).Sum(y => y.Cents);
+                        var billsHere = plan.Items.Where(y => y.Kind == "keep" && y.Destination == x.Destination)
+                            .Sum(y => y.Cents - (y.FromOthersCents - (y.Bills ?? []).Sum(b => b.ArrivedCents)));
                         var arrivedForLater = after is { } an
                             ? an.Plan.Items.Where(y => y.Kind == "keep" && y.Destination == x.Destination).SelectMany(y => y.Bills ?? []).Sum(b => b.ArrivedCents) : 0;
                         var need = billsHere + x.Cents + arrivedForLater;
                         var also = (billsHere > 0 ? " and the bills above" : "")
                                    + (arrivedForLater > 0 ? $", with the {PayEngine.Dollars(arrivedForLater)} already sent toward the later bills" : "");
-                        return holds.CurrentBalanceCents >= need
-                            ? (true, $"{holds.Name} has {PayEngine.Dollars(holds.CurrentBalanceCents)}, enough for this{also}.")
-                            : (false, $"{holds.Name} has {PayEngine.Dollars(holds.CurrentBalanceCents)}: {PayEngine.Dollars(need - holds.CurrentBalanceCents)} short of this{also}.");
+                        return Balance(holds) >= need
+                            ? (true, $"{Has(holds)}, enough for this{also}.")
+                            : (false, $"{Has(holds)}: {PayEngine.Dollars(need - Balance(holds))} short of this{also}.");
                     }
                     case "sweep":
                         var task = sweeps.FirstOrDefault(s => x.Key == $"sweep:{s.Id}");
@@ -763,24 +776,21 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                     var stillOut = keeps.Sum(x => x.Cents - (x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents)))
                                    + tasks.Where(t => t.Kind is "debt" or "savings" or "sweep" && !t.Done).Sum(t => t.Cents);
                     // A bonus still coming before the next payday will be there too (DECISIONS.md 263).
-                    shortCents = Math.Min(shortCents, Math.Max(0, stillOut - paidFrom.Sum(a => a!.CurrentBalanceCents) - bonusCents));
+                    shortCents = Math.Min(shortCents, Math.Max(0, stillOut - paidFrom.Sum(a => Balance(a!)) - bonusCents));
                 }
             }
             result.Add(new PlanDto(MergeSends(tasks), shortCents, heldEarlier, heldEarlier > 0 ? before!.Value.Pay : null,
-                current ? await SpareAsync() : null));
+                current ? Spare() : null));
 
-            // What checking can spare before the next payday (DECISIONS.md 272): every checking balance, less charges still
-            // pending, the bills still due before payday (a friend's part counts once it's arrived), what this check still
+            // What checking can spare before the next payday (DECISIONS.md 272, 276): every checking balance, counting what's
+            // pending both ways, less the bills still due before payday (a friend's part counts once it's arrived), what this check still
             // has to send to the cards and savings, what it keeps for the next check's bills, a friend's money already in
             // for those, and what you've charged to cards since payday (the next check's plan pays that from here).
             // Income still coming isn't counted: it can't be spent before it lands.
-            async Task<long?> SpareAsync()
+            long? Spare()
             {
                 var checking = accounts.Where(a => a.Type == AccountType.Checking).ToList();
                 if (checking.Count == 0 || checking.Any(a => a.PlaidAccountId is null)) return null;
-                var ids = checking.Select(a => a.Id).ToList();
-                var pending = await db.Transactions.AsNoTracking()
-                    .Where(t => t.HouseholdId == householdId && t.Pending && ids.Contains(t.AccountId)).SumAsync(t => t.AmountCents, ct);
                 var all = tasks.ToList();
                 var bills = plan.Items.Where(x => x.Kind == "keep").Sum(x => x.Cents - (x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents)));
                 var held = all.Where(x => x.Kind == "hold").Sum(x => x.Cents);
@@ -792,7 +802,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var sweeps = all.Where(x => x.Kind == "sweep" && !x.Done).Sum(x => x.Cents);
                 var arrivedForLater = after is { } an ? an.Plan.Items.Where(y => y.Kind == "keep").SelectMany(y => y.Bills ?? []).Sum(b => b.ArrivedCents) : 0;
                 var chargedSince = Math.Max(0, charged.Where(t => t.Date >= paidOn && t.Date <= c.Today).Sum(t => t.AmountCents));
-                return checking.Sum(a => a.CurrentBalanceCents) - pending - bills - held - toCards - toSavings + waitForBonus - sweeps - arrivedForLater - chargedSince;
+                return checking.Sum(Balance) - bills - held - toCards - toSavings + waitForBonus - sweeps - arrivedForLater - chargedSince;
             }
         }
         return result;

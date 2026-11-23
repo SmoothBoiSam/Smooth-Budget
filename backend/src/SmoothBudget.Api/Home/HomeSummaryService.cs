@@ -35,8 +35,6 @@ public record HomeSummaryDto(
     long PartnerShortfallCents = 0,
     // The next paycheck (SPEC 4.2, 6.3), once a schedule or pay stub is in. Null before that.
     NextPaydayDto? NextPayday = null,
-    // An account that won't cover the bills due before the next payday (DECISIONS.md 148).
-    IReadOnlyList<CashWarningDto>? CashWarnings = null,
     // What else comes off Left to Spend (DECISIONS.md 177-178): spending not filed yet, and a plan beyond the month's money.
     long UnfiledSpendingCents = 0,
     long OverplannedCents = 0,
@@ -49,22 +47,19 @@ public record HomeSummaryDto(
     Payday.PickUpDto? PickUp = null,
     // Each spending category, in your budget's order, for the small tiles under Left to Spend (DECISIONS.md 254).
     IReadOnlyList<HomeCategoryDto>? Spending = null,
-    // Only when spending at Left to Spend's pace would run checking short before the next payday (DECISIONS.md 272).
-    BeforePaydayDto? BeforePayday = null);
+    // Safe to Spend: only when checking can't cover Left to Spend until the next payday (DECISIONS.md 276).
+    SafeToSpendDto? SafeToSpend = null);
 
 /// <summary>
-/// A warning that checking can't keep up with Left to Spend until the next payday (DECISIONS.md 272).
+/// Safe to Spend (DECISIONS.md 276): Left to Spend is more than checking can cover until the next payday, so Home shows
+/// this instead.
 /// </summary>
 /// <param name="SafeCents">What checking can spare before payday: the most to spend until then (never below zero).</param>
-/// <param name="PaceCents">What Left to Spend's pace (safe per day) adds up to by then.</param>
-public record BeforePaydayDto(DateOnly PayDate, int Days, long SafeCents, long PaceCents);
+public record SafeToSpendDto(DateOnly PayDate, int Days, long SafeCents);
 
 /// <summary>One spending category on Home: its limit, what's spent, what's left (negative when over), and its health,
 /// the same numbers and colors as its line on the Budget tab (DECISIONS.md 255).</summary>
 public record HomeCategoryDto(Guid Id, string Name, long LimitCents, long SpentCents, long LeftCents, string Health);
-
-/// <param name="BillsCents">The bills due from it before the next payday (your share of them).</param>
-public record CashWarningDto(string Account, long BillsCents, long ShortCents, int BillCount, DateOnly? NextPayDate);
 
 /// <param name="HasSchedule">False until that month's schedule is imported (date only).</param>
 public record NextPaydayDto(DateOnly PayDate, bool HasSchedule, long NetCents, long LowNetCents, long HighNetCents, bool LowConfidence);
@@ -266,7 +261,6 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             NextPayday: await payday.NextAsync(householdId, ct) is { } n
                 ? new NextPaydayDto(n.Period.PayDate, n.HasSchedule, n.NetCents, n.LowNetCents, n.HighNetCents, n.LowConfidence)
                 : null,
-            CashWarnings: CashWarnings(checks),
             UnfiledSpendingCents: r.UnfiledSpendingCents,
             OverplannedCents: r.OverplannedCents,
             IncomeUnknown: MonthData.MoneyIn(data.Row, data.Contributions) <= 0 && data.Categories.Any(c => c.LimitCents > 0),
@@ -274,29 +268,28 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
             Cash: r.Cash,
             PickUp: await payday.PickUpAsync(householdId, r.CashShortCents, ct),
             Spending: SpendingRows(data),
-            BeforePayday: BeforePayday(checks, today, r));
+            SafeToSpend: SafeToSpend(checks, today, r));
     }
 
-    /// <summary>Under this, a gap between checking and the pace isn't worth a warning.</summary>
-    public const long BeforePaydayMinGapCents = 10_00;
+    /// <summary>Under this, a gap between checking and Left to Spend isn't worth a warning.</summary>
+    public const long SafeToSpendMinGapCents = 10_00;
 
     /// <summary>
-    /// Whether checking might run short before the next payday (DECISIONS.md 272). Left to Spend counts the whole month's
-    /// money, including checks still to come; spending it at its own pace (safe per day) until the next payday is fine as
-    /// long as checking can spare that much after the bills, card payments and savings due from it first. Only when it
-    /// can't, by $10 or more, is there a warning. Nothing when the next payday is next month's (Left to Spend already
-    /// ends there), or when checking isn't bank-synced.
+    /// Safe to Spend (DECISIONS.md 276): Left to Spend is never more than checking can cover right now. It counts the whole
+    /// month's money, including paychecks and bonuses that haven't landed; checking can only give what it holds (counting
+    /// pending both ways) after the bills, card payments and savings due from it before the next payday. When that's less
+    /// than Left to Spend by $10 or more, or below zero, Home shows it instead. It's Home's one cash warning (275).
+    /// Nothing when checking isn't bank-synced.
     /// </summary>
-    public static BeforePaydayDto? BeforePayday(IReadOnlyList<Payday.CheckDto> checks, DateOnly today, LeftToSpendResult r)
+    public static SafeToSpendDto? SafeToSpend(IReadOnlyList<Payday.CheckDto> checks, DateOnly today, LeftToSpendResult r)
     {
         var i = checks.ToList().FindIndex(c => c.IsCurrent);
         if (i < 0 || i + 1 >= checks.Count || checks[i].Plan?.SpareCents is not { } spare) return null;
         var pay = checks[i + 1].PayDate;
         var days = pay.DayNumber - today.DayNumber;
-        if (days <= 0 || days >= r.DaysRemaining) return null;
-        var pace = Math.Max(0, Math.Min(r.LeftToSpendCents, r.SafeToSpendPerDayCents * days));
-        if (pace <= 0 || spare > pace - BeforePaydayMinGapCents) return null;
-        return new BeforePaydayDto(pay, days, Math.Max(0, spare), pace);
+        if (days <= 0) return null;
+        if (spare >= 0 && (r.LeftToSpendCents <= 0 || spare > r.LeftToSpendCents - SafeToSpendMinGapCents)) return null;
+        return new SafeToSpendDto(pay, days, Math.Max(0, spare));
     }
 
     /// <summary>The spending categories as the Budget tab shows them (its calculator), in your budget's order.</summary>
@@ -310,16 +303,6 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
                 var l = lines[c.Id];
                 return new HomeCategoryDto(c.Id, c.Name, l.LimitCents, l.SpentCents, l.RemainingCents, Budget.BudgetSummaryService.HealthName(l.Health));
             }).ToList();
-    }
-
-    /// <summary>The payday plan's "keep" lines that the account's balance from the bank doesn't cover.</summary>
-    private static IReadOnlyList<CashWarningDto> CashWarnings(IReadOnlyList<Payday.CheckDto> checks)
-    {
-        var i = checks.ToList().FindIndex(c => c.IsCurrent);
-        if (i < 0 || checks[i].Plan is not { } plan) return [];
-        DateOnly? next = i + 1 < checks.Count ? checks[i + 1].PayDate : null;
-        return plan.Items.Where(x => x.ShortCents > 0)
-            .Select(x => new CashWarningDto(x.Destination, x.Cents, x.ShortCents, x.Bills?.Count ?? 0, next)).ToList();
     }
 
     public static DateOnly TodayIn(string timeZoneId, TimeProvider clock)

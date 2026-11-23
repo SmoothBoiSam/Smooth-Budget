@@ -103,7 +103,7 @@ public class NotificationService(
         ("bills", "Bills due tomorrow", "The day before a bill or subscription is charged."),
         ("over", "Category over budget", "When a spending category goes over its limit, once a month each."),
         ("low", "Left to Spend running low", "When under 15% of this month's spending money is left, and again if it drops below zero."),
-        ("cash", "Account short before payday", "When an account won't cover the bills due before your next check."),
+        ("cash", "Safe to Spend", "When checking can't cover Left to Spend before your next check, so it's adjusted."),
         ("price", "Bill price went up", "When a bill or subscription charges more than it used to."),
         ("partner", "Friend contribution late", "When a fixed contribution from a friend hasn't arrived by the end of its usual days."),
         ("bank", "Bank needs you", "When a bank connection stops syncing and needs you to sign in again. Weekly until it's fixed."),
@@ -198,9 +198,10 @@ public class NotificationService(
             list.Add(("low", $"low:{month}", new PushMessage("Left to Spend is running low",
                 $"{PayEngine.Dollars(h.LeftToSpendCents)} left with {Days(h.DaysRemaining)} to go: about {PayEngine.Dollars(h.SafeToSpendPerDayCents)} a day.", "#/", "low")));
 
-        foreach (var w in h.CashWarnings ?? [])
-            list.Add(("cash", $"cash:{(w.NextPayDate ?? h.BudgetMonth.End):yyyy-MM-dd}:{w.Account}", new PushMessage("Low on cash",
-                $"{w.Account} is {PayEngine.Dollars(w.ShortCents)} short for the bills due before payday.", "#/payday", "cash")));
+        // Safe to Spend: checking can't cover Left to Spend until payday (DECISIONS.md 275, 276). Once per payday.
+        if (h.SafeToSpend is { } bp)
+            list.Add(("cash", $"cash:{bp.PayDate:yyyy-MM-dd}", new PushMessage("Safe to Spend",
+                $"Checking can cover {PayEngine.Dollars(bp.SafeCents)} until payday {bp.PayDate:MMM d}, less than Left to Spend.", "#/", "cash")));
 
         // A price rise you haven't said "Got it" to, once per new price.
         foreach (var i in (await recurring.SummaryAsync(householdId, ct)).Items.Where(i => i.Status == "priceUp"))

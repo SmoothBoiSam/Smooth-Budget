@@ -46,12 +46,11 @@ export interface HomeSummary {
   pickUp: PickUp | null
   /** Each spending category in your budget's order, for the tiles under Left to Spend (DECISIONS.md 254). */
   spending: { id: string; name: string; limitCents: number; spentCents: number; leftCents: number; health: Health }[] | null
-  // Only when spending at Left to Spend's pace would run checking short before the next payday (DECISIONS.md 272).
-  beforePayday?: { payDate: string; days: number; safeCents: number; paceCents: number } | null
+  // Safe to Spend: only when checking can't cover Left to Spend until the next payday (DECISIONS.md 276).
+  safeToSpend?: { payDate: string; days: number; safeCents: number } | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */
-  cashWarnings: { account: string; billsCents: number; shortCents: number; billCount: number; nextPayDate: string | null }[] | null
 }
 
 export interface Me {
