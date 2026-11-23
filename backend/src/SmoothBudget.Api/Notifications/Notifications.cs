@@ -201,7 +201,7 @@ public class NotificationService(
         // Safe to Spend: checking can't cover Left to Spend until payday (DECISIONS.md 275, 276). Once per payday.
         if (h.SafeToSpend is { } bp)
             list.Add(("cash", $"cash:{bp.PayDate:yyyy-MM-dd}", new PushMessage("Safe to Spend",
-                $"Checking can cover {PayEngine.Dollars(bp.SafeCents)} until payday {bp.PayDate:MMM d}, less than Left to Spend.", "#/", "cash")));
+                $"Checking can cover {PayEngine.Dollars(bp.SafeCents)} until {bp.Until}, less than Left to Spend.", "#/", "cash")));
 
         // A price rise you haven't said "Got it" to, once per new price.
         foreach (var i in (await recurring.SummaryAsync(householdId, ct)).Items.Where(i => i.Status == "priceUp"))

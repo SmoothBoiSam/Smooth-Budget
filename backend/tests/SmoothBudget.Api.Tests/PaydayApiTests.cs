@@ -405,8 +405,8 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         // DECISIONS.md 276. Nov 17, living on the Nov 6 check; the next is Nov 23, 6 days away. Left to Spend is $1,200.
         var today = new DateOnly(2026, 11, 17);
         var month = new SmoothBudget.Core.Budgeting.BudgetMonthRange(new DateOnly(2026, 11, 6), new DateOnly(2026, 12, 6), new DateOnly(2026, 11, 1));
-        static CheckDto Check(DateOnly pay, bool current, long? spare) => new(pay, pay.AddDays(-14), pay.AddDays(-1), true, 0, 0, 0, 0, 0, false, [], [], [], [], [],
-            current ? new PlanDto([], 0, SpareCents: spare) : null, IsCurrent: current);
+        static CheckDto Check(DateOnly pay, bool current, long? spare, IReadOnlyList<ComingDto>? coming = null) => new(pay, pay.AddDays(-14), pay.AddDays(-1), true, 0, 0, 0, 0, 0, false, [], [], [], [], [],
+            current ? new PlanDto([], 0, SpareCents: spare, Coming: coming) : null, IsCurrent: current);
         SmoothBudget.Core.Budgeting.LeftToSpendResult Month(long left, long perDay) =>
             new(month, today, left, 900_00, 0, 0, 0, 0, 20, perDay, SmoothBudget.Core.Budgeting.LeftToSpendStatus.Healthy, 0, []);
         SafeToSpendDto? Warn(long? spare, long left = 1_200_00, int nextIn = 6) =>
@@ -423,6 +423,13 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(0, Warn(-50_00, left: 0)!.SafeCents); // but checking already short still warns (275)
         Assert.Equal(200_00, Warn(200_00, nextIn: 25)!.SafeCents); // payday after the month ends counts too (275)
         Assert.Null(Warn(1_500_00, nextIn: 25));
+
+        // DECISIONS.md 277: it says what it's waiting for, the first money still to land before payday, or else payday.
+        Assert.Equal("payday Nov 23", Warn(1_000_00)!.Until);
+        string? Until(params ComingDto[] coming) => HomeSummaryService.SafeToSpend(
+            [Check(new DateOnly(2026, 11, 6), true, 1_000_00, coming), Check(new DateOnly(2026, 11, 23), false, null)], today, Month(1_200_00, 60_00))?.Until;
+        Assert.Equal("Bonus lands Nov 20", Until(new ComingDto("Bonus lands Nov 20", 500_00, new DateOnly(2026, 11, 20)), new ComingDto("Jane sends $800.00", 800_00, new DateOnly(2026, 11, 21))));
+        Assert.Equal("payday Nov 23", Until(new ComingDto("Bonus lands Nov 25", 500_00, new DateOnly(2026, 11, 25))));
     }
 
     [Fact]
@@ -457,9 +464,9 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task A_friends_part_of_a_bill_still_to_arrive_doesnt_count_as_checking_short()
+    public async Task A_friends_part_of_a_bill_still_to_arrive_doesnt_count_as_checking_short_but_isnt_safe_to_spend()
     {
-        // DECISIONS.md 275. Feb 24, 2027, on the Feb 22 check: $1,650 rent is due Mar 1, before the Mar 8 payday, and a
+        // DECISIONS.md 275, 277. Feb 24, 2027, on the Feb 22 check: $1,650 rent is due Mar 1, before the Mar 8 payday, and a
         // friend sends $800 toward it that hasn't arrived yet.
         var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
         await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
@@ -488,7 +495,11 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         var keep = await Keep();
         Assert.Equal((1_650_00L, 0L, true), (keep.Cents, keep.ShortCents, keep.Done));
         Assert.Equal("Test Checking has $1,000.00, enough for these with the $800.00 Test Friend sends still to come.", keep.Status);
-        Assert.Null((await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!.SafeToSpend);
+        // But until it's in, it isn't safe to spend (DECISIONS.md 277): rent counts in full, and Home says what it waits for.
+        var coming = Assert.Single((await Payday(c)).Checks[0].Plan!.Coming!);
+        Assert.Equal(("Test Friend sends $800.00", 800_00L), (coming.Label, coming.Cents));
+        var safe = (await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!.SafeToSpend!;
+        Assert.Equal((0L, "Test Friend sends $800.00"), (safe.SafeCents, safe.Until));
 
         // With $500, it's short the $350 of your part.
         using (var scope = app.Services.CreateScope())

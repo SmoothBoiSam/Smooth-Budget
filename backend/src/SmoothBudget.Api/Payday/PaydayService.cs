@@ -22,11 +22,17 @@ public record PlanItemDto(string Key, string Kind, string Label, long Cents, str
     bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null, long ShortCents = 0,
     bool Skippable = false, bool Skipped = false, IReadOnlyList<PlanItemDto>? Parts = null);
 public record PlanBillDto(string Name, long Cents, DateOnly Due);
+/// <summary>Money still to land before the next payday (DECISIONS.md 277): "Bonus lands Nov 24", "Jane sends $800.00".</summary>
+/// <param name="Date">When it's expected: a bonus's date, or the start of a friend's usual window.</param>
+public record ComingDto(string Label, long Cents, DateOnly Date);
 /// <param name="ShortCents">What the check still lacks for everything planned for it, after what an earlier check keeps for it.</param>
 /// <param name="HeldEarlierCents">How much of what this check needs is kept back from the check before it, paid on <paramref name="HeldOn"/> (DECISIONS.md 253).</param>
 /// <param name="SpareCents">For the check you're on now: what checking can spare before the next payday (DECISIONS.md 272).
 /// Null when a checking account isn't bank-synced. Below zero when the accounts are already short.</param>
-public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents, long HeldEarlierCents = 0, DateOnly? HeldOn = null, long? SpareCents = null)
+/// <param name="Coming">For the check you're on now: money still to land before the next payday, soonest first (a bonus, or a
+/// friend's part of a bill). Safe to Spend doesn't count it until it's in (DECISIONS.md 277).</param>
+public record PlanDto(IReadOnlyList<PlanItemDto> Items, long ShortCents, long HeldEarlierCents = 0, DateOnly? HeldOn = null, long? SpareCents = null,
+    IReadOnlyList<ComingDto>? Coming = null)
 {
     /// <summary>Every task as it was before merging: a merged task's parts, and the rest as they are.</summary>
     public IEnumerable<PlanItemDto> AllParts() => Items.SelectMany(i => i.Parts ?? [i]);
@@ -512,7 +518,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
 
         // One check's plan before anything is carried between checks. It reads nothing from the database, so the loop
         // below can ask for the checks either side of the one it's on (DECISIONS.md 253).
-        (PaydayPlanResult Plan, long NetCents, bool Current, DateOnly Pay, DateOnly Next, List<ExpectedIncome> Bonuses, long BonusFunded)? Draft(int i)
+        (PaydayPlanResult Plan, long NetCents, bool Current, DateOnly Pay, DateOnly Next, List<ExpectedIncome> Bonuses, long BonusFunded, List<ComingDto> FriendsComing)? Draft(int i)
         {
             var f = checks[i];
             var pay = f.Period.PayDate;
@@ -558,11 +564,17 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             // charged, since their money lands there too (DECISIONS.md 165); only your share comes out of this check.
             var from = current ? c.Today : pay;
             var offsetUsed = new HashSet<Guid>();
+            var friendsComing = new List<ComingDto>();
             var bills = items.Where(b => b.NextExpected >= from && b.NextExpected < next).OrderBy(b => b.NextExpected).Select(b =>
             {
                 var toward = b.CategoryId is { } cat && offsetUsed.Add(cat)
                     ? arrangements.Where(a => a.CategoryId == cat && a.StartsOn <= b.NextExpected).ToList() : [];
                 var covered = Math.Min(b.AmountCents, toward.Sum(a => a.AmountCents));
+                // A friend's part that hasn't arrived yet (DECISIONS.md 277), expected from the start of their usual window.
+                foreach (var a in toward)
+                    if (a.AmountCents - Math.Min(a.AmountCents, Arrived(a.Id, b.NextExpected)) is var left and > 0)
+                        friendsComing.Add(new ComingDto($"{a.Friend.Name} sends {PayEngine.Dollars(left)}", left,
+                            PartnerContributions.Window(c.Calendar.MonthContaining(b.NextExpected), a.WindowFromDay, a.WindowToDay).Start));
                 // Whoever sends toward it (DECISIONS.md 211): "Jane sends", "Jane and Alex send".
                 var senders = toward.Select(a => a.Friend.Name).Distinct().ToList();
                 var who = $"{Shared.SharedService.JoinNames(senders) ?? "Your friend"} {(senders.Count > 1 ? "send" : "sends")}";
@@ -619,7 +631,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
 
             var net = landedNet ?? f.NetCents;
             return (PaydayPlan.Build(net + coming.Sum(x => x.AmountCents), bills, transfers), net, current, pay, next, coming,
-                BonusPart(debtExtra) + BonusPart(savingsMonthly));
+                BonusPart(debtExtra) + BonusPart(savingsMonthly), friendsComing);
         }
         // What a check has to pay from its own money (not a friend's part of a bill, or card charges paid from spending money).
         static long Own(PaydayPlanResult p) => p.Items.Sum(x => x.Cents - x.FromOthersCents);
@@ -629,7 +641,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         for (var i = 0; i < checks.Count; i++)
         {
             if (Draft(i) is not { } draft) { result.Add(null); continue; }
-            var (plan, net, current, pay, next, coming, bonusFunded) = draft;
+            var (plan, net, current, pay, next, coming, bonusFunded, friendsComing) = draft;
             var bonusCents = coming.Sum(x => x.AmountCents);
 
             // Money carried between checks (DECISIONS.md 253). When the next check can't pay for everything planned for it
@@ -780,10 +792,12 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 }
             }
             result.Add(new PlanDto(MergeSends(tasks), shortCents, heldEarlier, heldEarlier > 0 ? before!.Value.Pay : null,
-                current ? Spare() : null));
+                current ? Spare() : null,
+                current ? coming.Select(x => new ComingDto($"{x.Name} lands {x.ExpectedDate:MMM d}", x.AmountCents, x.ExpectedDate))
+                    .Concat(friendsComing).OrderBy(x => x.Date).ToList() : null));
 
             // What checking can spare before the next payday (DECISIONS.md 272, 276): every checking balance, counting what's
-            // pending both ways, less the bills still due before payday (a friend's part counts once it's arrived), what this check still
+            // pending both ways, less the bills still due before payday (in full: a friend's part counts once it's arrived, 277), what this check still
             // has to send to the cards and savings, what it keeps for the next check's bills, a friend's money already in
             // for those, and what you've charged to cards since payday (the next check's plan pays that from here).
             // Income still coming isn't counted: it can't be spent before it lands.
@@ -792,7 +806,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var checking = accounts.Where(a => a.Type == AccountType.Checking).ToList();
                 if (checking.Count == 0 || checking.Any(a => a.PlaidAccountId is null)) return null;
                 var all = tasks.ToList();
-                var bills = plan.Items.Where(x => x.Kind == "keep").Sum(x => x.Cents - (x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents)));
+                var bills = plan.Items.Where(x => x.Kind == "keep").Sum(x => x.Cents);
                 var held = all.Where(x => x.Kind == "hold").Sum(x => x.Cents);
                 var toCards = Math.Max(0, all.Where(x => x.Kind is "debt" or "cardspend" && !x.Skipped).Sum(x => x.Cents) - cardPaid);
                 var toSavings = Math.Max(0, all.Where(x => x.Kind == "savings").Sum(x => x.Cents) - intoSavings);

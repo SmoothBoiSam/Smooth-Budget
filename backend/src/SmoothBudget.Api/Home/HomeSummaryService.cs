@@ -55,7 +55,8 @@ public record HomeSummaryDto(
 /// this instead.
 /// </summary>
 /// <param name="SafeCents">What checking can spare before payday: the most to spend until then (never below zero).</param>
-public record SafeToSpendDto(DateOnly PayDate, int Days, long SafeCents);
+/// <param name="Until">The first money still to land (DECISIONS.md 277): "payday Dec 4", "Bonus lands Nov 24", "Jane sends $800.00".</param>
+public record SafeToSpendDto(DateOnly PayDate, int Days, long SafeCents, string Until);
 
 /// <summary>One spending category on Home: its limit, what's spent, what's left (negative when over), and its health,
 /// the same numbers and colors as its line on the Budget tab (DECISIONS.md 255).</summary>
@@ -289,7 +290,9 @@ public class HomeSummaryService(CurrentMonthLoader loader, TimeProvider clock, B
         var days = pay.DayNumber - today.DayNumber;
         if (days <= 0) return null;
         if (spare >= 0 && (r.LeftToSpendCents <= 0 || spare > r.LeftToSpendCents - SafeToSpendMinGapCents)) return null;
-        return new SafeToSpendDto(pay, days, Math.Max(0, spare));
+        // Until the first money still to land: a bonus or a friend's part before payday, or else payday (277).
+        var until = checks[i].Plan?.Coming?.FirstOrDefault(x => x.Date < pay)?.Label ?? $"payday {pay:MMM d}";
+        return new SafeToSpendDto(pay, days, Math.Max(0, spare), until);
     }
 
     /// <summary>The spending categories as the Budget tab shows them (its calculator), in your budget's order.</summary>

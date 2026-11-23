@@ -47,7 +47,8 @@ export interface HomeSummary {
   /** Each spending category in your budget's order, for the tiles under Left to Spend (DECISIONS.md 254). */
   spending: { id: string; name: string; limitCents: number; spentCents: number; leftCents: number; health: Health }[] | null
   // Safe to Spend: only when checking can't cover Left to Spend until the next payday (DECISIONS.md 276).
-  safeToSpend?: { payDate: string; days: number; safeCents: number } | null
+  // until: the first money still to land (277): "payday Dec 4", "Bonus lands Nov 24", "Jane sends $800.00".
+  safeToSpend?: { payDate: string; days: number; safeCents: number; until: string } | null
   /** The next paycheck, once a schedule or pay stub is in. */
   nextPayday: { payDate: string; hasSchedule: boolean; netCents: number; lowNetCents: number; highNetCents: number; lowConfidence: boolean } | null
   /** Accounts that won't cover the bills due before the next payday. */

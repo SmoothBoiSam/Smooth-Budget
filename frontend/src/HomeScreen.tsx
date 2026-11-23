@@ -423,7 +423,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
           {formatCents(shown.left)}
         </p>
         <p className="mt-0.5 text-xs text-ink-faint">
-          {s.safeToSpend ? `until payday ${formatDay(s.safeToSpend.payDate)}` : `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'} left`}
+          {s.safeToSpend ? `until ${s.safeToSpend.until}` : `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'} left`}
         </p>
       </div>
     </div>
@@ -549,9 +549,9 @@ function Summary({ summary: s, stale }: { summary: HomeSummary; stale: boolean }
         <Gauge s={s} shown={shown} />
         {/* Safe to Spend (DECISIONS.md 276): while checking can't cover Left to Spend until payday, the number is what it
             can. It's Home's one cash warning (275); the payday tasks say which bills and transfers come first. */}
-        {shown.adjusted && (
+        {s.safeToSpend && (
           <a href="#/tasks/payday" className="mt-3 block text-center text-xs font-medium text-ink-soft">
-            Checking can't cover Left to Spend until payday. Some of it hasn't landed yet.
+            Checking can't cover Left to Spend until {s.safeToSpend.until}.
           </a>
         )}
         <div className="mt-4 text-center">
