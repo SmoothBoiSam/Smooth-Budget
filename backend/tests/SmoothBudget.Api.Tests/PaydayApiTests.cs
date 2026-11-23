@@ -439,6 +439,41 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/payday/plan/2026-11-23/savings", new ChecklistRequest(true), Json)).StatusCode);
         using (var scope = app.Services.CreateScope())
             Assert.True(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PaydayChecklistItems.AnyAsync(x => x.PayDate == new DateOnly(2026, 11, 23) && x.Key == "savings"));
+
+        // $50 goes to savings the day it landed, and $12 goes on a card. On payday itself, "since payday" still starts the day it
+        // landed, and the card charge is the next check's to pay off, not lost between the two (DECISIONS.md 303).
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var acct = await db.Accounts.SingleAsync(a => a.Id == checking);
+            var savings = new Account { Id = Guid.NewGuid(), HouseholdId = acct.HouseholdId, Name = "Test Savings", Mask = "2222", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+            var card = new Account { Id = Guid.NewGuid(), HouseholdId = acct.HouseholdId, Name = "Test Card", Mask = "3333", Type = AccountType.CreditCard, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+            db.AddRange(savings, card, new Category { Id = Guid.NewGuid(), HouseholdId = acct.HouseholdId, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 });
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = acct.HouseholdId, AccountId = card.Id, Date = new DateOnly(2026, 11, 22), AmountCents = 12_00, Merchant = "TEST SHOP",
+                Description = "TEST", Kind = TransactionKind.Purchase, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = acct.HouseholdId, AccountId = checking, Date = new DateOnly(2026, 11, 22), AmountCents = 50_00, Merchant = "ONLINE TRANSFER TO SAV",
+                Description = "TEST", Kind = TransactionKind.Transfer, IsTransfer = true, TransferAccountId = savings.Id, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal("Moved $50.00 to savings since payday.", await SavingsStatus());
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 23, 19, 0, 0, TimeSpan.Zero));
+        Assert.Equal("Moved $50.00 to savings since payday.", await SavingsStatus());
+        var both = (await Payday(c)).Checks;
+        Assert.DoesNotContain(both[0].Plan!.AllParts(), i => i.Kind == "cardspend");
+        Assert.Equal(12_00, both[1].Plan!.AllParts().Single(i => i.Kind == "cardspend").Cents);
+
+        async Task<string?> SavingsStatus()
+        {
+            var now = (await Payday(c)).Checks[0];
+            Assert.Equal((new DateOnly(2026, 11, 23), true), (now.PayDate, now.IsCurrent));
+            return now.Plan!.AllParts().Single(i => i.Kind == "savings").Status;
+        }
     }
 
     [Fact]

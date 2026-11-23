@@ -194,14 +194,18 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
         }
 
         // The cards' window starts at the payday before this month's first one, like the payday plan's "Pay off what you
-        // charged" (DECISIONS.md 179); without pay dates, at the month's start.
+        // charged" (DECISIONS.md 179); without pay dates, at the month's start. A check's window starts the day its paycheck
+        // landed, once it has (303).
         var cardsFrom = range.Start;
         SmoothBudget.Core.Pay.PayRules? rules = null;
+        Dictionary<DateOnly, DateOnly> landedOn = [];
         if (await db.ScheduleMonths.AnyAsync(m => m.HouseholdId == householdId, ct) || await db.PayStubs.AnyAsync(s => s.HouseholdId == householdId, ct))
         {
             var profile = await db.PayProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.HouseholdId == householdId, ct);
             rules = profile is null ? SmoothBudget.Core.Pay.PayRules.Default : Payday.PaydayService.RulesOf(profile);
-            var before = Payday.PaydayService.PaydayBefore(SmoothBudget.Core.Pay.PayCalendar.From(range.Start, rules).First().PayDate, rules);
+            landedOn = await Payday.PaydayService.LandedOnAsync(db, householdId, today, ct);
+            var before = Payday.PaydayService.PeriodStart(
+                Payday.PaydayService.PaydayBefore(SmoothBudget.Core.Pay.PayCalendar.From(range.Start, rules).First().PayDate, rules), landedOn);
             if (before < cardsFrom) cardsFrom = before;
         }
         var cardCharges = cardIds.Count == 0 ? [] : await db.Transactions.AsNoTracking()
@@ -219,8 +223,9 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             foreach (var skip in skips)
             {
                 if (!Guid.TryParse(skip.Key[(Payday.PaydayService.SkipPrefix + "cardspend:").Length..], out var cardId)) continue;
-                var from = Payday.PaydayService.PaydayBefore(skip.PayDate, rules);
-                charged -= cardCharges.Where(t => t.AccountId == cardId && t.Date >= from && t.Date < skip.PayDate).Sum(t => t.AmountCents);
+                var from = Payday.PaydayService.PeriodStart(Payday.PaydayService.PaydayBefore(skip.PayDate, rules), landedOn);
+                var to = Payday.PaydayService.PeriodStart(skip.PayDate, landedOn);
+                charged -= cardCharges.Where(t => t.AccountId == cardId && t.Date >= from && t.Date < to).Sum(t => t.AmountCents);
             }
         }
         var paid = await db.Transactions.AsNoTracking()

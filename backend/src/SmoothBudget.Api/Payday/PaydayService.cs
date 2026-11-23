@@ -259,14 +259,22 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     }
 
     /// <summary>
-    /// Checks whose paycheck has already landed before their payday (DECISIONS.md 270), each with the day it landed: a
-    /// deposit matched to the check (it can come up to 2 days early). That check is the one you're on from then.
+    /// The day each recent check's paycheck landed: the deposit matched to it, which can come up to 2 days early or 3 late
+    /// (DECISIONS.md 270, 303). A check with one is the one you're on from then, even before its payday.
     /// </summary>
-    public static async Task<Dictionary<DateOnly, DateOnly>> ArrivedEarlyAsync(AppDbContext db, Guid householdId, DateOnly today, CancellationToken ct) =>
+    public static async Task<Dictionary<DateOnly, DateOnly>> LandedOnAsync(AppDbContext db, Guid householdId, DateOnly today, CancellationToken ct) =>
         await db.PayPeriodForecasts.AsNoTracking()
-            .Where(f => f.HouseholdId == householdId && f.PayDate > today && f.PayDate <= today.AddDays(3) && f.DepositTransactionId != null)
+            .Where(f => f.HouseholdId == householdId && f.PayDate > today.AddDays(-80) && f.PayDate <= today.AddDays(3) && f.DepositTransactionId != null)
             .Join(db.Transactions, f => f.DepositTransactionId, t => t.Id, (f, t) => new { f.PayDate, t.Date })
-            .ToDictionaryAsync(x => x.PayDate, x => x.Date < x.PayDate ? x.Date : x.PayDate, ct);
+            .ToDictionaryAsync(x => x.PayDate, x => x.Date, ct);
+
+    /// <summary>
+    /// Where a check's pay period starts (DECISIONS.md 303): its payday, assumed from your schedule, until its paycheck lands;
+    /// then the day it landed. "Since payday" and the card-charge windows all start here, so a check that comes early or late
+    /// moves them with it.
+    /// </summary>
+    public static DateOnly PeriodStart(DateOnly pay, IReadOnlyDictionary<DateOnly, DateOnly> landedOn) =>
+        landedOn.TryGetValue(pay, out var on) ? on : pay;
 
     /// <summary>One request per household keeps the predictions at a time (the app runs as a single container).</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> Gates = new();
@@ -279,7 +287,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         // so one at a time per household, and a row is only written when its numbers changed.
         List<ForecastCheck> forecasts;
         List<PayPeriodForecast> rows;
-        Dictionary<DateOnly, DateOnly> early;
+        Dictionary<DateOnly, DateOnly> landedOn;
         var gate = Gates.GetOrAdd(householdId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct);
         try
@@ -287,8 +295,8 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             await MatchActualsAsync(householdId, c, ct);
             var miss = await TypicalMissAsync(householdId, ct);
             // The check you're living on now (the latest one paid, or one that landed early: DECISIONS.md 270) and the next few.
-            early = await ArrivedEarlyAsync(db, householdId, c.Today, ct);
-            var paidThrough = early.Count > 0 ? early.Keys.Max() : c.Today;
+            landedOn = await LandedOnAsync(db, householdId, c.Today, ct);
+            var paidThrough = landedOn.Keys.Append(c.Today).Max();
             var current = PayCalendar.From(c.Today.AddDays(-45), c.Rules).TakeWhile(p => p.PayDate <= paidThrough).LastOrDefault();
             var periods = PayCalendar.From(paidThrough.AddDays(1), c.Rules).Take(ChecksShown).ToList();
             if (current is not null) periods.Insert(0, current);
@@ -319,12 +327,12 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
 
         var landed = rows.Where(r => r.ActualNetCents is not null).ToDictionary(r => r.PayDate, r => r.ActualNetCents!.Value);
         foreach (var (_, stub) in c.Stubs) landed[stub.PayDate] = stub.NetCents;
-        var plans = await PlansAsync(householdId, c, forecasts, landed, early, ct);
+        var plans = await PlansAsync(householdId, c, forecasts, landed, landedOn, ct);
         var checks = forecasts.Select((f, i) => new CheckDto(
             f.Period.PayDate, f.Period.Start, f.Period.End, f.HasSchedule, f.GrossCents, f.TaxableCents, f.NetCents, f.LowNetCents, f.HighNetCents,
             f.LowConfidence, f.Reasons, f.Notes, f.Lines.Select(l => new LineDto(l.Name, l.Cents, l.Note)).ToList(),
             f.Taxes.Select(t => new AmountDto(t.Name, t.CurrentCents)).ToList(), f.Deductions.Select(d => new AmountDto(d.Name, d.CurrentCents)).ToList(),
-            plans[i], f.Period.PayDate <= c.Today || early.ContainsKey(f.Period.PayDate), landed.TryGetValue(f.Period.PayDate, out var got) ? got : null)).ToList();
+            plans[i], f.Period.PayDate <= c.Today || landedOn.ContainsKey(f.Period.PayDate), landed.TryGetValue(f.Period.PayDate, out var got) ? got : null)).ToList();
 
         var history = rows.Where(r => r.PayDate < c.Today || r.ActualNetCents is not null).OrderByDescending(r => r.PayDate).Take(12)
             .Select(r => new HistoryDto(r.PayDate, r.PredictedNetCents, r.LowNetCents, r.HighNetCents, r.ActualNetCents,
@@ -444,11 +452,14 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     /// marked sent. You can still check anything off yourself.
     /// </summary>
     private async Task<List<PlanDto?>> PlansAsync(Guid householdId, PayContext c, List<ForecastCheck> checks, IReadOnlyDictionary<DateOnly, long> landed,
-        IReadOnlyDictionary<DateOnly, DateOnly> early, CancellationToken ct)
+        IReadOnlyDictionary<DateOnly, DateOnly> landedOn, CancellationToken ct)
     {
-        // A check is paid on its payday, or on the day it landed when that was earlier (DECISIONS.md 270): "since payday" counts from then.
-        bool Paid(DateOnly pay) => pay <= c.Today || early.ContainsKey(pay);
-        DateOnly Since(DateOnly pay) => early.TryGetValue(pay, out var on) ? on : pay;
+        // A check is paid on its payday, or on the day it landed when that was earlier (DECISIONS.md 270). Its pay period
+        // starts on the day it landed once it has (303). "Since payday", for the tasks, counts from then or from payday,
+        // whichever came first: what you sent on payday, before a late check showed up, still counts.
+        bool Paid(DateOnly pay) => pay <= c.Today || landedOn.ContainsKey(pay);
+        DateOnly Start(DateOnly pay) => PeriodStart(pay, landedOn);
+        DateOnly Since(DateOnly pay) => Start(pay) < pay ? Start(pay) : pay;
         var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
         // The bank's balance leaves out pending charges and deposits; every check of a balance here counts them
         // (DECISIONS.md 276), so the payday tasks and Home's warning see the same money.
@@ -610,7 +621,8 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             var nextUp = !current && (i == 0 || Paid(checks[i - 1].Period.PayDate));
             if (current || nextUp)
             {
-                var (spendFrom, spendTo) = current ? (PaydayBefore(pay), Since(pay).AddDays(-1)) : (PaydayBefore(pay), c.Today);
+                // Each window runs from the day the check before landed to the day before this one did (DECISIONS.md 303).
+                var (spendFrom, spendTo) = current ? (Start(PaydayBefore(pay)), Start(pay).AddDays(-1)) : (Start(PaydayBefore(pay)), c.Today);
                 foreach (var card in cardAccounts)
                 {
                     var cents = charged.Where(t => t.AccountId == card.Id && t.Date >= spendFrom && t.Date <= spendTo).Sum(t => t.AmountCents);

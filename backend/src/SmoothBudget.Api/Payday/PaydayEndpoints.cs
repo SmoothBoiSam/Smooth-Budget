@@ -98,7 +98,7 @@ public static class PaydayEndpoints
             {
                 var zone = await db.Households.Where(h => h.Id == householdId).Select(h => h.TimeZoneId).SingleAsync(ct);
                 var today = SmoothBudget.Api.Home.HomeSummaryService.TodayIn(zone, clock);
-                if (payDate > today && !(await PaydayService.ArrivedEarlyAsync(db, householdId, today, ct)).ContainsKey(payDate))
+                if (payDate > today && !(await PaydayService.LandedOnAsync(db, householdId, today, ct)).ContainsKey(payDate))
                     return Results.Problem($"These open on payday, {payDate:MMM d}.", statusCode: StatusCodes.Status409Conflict);
             }
             if (req.Skipped is { } skip)
