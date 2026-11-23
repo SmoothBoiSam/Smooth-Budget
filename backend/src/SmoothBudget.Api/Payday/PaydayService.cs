@@ -566,9 +566,19 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             long Split(long line, long extra) => BySplit()
                 ? PaydayPlan.Share(line - extra * funded / flex, inMonth.Count, index) + BonusPart(extra)
                 : PaydayPlan.Share(line, inMonth.Count, index);
-            var bonusNote = funded <= 0 || inMonth.IndexOf(pay) < 0 ? ""
-                : bonusEach[index] > 0 ? $" It includes the {PayEngine.Dollars(funded)} of the month's extra card payment and savings that {(coming.Count == 1 ? coming[0].Name : "your bonuses")} pays for."
-                : " The part your bonus pays for comes from the check it lands with.";
+            // What the card payment and savings lines say (DECISIONS.md 305): how much is this check's share, and how much a
+            // bonus pays for, so the note matches the amount.
+            string Why(string what, long line, long extra)
+            {
+                var whole = PayEngine.Dollars(line);
+                if (!BySplit()) return inMonth.Count > 1 ? $"{share} {whole} {what} in your budget." : $"Your budget's {whole} {what}.";
+                var bonus = BonusPart(extra);
+                var own = Split(line, extra) - bonus;
+                var name = coming.Count == 1 ? coming[0].Name : "your bonuses";
+                return bonus <= 0 ? $"This check's share of the month's {whole} {what}. The part your bonus pays for comes from the check it lands with."
+                    : own <= 0 ? $"The month's {whole} {what}, all from this check: {name} pays for it."
+                    : $"{PayEngine.Dollars(own)} is this check's share of the month's {whole} {what}, plus {PayEngine.Dollars(bonus)} that {name} pays for.";
+            }
 
             // Bills still to come before the next payday (for the current check: from today, since paid ones are done).
             // A bill your partner's fixed contribution goes toward (rent) still needs all of it in the account when it's
@@ -613,7 +623,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             }
             else
                 transfers.Add(new("debt", "Card payment", debtShare, target,
-                    (inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(debtMonthly)} card payment in your budget." : $"Your budget's {PayEngine.Dollars(debtMonthly)} card payment.") + bonusNote));
+                    Why("card payment", debtMonthly, debtExtra)));
 
             // The check you're on pays off what you charged between the last payday and this one. The next check shows
             // what you've charged since this payday so far. It comes from the spending money still in checking (you spent
@@ -639,7 +649,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 transfers.AddRange(sweeps.Where(s => s.DoneUtc == null || (current && s.DoneUtc >= Since(pay).ToDateTime(TimeOnly.MinValue)))
                     .Select(s => new PlanTransfer($"sweep:{s.Id}", "Last month's leftover", s.AmountCents, s.Destination, "Left over from last month.")));
             transfers.Add(new("savings", "Savings", Split(savingsMonthly, savingsMonthly), savingsAccount,
-                (inMonth.Count > 1 ? $"{share} {PayEngine.Dollars(savingsMonthly)} savings in your budget." : $"Your budget's {PayEngine.Dollars(savingsMonthly)} savings.") + bonusNote));
+                Why("savings", savingsMonthly, savingsMonthly)));
 
             var net = landedNet ?? f.NetCents;
             return (PaydayPlan.Build(net + coming.Sum(x => x.AmountCents), bills, transfers), net, current, pay, next, coming,

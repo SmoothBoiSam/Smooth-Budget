@@ -529,11 +529,13 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
             await db.SaveChangesAsync();
         }
         long Of(PaydayDto p, string kind) => p.Checks[0].Plan!.Items.Where(i => i.Kind == kind).Sum(i => i.Cents);
+        static PlanItemDto Savings(PaydayDto p) => p.Checks[0].Plan!.AllParts().Single(i => i.Kind == "savings");
 
         // Without a bonus this check sends half the month's savings, and keeps what the Mar 8 check can't cover of its own
         // plan: checking can spare the rest.
         var p = await Payday(c);
         Assert.Equal((new DateOnly(2027, 2, 22), 200_00L), (p.Checks[0].PayDate, Of(p, "savings")));
+        Assert.Equal("Half of the month's $400.00 savings in your budget.", Savings(p).Why);
         Assert.Equal(2_000_00L - 200_00 - Of(p, "hold"), p.Checks[0].Plan!.SpareCents);
 
         // A bonus expected Feb 26 pays for the month's savings (263), so this check's savings is all of it. Its savings
@@ -543,6 +545,8 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         (await c.PostAsJsonAsync("/api/payday/expected", new { name = "Test bonus", amountCents = 1_000_00, expectedDate = "2027-02-26" }, Json)).EnsureSuccessStatusCode();
         p = await Payday(c);
         Assert.Equal(400_00L, Of(p, "savings"));
+        // The note says so (DECISIONS.md 305), rather than "half of the month's" next to all of it.
+        Assert.Equal("The month's $400.00 savings, all from this check: Test bonus pays for it.", Savings(p).Why);
         Assert.Equal(Math.Min(2_000_00L, 2_000_00L + 1_000_00 - 400_00 - Of(p, "hold")), p.Checks[0].Plan!.SpareCents);
     }
 
