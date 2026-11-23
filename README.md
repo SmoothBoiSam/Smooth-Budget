@@ -1,22 +1,53 @@
 # Smooth Budget
 
 A phone-first budgeting app whose Home screen answers one question: **how much do I have left to spend this month?**
-The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. `DECISIONS.md` records the choices made where the spec is silent.
+It's built around a monthly flight schedule and paychecks, bank sync through Plaid, and an automatic budget that follows your pay.
 
-**Status:** Milestone 10 (polish), the last milestone in the spec:
-- **Milestone 1:** auth, database, CI, fake-data seed, and a Home screen showing Left to Spend.
-- **Milestone 2:** CSV import for Chase checking, Chase credit and Apple Card; categorization by bank category and merchant rules; card payment and transfer detection; and an inbox for transactions that still need a category.
-- **Milestone 3:** Plaid Link, cursor-based sync, verified webhooks, background sync, pending-to-posted handling, CSV/Plaid overlap matching, and sync health on Home.
-- **Milestone 4:** editable categories (this month only or from now on, hide, reorder), income vs planned, the budget generator, and month close with sweeps and carry-forward.
-- **Since milestone 4:** categories discovered from your own transactions, every automatic category reviewed in its own Review tab, one budget line per bill, no double counting of card payments or transfers, and partner splits with a settle-up balance.
-- **Milestone 5:** the Debt tab: cards followed from their accounts and loans by hand, APR and minimum from the bank where it shares them (Plaid Liabilities), the payoff engine (Avalanche by default, Snowball compared), debt-free date, payoff chart, an "extra each month" what-if slider, utilization and progress. The budget generator proposes card minimums plus what's left to the highest APR, and sweeps go to the highest APR.
-- **Milestone 6:** bills and subscriptions found from your transactions (More → Bills & subscriptions): monthly and annual totals, price changes, charges that stopped, possible duplicates, rename, bill vs subscription, due day, dismiss, and "make it its own bill line". The next 3 bills show on Home, and the budget generator proposes bills at their current price.
-- **Milestone 7:** the Partner screen (More → Partner): a fixed contribution (e.g. $800 toward Rent) shown as an offset on its bill line with your net share, matched to her transfers in a window (the 18th to 24th by default) with expected, received, different-amount and late states (late or short money comes out of Left to Spend). Other money between you has no tally: each transfer waits in Review until you say what it was for (paying you back for a category, her money, or your share of something).
-- **Milestone 8:** the Savings tab: total saved, savings accounts and balances, goals with progress from their account balance and a projected date at your monthly amount or recent pace, a rainy-day fund created for you, a 12-month savings chart, and the order money left over goes in (rainy-day fund, high-APR debt, larger savings), which the budget generator follows.
-- **Milestone 9:** the Payday tab: import the monthly SkedPlus+ schedule (the detailed text export, or the older CSV with estimated times), add past pay stub PDFs (reviewed before saving; the app learns your taxes and deductions from them), and see the next 3 checks with a low/likely/high range, a payday plan for each (bills due before the next payday, card payment, sweep, savings, spending money), and predicted vs actual once a check lands. Every pay rule is editable. Home shows the next payday.
-- **Milestone 10:** installable on a phone's home screen (app icon, manifest and a service worker), opens to the last known Left to Spend when offline with a clear "last known numbers" notice, and the same loading placeholders and "Try again" errors on every tab.
-- **Since milestone 10:** an automatic budget that follows your paychecks (squeezing spending when a month brings in less), a payday plan that checks itself off from your accounts, a date of hire for pay, editing a schedule (drop a trip, upload an update), last-day-of-month due dates, icon tabs, and collapsible sections.
-- **Also:** dark mode (More → Settings → Appearance: System, Light or Dark).
+The full spec (`SPEC.md`) stays out of the repo because its appendices contain real pay figures. [DECISIONS.md](DECISIONS.md) records every choice made where the spec is silent, numbered; code comments cite those numbers ("DECISIONS.md 308").
+
+All ten milestones in the spec are done. Work since then is follow-ups and fixes, each one recorded in DECISIONS.md.
+
+## What it does
+
+The app has five tabs.
+
+- **Home:**
+  - **Left to Spend** for the budget month, with a ring and a cat that shows at a glance how much is left.
+  - **Safe to Spend** when checking might not keep up before the next payday.
+  - The month overview: income in vs expected, bills, spending, debt and savings.
+  - The next payday and the next bills.
+  - Notices for anything that needs you, like a bank to reconnect or a friend's late payment.
+  - Pull to refresh, and **Update bank data**, which asks Plaid to check every bank now, within monthly limits.
+- **Budget:**
+  - Spending categories, bills (one line each), debt payments and savings, each with spent vs limit and a "Maxed" state.
+  - The **automatic budget** proposes limits from your history and your expected pay. It squeezes the least important spending first when a month brings in less. Limits you set yourself stay.
+  - Budget settings: income, where leftover money goes when a month closes (debt, savings or a split), archived and unused categories, and **Refresh categories from bank**. The demo leaves that last one out.
+- **Tasks:**
+  - **Review transactions:** file anything the app couldn't categorize. One card covers spending, bills, income and transfers, and can make a merchant rule.
+  - **Pay period tasks:** for each paycheck, what to keep in checking for bills, what to pay the cards, and what to move to savings.
+    - Tasks check themselves off from your accounts, and moves to the same account merge into one.
+    - They never ask for more than checking can spare right now. The rest waits for a bonus still to come, or for room in checking.
+  - **Upload** a new schedule or pay stub.
+- **Money:**
+  - **Paychecks:** import the monthly SkedPlus+ schedule (the detailed text export, or the older CSV) and past pay stub PDFs. Stubs are reviewed before saving, and the app learns your taxes and deductions from them.
+    - You get the next 3 checks with a low/likely/high range, predicted vs actual once a check lands, and editable pay rules.
+    - A pay period starts when its paycheck actually lands.
+  - **Income:** past and expected income, including bonuses you expect.
+  - **Debit:** checking and cash.
+  - **Debt:** cards followed from their accounts and loans by hand, APR and minimums from the bank (Plaid Liabilities), and expected interest.
+    - The payoff engine uses Avalanche by default and compares Snowball. It shows a debt-free date, a payoff chart, and an "extra each month" what-if.
+  - **Savings:** balances, counting transfers still on their way in. Goals with projected dates, a rainy-day fund, a 12-month chart, and the order leftover money goes in.
+  - **Transactions:** every transaction, with search.
+- **More:**
+  - Bank connections (Plaid), CSV import (Chase checking, Chase credit, Apple Card), and **Friends**.
+    - Friends are people you share costs with. They can have their own linked account or none, and each friend has a settle-up balance. A fixed contribution toward a bill, like part of the rent, is matched to their transfers.
+  - Appearance (System, Light or Dark) and Notifications (Web Push: alerts when something happens, and reminders for paydays and due dates that wait for daytime).
+
+Also:
+- It installs to a phone's home screen.
+- When offline, it opens to the last known numbers.
+- Sign-up is invite-only through a friend's link once an account exists.
+- **Try the demo** on the sign-in screen gives each visitor a fresh copy of made-up data, with bank sync and notifications off.
 
 ## Stack
 
@@ -25,13 +56,14 @@ The full spec (`SPEC.md`) stays out of the repo because its appendices contain r
 - **Money math:** `backend/src/SmoothBudget.Core`, pure C# with unit tests. The frontend only displays results.
 
 ```
-backend/src/SmoothBudget.Core        Budget-month calendar, Left to Spend calculator,
+backend/src/SmoothBudget.Core        Budget-month calendar, Left to Spend, budget generator, payoff engine, pay engine,
                                      CSV parsing, merchant cleanup, dedup, categorizer, transfer detector
-backend/src/SmoothBudget.Api         EF Core model + migrations, auth, endpoints, import pipeline, demo seeder
+backend/src/SmoothBudget.Api         EF Core model + migrations, auth, endpoints (one folder per area), Plaid,
+                                     import pipeline, notifications, demo seeder
 backend/tests/SmoothBudget.Core.Tests    Unit tests for the money math and import logic
 backend/tests/SmoothBudget.Api.Tests     End-to-end API tests against a throwaway Postgres DB
-frontend/                            Vite React app (login, Home, Budget/inbox, More/import)
-scripts/seed.ps1, scripts/seed.sh    Load fake demo data
+frontend/                            Vite React app (one file per screen in frontend/src)
+scripts/                             Seed fake data, move or pull hosted data (see DEPLOY.md)
 ```
 
 ## Prerequisites
@@ -97,7 +129,7 @@ Re-importing an overlapping export is safe: rows already in the account are skip
    - **Connect a bank** opens Plaid Link. In sandbox, sign in with Plaid's test login `user_good` / `pass_good`.
    - **Add Plaid's sandbox test bank (dev only)** links Plaid's test bank without the Link screen.
 3. Choose, for each account at the bank, **Import as a new account**, **Same as …** (pick the account you already imported CSVs into, so nothing is counted twice), or **Don't import**.
-4. Pull down on Home (or tap **Refresh**, or **Sync now**) to sync. A background sweep also syncs every 6 hours.
+4. Pull down on Home (or tap **Update bank data**, or **Sync now**) to sync. A background sweep also syncs every 6 hours.
 
 In sandbox, **Simulate new activity** makes Plaid post pending purchases, so you can watch them post without being counted twice.
 Webhooks need a public HTTPS URL. Set `PLAID_WEBHOOK_URL` when the app is hosted.
@@ -145,50 +177,24 @@ In Development, migrations apply automatically on startup.
 
 ## API
 
-| Method | Path | Notes |
+Everything is under `/api`, signed in with the auth cookie (except sign-in, the demo, the Plaid webhook and `/api/health`).
+Each area maps its own endpoints in its folder under `backend/src/SmoothBudget.Api`:
+
+| Area | Where | Covers |
 |---|---|---|
-| POST | `/api/auth/register` | `{ email, password }`. Creates a user and their household, and signs in. |
-| POST | `/api/auth/login` | `{ email, password }`. Sets the auth cookie. |
-| POST | `/api/auth/logout` | |
-| GET | `/api/auth/me` | |
-| GET | `/api/auth/options` | `{ signUpOpen }`: closed in production once an account exists |
-| GET | `/api/home/summary` | Left to Spend, status, days left, safe per day, carried over, over-budget line, uncategorized count, sync health |
-| GET / POST | `/api/accounts` | List, or add `{ name, type: Checking\|Savings\|CreditCard, mask: "1234" }` |
-| POST | `/api/import/csv` | Multipart: `file` and `accountId`. Returns counts and any unreadable rows. |
-| GET | `/api/import/batches` | Recent imports |
-| DELETE | `/api/import/batches/{id}` | Undo an import |
-| GET | `/api/transactions` | Current budget month, or `?from=YYYY-MM-DD&to=YYYY-MM-DD` |
-| GET | `/api/transactions/inbox`, `/api/transactions/inbox/count` | Transactions that need a category |
-| PATCH | `/api/transactions/{id}` | `{ categoryId, isTransfer, rulePattern? }`. Your choice locks the row. |
-| GET | `/api/budget/categories` | |
-| GET | `/api/budget/summary` | Every category grouped by type (limit, spent/paid, remaining, health), Left to Spend, income vs planned, last month's close and pending sweeps |
-| POST / PUT | `/api/budget/categories`, `/api/budget/categories/{id}` | Add; edit with `applyTo: month|permanent`, `isHidden` |
-| POST | `/api/budget/categories/order` | `{ ids }` |
-| PUT | `/api/budget/months/current/income` | `{ incomeCents }` |
-| POST | `/api/budget/months/{start}/close` | Close an ended month now |
-| POST / DELETE | `/api/budget/sweeps/{id}/done` | Mark a sweep as sent, or undo |
-| GET / POST | `/api/budget/generator`, `/api/budget/generator/apply` | Propose a budget from history; apply `{ incomeCents, limits }` |
-| GET / PUT | `/api/settings/budget` | `{ sweepTarget: Debt|Savings|Split, sweepSavingsPercent }` |
-| GET / DELETE | `/api/rules`, `/api/rules/{id}` | Merchant rules |
-| GET | `/api/plaid/config` | Whether Plaid is set up, and the environment |
-| POST | `/api/plaid/link-token` | `{ itemId? }`. Pass an item id for update mode (reconnect). |
-| POST | `/api/plaid/exchange` | `{ publicToken }` from Link. Returns the bank's accounts with suggested matches. |
-| POST | `/api/plaid/items/{id}/accounts` | `{ mappings: [{ plaidAccountId, action: new\|existing\|skip, accountId? }] }`, then the first sync |
-| GET / DELETE | `/api/plaid/items`, `/api/plaid/items/{id}` | Connections and their status; disconnect (history is kept) |
-| POST | `/api/plaid/items/{id}/reconnected` | After update-mode Link: mark active and sync |
-| POST | `/api/sync` | Sync every connection now (pull to refresh) |
-| POST | `/api/plaid/webhook` | Plaid only; signature-verified |
-| POST | `/api/plaid/sandbox/link`, `/api/plaid/sandbox/items/{id}/refresh` | Development + sandbox only |
-| GET | `/api/payday` | The next 3 checks (lines, taxes, deductions, low/likely/high, confidence), each check's payday plan, and predicted vs actual |
-| PUT | `/api/payday/plan/{payDate}/{key}` | `{ done }`: check off a plan item |
-| POST | `/api/payday/schedule` | Multipart `file` (.txt or .csv) and `confirm`: preview the grouped trips, or save the month (replaces it) |
-| GET / PUT / DELETE | `/api/payday/schedule`, `/api/payday/schedule/{year}/{month}` | Months with trips and pay; `{ reserve, overtime, paidEntries }` |
-| POST | `/api/payday/paystubs`, `/api/payday/paystubs/confirm` | Multipart PDF → parsed numbers for review (nothing saved); then save the reviewed stub |
-| GET / DELETE | `/api/payday/paystubs`, `/api/payday/paystubs/{id}` | |
-| GET / PUT / DELETE | `/api/payday/model` | The learned withholding model with back-tests; save edits; back to the learned fit |
-| GET / PUT | `/api/payday/profile` | `{ yearsOfService, fullTime, holidayPay, flatNetPercent }` |
-| GET / PUT / DELETE | `/api/payday/rules` | The pay rules table; reset to the manual |
-| GET | `/api/health` | |
+| Auth | `Auth/AuthEndpoints.cs` | Sign up (with a friend's invite), sign in and out, `me`, the demo (`POST /api/auth/demo`) |
+| Home | `Program.cs`, `Home/` | `GET /api/home/summary`: Left to Spend, Safe to Spend, the month overview, notices, sync health |
+| Accounts | `Accounts/` | Accounts and balances, Debit |
+| Transactions | `Transactions/TransactionEndpoints.cs` | Search, Review, filing a transaction, merchant rules, income |
+| Budget | `Budget/BudgetEndpoints.cs` | Categories, the summary, the automatic budget and generator, month close and sweeps, settings |
+| Bills | `Bills/RecurringEndpoints.cs` | Bills and subscriptions found from your transactions |
+| Debt | `Debt/DebtEndpoints.cs` | Cards and loans, the payoff plan, interest |
+| Savings | `Savings/` | Savings accounts, goals, the leftover order |
+| Payday | `Payday/PaydayEndpoints.cs` | Schedules, pay stubs, the withholding model, pay rules, expected income, the next checks and their tasks |
+| Friends | `Shared/SharedEndpoints.cs` | Friends, invites, shared costs and settle-up |
+| Import | `Import/ImportEndpoints.cs` | CSV import and undo |
+| Plaid | `Plaid/PlaidEndpoints.cs` | Link, connections, sync, Update bank data, the verified webhook, sandbox helpers (dev only) |
+| Notifications | `Notifications/Notifications.cs` | Web Push subscriptions and settings |
 
 ## Hosting
 
