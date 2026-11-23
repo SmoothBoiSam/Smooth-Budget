@@ -258,9 +258,14 @@ function AutomaticView({ p, top, busy, error, onTurnOff }: { p: GeneratorProposa
           {error}
         </p>
       )}
-      <button type="button" disabled={busy} onClick={onTurnOff} className="mt-12 w-full rounded-2xl neu py-3 text-sm font-semibold text-ink-soft disabled:opacity-50">
-        Turn off the automatic budget
-      </button>
+      <section className="mt-6" aria-labelledby="auto-options">
+        <h2 id="auto-options" className="px-1 text-sm font-semibold text-ink-soft">
+          Options
+        </h2>
+        <button type="button" disabled={busy} onClick={onTurnOff} className="mt-2 w-full rounded-2xl neu py-3 text-sm font-semibold text-ink-soft disabled:opacity-50">
+          Turn off the automatic budget
+        </button>
+      </section>
     </div>
   )
 }
