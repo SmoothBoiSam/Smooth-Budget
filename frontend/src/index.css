@@ -342,7 +342,7 @@ details[open] > :not(summary) {
   She's inside the card she sits on, so she's in front of the card above it, and under the tab bar.
 */
 /* Whatever she's on is her positioning box, only while she's there. */
-:where(*):has(> .lola) {
+:where(*):has(> .lola, > .draco-ground) {
   position: relative;
 }
 .lola {
@@ -409,4 +409,65 @@ details[open] > :not(summary) {
 }
 @keyframes lola-pop {
   from { opacity: 0; transform: scale(0.4) translateY(6px); }
+}
+
+/*
+  Draco (DECISIONS.md 297): coiled round a progress bar, tongue flicking; tapped, he pulls back and slithers off. When he
+  meets Lola he slithers up along her card, and flees back the way he came when she hisses.
+*/
+.draco-bar {
+  position: absolute;
+  z-index: 5;
+  cursor: pointer;
+  line-height: 0;
+  -webkit-tap-highlight-color: transparent;
+  animation: fade-in 500ms ease-out both;
+}
+.draco-bar[data-mode="startled"] svg {
+  animation: draco-startle 420ms ease-out both;
+}
+.draco-bar[data-mode="run"] {
+  transform: translateX(110vw);
+  transition: transform 1050ms cubic-bezier(0.5, 0, 0.9, 0.5);
+}
+.draco-bar[data-mode="run"] svg,
+.draco-ground[data-mode="run"] .draco-body {
+  animation: draco-wiggle 160ms ease-in-out infinite alternate;
+}
+.draco-ground {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  z-index: 1;
+  cursor: pointer;
+  line-height: 0;
+  -webkit-tap-highlight-color: transparent;
+  animation: draco-arrive 2600ms cubic-bezier(0.2, 0.7, 0.3, 1) 800ms both;
+}
+.draco-ground .draco-body {
+  animation: draco-wiggle 280ms ease-in-out 800ms 9 alternate;
+}
+.draco-ground[data-mode="run"] {
+  animation: none;
+  transform: translateX(calc(var(--draco-dir) * 110vw));
+  transition: transform 1000ms cubic-bezier(0.5, 0, 0.9, 0.5);
+}
+.draco-tongue {
+  transform-box: fill-box;
+  transform-origin: 0 50%;
+  animation: draco-tongue 2.8s ease-in-out infinite;
+}
+@keyframes draco-arrive {
+  from { transform: translateX(var(--draco-from)); }
+}
+@keyframes draco-wiggle {
+  to { transform: skewX(-9deg) scaleX(0.96); }
+}
+@keyframes draco-startle {
+  30% { transform: translateX(-4px) scaleX(0.94); }
+  60% { transform: translateX(2px); }
+}
+@keyframes draco-tongue {
+  0%, 78%, 100% { transform: scaleX(0); }
+  84%, 92% { transform: scaleX(1); }
+  88% { transform: scaleX(0.55); }
 }

@@ -1,38 +1,105 @@
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { DracoOnBar, Slithering } from './Draco'
 import { reducedMotion } from './motion'
 
 /**
- * Lola, the orange tabby (DECISIONS.md 295): once in a while (1 in 30 pages opened, at most once a day) she's asleep on top
- * of a card or a button at any spot along it, with z's drifting off her. Tap her and she hisses, then runs off the screen. She sits inside the card she's
- * on, so on a lower card she's drawn in front of the card above. Add ?lola to the address to see her every time.
+ * The pets (DECISIONS.md 295, 297). Each time a page opens, one roll of the dice:
+ * - Lola, the orange tabby (1 in 30, at most once a day): asleep on top of a card or a button at any spot along it, with
+ *   z's drifting off her. Tap her and she hisses, then runs off the screen. She sits inside the card she's on, so on a
+ *   lower card she's drawn in front of the card above.
+ * - Draco, the striped snake (1 in 60, at most once a day): coiled round a progress bar (Draco.tsx).
+ * - Very rarely (1 in 400), Draco slithers up to Lola while she naps. Tap either: she hisses at him and they bolt
+ *   opposite ways.
+ * Add ?lola, ?draco or ?meet to the address to see one every time.
  */
-const ODDS = 30
+const ODDS = { meet: 400, lola: 30, draco: 60 }
 
 const today = () => new Date().toLocaleDateString('en-CA')
-function seenToday() {
+function seenToday(pet: 'lola' | 'draco') {
   try {
-    return localStorage.getItem('lola:day') === today()
+    return localStorage.getItem(`${pet}:day`) === today()
   } catch {
     return false
   }
 }
-function markSeen() {
+function markSeen(pet: 'lola' | 'draco') {
   try {
-    localStorage.setItem('lola:day', today())
+    localStorage.setItem(`${pet}:day`, today())
   } catch {
-    // Private mode or blocked storage: she may nap again today, which is fine.
+    // Private mode or blocked storage: they may visit again today, which is fine.
   }
 }
 
+type Visit =
+  | { id: number; kind: 'lola' | 'meet'; perch: HTMLElement; spot: number }
+  | { id: number; kind: 'draco'; left: number; mid: number; span: number }
+
+const forced = (): Visit['kind'] | null => {
+  const q = window.location.search
+  return q.includes('meet') ? 'meet' : q.includes('draco') ? 'draco' : q.includes('lola') ? 'lola' : null
+}
+
+/** Who visits this page, if anyone: one roll of the dice. */
+function roll(): Visit['kind'] | null {
+  const r = Math.random()
+  const [meet, lola, draco] = [1 / ODDS.meet, 1 / ODDS.lola, 1 / ODDS.draco]
+  if (r < meet) return !seenToday('lola') && !seenToday('draco') ? 'meet' : null
+  if (r < meet + lola) return !seenToday('lola') ? 'lola' : null
+  if (r < meet + lola + draco) return !seenToday('draco') ? 'draco' : null
+  return null
+}
+
+/** Where on this page they go, or null when there's nowhere yet (the page may still be loading). */
+function place(kind: Visit['kind'], forced: boolean): Visit | null {
+  const id = Date.now()
+  if (kind === 'draco') {
+    const bar = findBar()
+    if (bar && !forced) markSeen('draco')
+    return bar ? { id, kind, ...bar } : null
+  }
+  // Meeting: a wide card, with Lola near one end and room for Draco at the other.
+  const perch = findPerch(kind === 'meet' ? 230 : 90)
+  if (!perch) return null
+  if (!forced) {
+    markSeen('lola')
+    if (kind === 'meet') markSeen('draco')
+  }
+  const spot = kind === 'meet' ? (Math.random() < 0.5 ? 0.05 + Math.random() * 0.25 : 0.7 + Math.random() * 0.25) : Math.random()
+  return { id, kind, perch, spot }
+}
+
+/** A bar he can coil round: a thin rounded track (budget, debt, savings, Home), preferring one in view. */
+function findBar(): { left: number; mid: number; span: number } | null {
+  const root = document.getElementById('root')
+  if (!root) return null
+  const fits = [...root.querySelectorAll<HTMLElement>('.neu-inset.rounded-full.overflow-hidden')].filter((el) => {
+    if (el.closest('nav, [role="dialog"], .fixed')) return false
+    const r = el.getBoundingClientRect()
+    return r.width >= 110 && r.height > 0 && r.height <= 12
+  })
+  const inView = fits.filter((el) => {
+    const top = el.getBoundingClientRect().top
+    return top > 120 && top < window.innerHeight - 150
+  })
+  const pool = inView.length > 0 ? inView : fits
+  const bar = pool[Math.floor(Math.random() * pool.length)]
+  if (!bar) return null
+  const r = bar.getBoundingClientRect()
+  // He wraps part of it, anywhere along it.
+  const span = Math.round(Math.min(105, Math.max(60, r.width * 0.35)))
+  const start = r.left + Math.random() * (r.width - span)
+  return { left: start + window.scrollX, mid: r.top + window.scrollY + r.height / 2, span }
+}
+
 /** A card or a button on the page for her to sit on (not a row in a list), preferring one in view. */
-function findPerch(): HTMLElement | null {
+function findPerch(minWidth: number): HTMLElement | null {
   const root = document.getElementById('root')
   if (!root) return null
   const fits = [...root.querySelectorAll<HTMLElement>('.neu, .neu-sm, .shadow-neu-sm, a, button')].filter((el) => {
     if (el.closest('nav, [role="dialog"], [role="alert"], .fixed, summary, li, .lola')) return false
     const r = el.getBoundingClientRect()
-    if (r.width < 90 || r.height < 28) return false
+    if (r.width < minWidth || r.height < 28) return false
     // A link or button only when it looks like one: raised or filled, not plain text.
     if (el.matches('a, button') && !el.matches('.neu, .neu-sm, .shadow-neu-sm')) {
       const s = getComputedStyle(el)
@@ -93,32 +160,30 @@ function hiss() {
   }
 }
 
-export default function Lola() {
-  const [perch, setPerch] = useState<HTMLElement | null>(null)
-  const [mode, setMode] = useState<'sleep' | 'hiss' | 'run'>('sleep')
-  const [dir, setDir] = useState<1 | -1>(1)
-  // Where along the top she lies: anywhere from the left edge to the right (0 to 1).
-  const [spot, setSpot] = useState(0.5)
+export default function Pets() {
+  const [visit, setVisit] = useState<Visit | null>(null)
 
   // A roll of the dice each time a page opens, once it has had a moment to load.
   useEffect(() => {
     let timer = 0
-    const roll = () => {
+    // One roll per page; then, while the page is still loading, a few more looks for somewhere to be.
+    const visitPage = () => {
       window.clearTimeout(timer)
-      const force = window.location.search.includes('lola')
-      timer = window.setTimeout(() => {
-        const el = force || (!seenToday() && Math.random() * ODDS < 1) ? findPerch() : null
-        if (el && !force) markSeen()
-        setMode('sleep')
-        setSpot(Math.random())
-        setPerch(el)
-      }, 1200)
+      const force = forced()
+      const kind = force ?? roll()
+      if (!kind) return
+      const look = (tries: number) => {
+        const v = place(kind, !!force)
+        if (v) setVisit(v)
+        else if (tries > 0) timer = window.setTimeout(() => look(tries - 1), 900)
+      }
+      timer = window.setTimeout(() => look(5), 1200)
     }
     const onPage = () => {
-      setPerch(null)
-      roll()
+      setVisit(null)
+      visitPage()
     }
-    roll()
+    visitPage()
     window.addEventListener('hashchange', onPage)
     return () => {
       window.clearTimeout(timer)
@@ -126,7 +191,22 @@ export default function Lola() {
     }
   }, [])
 
-  if (!perch) return null
+  if (!visit) return null
+  const gone = () => setVisit(null)
+  return visit.kind === 'draco' ? (
+    <DracoOnBar key={visit.id} left={visit.left} mid={visit.mid} span={visit.span} onGone={gone} />
+  ) : (
+    <LolaNap key={visit.id} perch={visit.perch} spot={visit.spot} meet={visit.kind === 'meet'} onGone={gone} />
+  )
+}
+
+/** Lola asleep on a card; with meet, Draco slithers up beside her (from the side with more room). */
+function LolaNap({ perch, spot, meet, onGone }: { perch: HTMLElement; spot: number; meet: boolean; onGone: () => void }) {
+  const [mode, setMode] = useState<'sleep' | 'hiss' | 'run'>('sleep')
+  const [dir, setDir] = useState<1 | -1>(1)
+  // In a meeting, Draco comes from the end of the card she isn't at.
+  const dracoLeft = spot > 0.5
+  const at = `${spot * 100}% - ${spot * 70}px`
 
   function wake(e: MouseEvent | KeyboardEvent) {
     e.preventDefault()
@@ -134,43 +214,73 @@ export default function Lola() {
     if (mode !== 'sleep') return
     hiss()
     setMode('hiss')
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setDir(r.left + r.width / 2 < window.innerWidth / 2 ? -1 : 1)
+    if (meet) setDir(dracoLeft ? 1 : -1) // away from him
+    else {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      setDir(r.left + r.width / 2 < window.innerWidth / 2 ? -1 : 1)
+    }
     if (reducedMotion()) {
-      window.setTimeout(() => setPerch(null), 700)
+      window.setTimeout(onGone, 700)
       return
     }
     window.setTimeout(() => setMode('run'), 650)
-    window.setTimeout(() => setPerch(null), 650 + 950)
+    window.setTimeout(onGone, 650 + 1050)
   }
+  const keys = (e: KeyboardEvent) => (e.key === 'Enter' || e.key === ' ') && wake(e)
+  // She faces right; she turns to hiss at Draco when he's on her left, and to run left.
+  const flip = mode === 'run' ? dir < 0 : mode === 'hiss' && meet && dracoLeft
+  // Draco faces right; he faces Lola until he flees back the way he came.
+  const dracoFlip = mode === 'run' ? dracoLeft : !dracoLeft
 
   return createPortal(
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={mode === 'sleep' ? 'Lola the cat, asleep on this card. Tap her.' : 'Lola hisses and runs off'}
-      className="lola"
-      data-mode={mode}
-      style={{ ['--lola-dir' as string]: dir, left: `calc(${spot * 100}% - ${spot * 70}px)` }}
-      onClick={wake}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && wake(e)}
-    >
-      <div className="lola-face" style={{ transform: mode === 'run' && dir < 0 ? 'scaleX(-1)' : undefined }}>
-        {mode === 'sleep' ? <Sleeping /> : <Hissing />}
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={mode === 'sleep' ? 'Lola the cat, asleep on this card. Tap her.' : 'Lola hisses and runs off'}
+        className="lola"
+        data-mode={mode}
+        style={{ ['--lola-dir' as string]: dir, left: `calc(${at})` }}
+        onClick={wake}
+        onKeyDown={keys}
+      >
+        <div className="lola-face" style={{ transform: flip ? 'scaleX(-1)' : undefined }}>
+          {mode === 'sleep' ? <Sleeping /> : <Hissing />}
+        </div>
+        {mode === 'sleep' && (
+          <span className="lola-z" aria-hidden>
+            <i>z</i>
+            <i>z</i>
+            <i>Z</i>
+          </span>
+        )}
+        {mode === 'hiss' && (
+          <span className="lola-hiss" aria-hidden style={meet && dracoLeft ? { right: 'auto', left: '-14px' } : undefined}>
+            Hsss!
+          </span>
+        )}
       </div>
-      {mode === 'sleep' && (
-        <span className="lola-z" aria-hidden>
-          <i>z</i>
-          <i>z</i>
-          <i>Z</i>
-        </span>
+      {meet && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Draco the snake, sneaking up on Lola"
+          className="draco-ground"
+          data-mode={mode}
+          style={{
+            left: dracoLeft ? `calc(${at} - 92px)` : `calc(${at} + 76px)`,
+            ['--draco-from' as string]: dracoLeft ? '-110vw' : '110vw',
+            ['--draco-dir' as string]: dracoLeft ? -1 : 1,
+          }}
+          onClick={wake}
+          onKeyDown={keys}
+        >
+          <div style={{ transform: dracoFlip ? 'scaleX(-1)' : undefined }}>
+            <Slithering />
+          </div>
+        </div>
       )}
-      {mode === 'hiss' && (
-        <span className="lola-hiss" aria-hidden>
-          Hsss!
-        </span>
-      )}
-    </div>,
+    </>,
     perch,
   )
 }
@@ -216,18 +326,19 @@ function Hissing() {
         <path d="M13 33 L6 29 L9 25 L3 21 L8 17 L4 12 L10 10 L8 4 L14 7 L16 1 L18 8 L22 9 L18 14 L22 18 L17 22 L21 27 L17 31 Z" fill={O.fur} />
         <rect x="14" y="34" width="5" height="16" rx="2.2" fill={O.fur} />
         <rect x="21.5" y="34" width="5" height="16" rx="2.2" fill={O.fur} />
-        <rect x="39" y="34" width="5" height="16" rx="2.2" fill={O.fur} />
-        <rect x="46.5" y="34" width="5" height="16" rx="2.2" fill={O.fur} />
-        <polygon points="25,15 27,7 30,13" fill={O.fur} />
-        <polygon points="30,12.5 33,5 35.5,12" fill={O.fur} />
-        <polygon points="36,13 40,7 40.5,15" fill={O.fur} />
-        <path d="M9 41 C 8 12, 52 8, 55 38 C 46 33, 18 33, 9 41 Z" fill={O.fur} />
+        <rect x="41.5" y="34" width="5" height="16" rx="2.2" fill={O.fur} />
+        <rect x="48.5" y="34" width="5" height="16" rx="2.2" fill={O.fur} />
+        <polygon points="25,18.5 27,10.5 30,16" fill={O.fur} />
+        <polygon points="30,15.5 33,8 35.5,15" fill={O.fur} />
+        <polygon points="36,16 40,10.5 40.5,18.5" fill={O.fur} />
+        {/* Arched, with a round haunch behind and a round chest in front (not pointed ends). */}
+        <path d="M12.5 38 C 11 31, 14 22, 20.5 18 C 27 14, 37 14, 43.5 18.5 C 49 22.5, 53 29, 53 36 C 53 41.5, 46 42.5, 44 37.5 C 40.5 31.5, 25 31.5, 21.5 37.5 C 19 42.5, 13 43, 12.5 38 Z" fill={O.fur} />
         <polygon points="47,27 41,19.5 51.5,22" fill={O.fur} />
         <polygon points="58.5,22 69,19.5 63,27" fill={O.fur} />
         <circle cx="55" cy="31" r="10.5" fill={O.fur} />
       </g>
-      <path d="M21 18.5 q-1.4 5 0.8 9.5 M29.5 15.5 q-1.4 5.2 0.8 10.5 M38 16 q-1.4 5 0.8 9.8" fill="none" stroke={O.stripe} strokeWidth={2} strokeLinecap="round" />
-      <path d="M11 22 l5 1.2 M10 15 l5 1.4" stroke={O.stripe} strokeWidth={1.6} strokeLinecap="round" />
+      <path d="M23.5 19.5 q-1.4 4.6 0.8 8.8 M31 17 q-1.4 5 0.8 9.6 M38.5 17.5 q-1.4 4.8 0.8 9.2" fill="none" stroke={O.stripe} strokeWidth={2} strokeLinecap="round" />
+      <path d="M10.5 22 l3.6 0.9 M10 15 l5 1.4" stroke={O.stripe} strokeWidth={1.6} strokeLinecap="round" />
       <path d="M52.5 22 v3 M55 21.4 v3.4 M57.5 22 v3" stroke={O.stripe} strokeWidth={1.4} strokeLinecap="round" />
       <ellipse cx="55" cy="35.5" rx="5.4" ry="3.8" fill={O.cream} />
       <circle cx="51" cy="29" r="2.7" fill={O.eye} />
