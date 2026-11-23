@@ -617,7 +617,8 @@ function ReviewCard({
                 setTab(x.id)
                 setAdding(false)
               }}
-              className={`min-w-0 flex-1 truncate rounded-full py-1.5 text-xs font-semibold ${tab === x.id ? 'neu-sm text-accent' : 'text-ink-soft'}`}
+              // Each sized to its word; with all five (money in), a smaller font so they fit (DECISIONS.md 299).
+              className={`min-w-0 flex-auto truncate rounded-full py-1.5 font-semibold ${tabs.length > 4 ? 'px-1 text-[11px] tracking-tight' : 'px-1.5 text-xs'} ${tab === x.id ? 'neu-sm text-accent' : 'text-ink-soft'}`}
             >
               {x.label}
             </button>

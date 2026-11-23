@@ -26,7 +26,7 @@ import SweepSetting from './SweepSetting'
 import CategoryEditSheet from './CategoryEditSheet'
 import { ArchivedCategories, ResetCategories, UnusedCategories } from './CategoryTools'
 import BillSheet from './BillSheet'
-import { centsToInput, formatCents, formatDay, formatSigned, formatTime, ordinal, parseDollars, titleCase, spendingBar, isMaxed } from './format'
+import { formatCents, formatDay, formatSigned, ordinal, parseDollars, titleCase, spendingBar, isMaxed } from './format'
 import { TransactionEditSheet } from './ReviewScreen'
 
 // Sub-views of the Budget tab, from the URL hash:
@@ -164,6 +164,14 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
             <button type="button" onClick={() => setEditing(line)} className={headerActionCls}>
               Edit
             </button>
+          ) : view.kind === 'overview' ? (
+            // Budget settings is a gear at the top right (DECISIONS.md 299).
+            <a href="#/budget/plan" aria-label="Budget settings" title="Budget settings" className="neu-sm grid size-10 shrink-0 place-items-center rounded-full text-ink-soft">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-5">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </a>
           ) : undefined
         }
       />
@@ -184,11 +192,10 @@ export default function BudgetScreen({ onChanged, onSignedOut }: { onChanged: ()
           the planner's own income fields do that job. */}
       {view.kind === 'plan' && (
         <BudgetPlanner
-          top={(p) =>
+          top={() =>
             summary && (
               <IncomeCard
                 summary={summary}
-                explanation={p.incomeExplanation}
                 onIncome={(income, partner, automatic) =>
                   act(() => budgetEditApi.setIncome(income, partner, automatic), automatic ? 'Income follows your paycheck forecast again.' : 'Expected income updated.')
                 }
@@ -294,15 +301,10 @@ function Overview({
   const short = Math.max(s.overplannedCents, trimmed ? s.auto!.shortCents : 0)
   return (
     <>
-      {/* Managing the budget sits right under its numbers, one tap away (DECISIONS.md 169, 187). */}
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <button type="button" onClick={onAdd} className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
-          + Add a Spending Category
-        </button>
-        <a href="#/budget/plan" className="neu-sm rounded-2xl py-2.5 text-center text-sm font-semibold">
-          Budget settings
-        </a>
-      </div>
+      {/* Adding a category sits right under the month, full width; Budget settings is the gear up top (DECISIONS.md 169, 187, 299). */}
+      <button type="button" onClick={onAdd} className="neu-sm mt-4 w-full rounded-2xl py-2.5 text-center text-sm font-semibold">
+        + Add a Spending Category
+      </button>
 
       {short > 0 && (
         <div className="mt-5 space-y-3">
@@ -369,7 +371,7 @@ function Group({
       <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
         {g.categories.map((c) => {
           const items = live.filter((b) => b.categoryId === c.id)
-          // One bill per line (DECISIONS.md 279): its due date sits under the line, and the bill opens from the line's page.
+          // One bill per line (DECISIONS.md 279): its due date sits at the line's top right (299), and the bill opens from the line's page.
           const only = items.length === 1 ? billStatus(items[0], month, today) : null
           return (
             <li key={c.id}>
@@ -377,9 +379,8 @@ function Group({
                 {c.partOfCardPayments ? (
                   <InterestRow line={c} />
                 ) : (
-                  <CategoryRow line={c} spending={spending} />
+                  <CategoryRow line={c} spending={spending} status={only} />
                 )}
-                {only && <span className={`mt-0.5 block text-xs ${only[1]}`}>{only[0]}</span>}
                 {c.interestIncludedCents > 0 && (
                   <span className="mt-1 block text-xs text-ink-faint">Your card minimums, with about {formatCents(c.interestIncludedCents)} of interest in them</span>
                 )}
@@ -465,7 +466,7 @@ function BillItemRow({ b, month, today, onOpen }: { b: RecurringItem; month: { s
   )
 }
 
-function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending: boolean }) {
+function CategoryRow({ line: c, spending, status }: { line: BudgetCategoryLine; spending: boolean; status?: [string, string] | null }) {
   // Bar width is display only: how much of the limit is used, capped at full.
   const used = c.limitCents > 0 ? Math.min(1, Math.max(0, c.spentCents / c.limitCents)) : c.spentCents > 0 ? 1 : 0
   // Spending: red once it's maxed (DECISIONS.md 280). Card payments and savings: green once they're paid in full.
@@ -481,12 +482,16 @@ function CategoryRow({ line: c, spending }: { line: BudgetCategoryLine; spending
       {/* Two lines (DECISIONS.md 265): the name with spent of limit right after it, then the bar with what's left at its
           end. All three on one line didn't fit a phone ("Credit card payment $200.00 of $2,000.00 $1,800.00 to go"). The
           amount wraps under a name too long to share its line. */}
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-        <span className="max-w-full truncate text-sm font-medium">{c.name}</span>
-        <span className="whitespace-nowrap text-xs tabular-nums text-ink-soft">
-          {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
-        </span>
-        {c.hasMonthOverride && <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap text-ink-soft">this month only</span>}
+      <div className="flex items-baseline gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
+          <span className="max-w-full truncate text-sm font-medium">{c.name}</span>
+          <span className="whitespace-nowrap text-xs tabular-nums text-ink-soft">
+            {formatCents(c.spentCents)} of {formatCents(c.limitCents)}
+          </span>
+          {c.hasMonthOverride && <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap text-ink-soft">this month only</span>}
+        </div>
+        {/* A bill's due or paid date, top right, so the line stays two rows (DECISIONS.md 299). */}
+        {status && <span className={`shrink-0 whitespace-nowrap text-xs ${status[1]}`}>{status[0]}</span>}
       </div>
       <div className="mt-1 flex items-center gap-3">
         <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full neu-inset" aria-hidden>
@@ -1099,23 +1104,16 @@ function AutoBudgetOff() {
 }
 
 /**
- * Budget settings' one card (DECISIONS.md 168): the automatic budget's last change, this month's income and partner
- * money with where the numbers come from, money in vs planned, and any shortfall, once.
+ * Budget settings' one card (DECISIONS.md 168, 299): this month's income and partner money, money in vs planned, and any
+ * shortfall, once.
  */
 function IncomeCard({
   summary: s,
-  explanation,
   onIncome,
 }: {
   summary: BudgetSummary
-  explanation?: string
   onIncome: (income: number, partner: number, automatic?: boolean) => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [income, setIncome] = useState(centsToInput(s.incomeExpectedCents))
-  const [partner, setPartner] = useState(centsToInput(s.partnerExpectedCents))
-  const incomeCents = parseDollars(income)
-  const partnerCents = parseDollars(partner)
   const over = s.unallocatedCents < 0
   const first = s.partnerName
   const partnerLabel = first ? `From ${first}` : 'From friends'
@@ -1126,60 +1124,16 @@ function IncomeCard({
 
   return (
     <section aria-labelledby="income-h" className="mt-4 rounded-3xl neu p-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 id="income-h" className="text-sm font-semibold">
-          This month
-        </h2>
-        {!editing && (
-          <button type="button" onClick={() => setEditing(true)} className={`${smallBtn} text-accent`}>
-            Edit income
-          </button>
-        )}
-      </div>
+      {/* No Edit income button (DECISIONS.md 300): income comes from the paychecks. */}
+      <h2 id="income-h" className="text-sm font-semibold">
+        This month
+      </h2>
       {a?.on && (
         <p className="mt-1 text-xs text-ink-soft">
           Updates itself as your pay, bills and spending change. Limits you set yourself stay.
-          {a.note && (
-            <span className="mt-1 block text-ink-soft">
-              <span className="font-medium">Last change{a.noteUtc ? `, ${formatTime(a.noteUtc)}` : ''}:</span> {a.note}
-            </span>
-          )}
         </p>
       )}
 
-      {editing ? (
-        <form
-          className="mt-2 space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (incomeCents !== null && partnerCents !== null) {
-              onIncome(incomeCents, partnerCents)
-              setEditing(false)
-            }
-          }}
-        >
-          <MoneyField label="Your expected income" value={income} onChange={setIncome} />
-          {fixed.length > 0 ? (
-            <p className="text-xs text-ink-soft">
-              {partnerLabel}: set on the{' '}
-              <a href="#/friends" className={`${smallBtn} py-1! text-accent`}>
-                Friends
-              </a>
-              .
-            </p>
-          ) : (
-            <MoneyField label={`${partnerLabel}, expected`} value={partner} onChange={setPartner} />
-          )}
-          <button
-            type="submit"
-            disabled={incomeCents === null || partnerCents === null}
-            className="w-full rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-50"
-          >
-            Save
-          </button>
-        </form>
-      ) : (
-        <>
           <dl className="mt-3 space-y-1 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-ink-soft">Your income</dt>
@@ -1187,18 +1141,13 @@ function IncomeCard({
                 {formatCents(s.incomeExpectedCents)} <span className="text-xs text-ink-soft">· {formatCents(s.incomeReceivedCents)} in so far</span>
               </dd>
             </div>
-            {s.auto?.on && (
+            {/* No note on where the income comes from or the last change (DECISIONS.md 299): only the way back to paychecks. */}
+            {s.auto?.on && s.auto.incomeSetByYou && (
               <p className="text-xs text-ink-soft">
-                {s.auto.incomeSetByYou ? (
-                  <>
-                    You set this.{' '}
-                    <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className={`${smallBtnOn} py-1!`}>
-                      Use your paychecks instead
-                    </button>
-                  </>
-                ) : (
-                  (explanation ?? 'From your paychecks this month (Money → Income), or your usual income until there is pay data.')
-                )}
+                You set this.{' '}
+                <button type="button" onClick={() => onIncome(0, s.partnerExpectedCents, true)} className={`${smallBtnOn} py-1!`}>
+                  Use your paychecks instead
+                </button>
               </p>
             )}
             {fixed.length === 0 ? (
@@ -1249,37 +1198,7 @@ function IncomeCard({
               to track what they send apart from your income.
             </p>
           )}
-        </>
-      )}
-      {s.incomeExpectedCents === 0 && !editing && (
-        <p className="mt-2 text-xs text-ink-soft">
-          Set your expected income, or{' '}
-          <a href="#/budget/plan" className={`${smallBtn} py-1! text-accent`}>
-            build a budget from your history
-          </a>
-          .
-        </p>
-      )}
     </section>
-  )
-}
-
-function MoneyField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <label className="block">
-      <span className="text-xs text-ink-soft">{label}</span>
-      <div className="mt-0.5 flex items-center rounded-xl neu-inset px-3">
-        <span className="text-sm text-ink-soft">$</span>
-        <input
-          aria-label={label}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          inputMode="decimal"
-          aria-invalid={parseDollars(value) === null}
-          className="block w-full bg-transparent px-1 py-2 tabular-nums outline-none"
-        />
-      </div>
-    </label>
   )
 }
 

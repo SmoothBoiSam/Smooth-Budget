@@ -227,8 +227,9 @@ export default function BudgetPlanner({ onApplied, top }: { onApplied: (message:
  * money in, planned and any shortfall are in the one card above it (<paramref name="top"/>, DECISIONS.md 168).
  */
 function AutomaticView({ p, top, busy, error, onTurnOff }: { p: GeneratorProposal; top: ReactNode; busy: boolean; error: string | null; onTurnOff: () => void }) {
+  // The off switch has extra room above it, apart from the budget, and the usual gap below (DECISIONS.md 299).
   return (
-    <div className="pb-6">
+    <div>
       {top}
       {groups.map((g) => {
         const rows = p.categories.filter((c) => listedType(c) === g.type)
@@ -257,10 +258,9 @@ function AutomaticView({ p, top, busy, error, onTurnOff }: { p: GeneratorProposa
           {error}
         </p>
       )}
-      <button type="button" disabled={busy} onClick={onTurnOff} className="mt-6 w-full rounded-2xl neu py-3 text-sm font-semibold text-ink-soft disabled:opacity-50">
+      <button type="button" disabled={busy} onClick={onTurnOff} className="mt-12 w-full rounded-2xl neu py-3 text-sm font-semibold text-ink-soft disabled:opacity-50">
         Turn off the automatic budget
       </button>
-      <p className="mt-2 text-center text-xs text-ink-soft">Off, the limits stay where they are until you change them or build a budget yourself.</p>
     </div>
   )
 }

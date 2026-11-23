@@ -174,7 +174,7 @@ export function ResetCategories({ onDone }: { onDone: (message: string) => void 
   )
 }
 
-/** The caution before "Refresh categories from bank": what it does, what stays, and that it can't be undone. */
+/** The "are you sure" before "Refresh categories from bank" (DECISIONS.md 299): what it does, what stays, that it can't be undone. */
 function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message: string) => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -212,7 +212,7 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
           Caution
         </p>
         <h2 id="reset-h" className="mt-1 text-lg font-semibold">
-          Reset all categories?
+          Are you sure?
         </h2>
         <div id="reset-d" className="mt-2 space-y-2 text-sm text-ink-soft">
           <p>
@@ -236,7 +236,7 @@ function ResetSheet({ onClose, onDone }: { onClose: () => void; onDone: (message
             Cancel
           </button>
           <button type="button" disabled={busy} onClick={reset} className="rounded-2xl bg-danger py-3 text-sm font-semibold text-primary-ink shadow-neu-sm disabled:opacity-60">
-            {busy ? 'Refreshing…' : 'Yes, reset all'}
+            {busy ? 'Refreshing…' : 'Continue'}
           </button>
         </div>
       </div>
