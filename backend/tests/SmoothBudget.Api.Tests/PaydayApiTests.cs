@@ -245,6 +245,34 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task A_move_checking_cant_make_yet_says_what_it_can_send_now_and_what_waits()
+    {
+        // DECISIONS.md 308. Feb 24, 2027, on the Feb 22 check: savings is half the month's $100, and checking has $30.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var me = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AddRange(
+                new Account { Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid,
+                    PlaidAccountId = $"test-chk-{Guid.NewGuid():N}", CurrentBalanceCents = 30_00, CreatedUtc = DateTime.UtcNow },
+                new Category { Id = Guid.NewGuid(), HouseholdId = me.HouseholdId, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 });
+            await db.SaveChangesAsync();
+        }
+        async Task<PlanItemDto> SavingsTask() => (await Payday(c)).Checks[0].Plan!.AllParts().Single(i => i.Kind == "savings");
+
+        var s = await SavingsTask();
+        Assert.Equal((50_00L, 20_00L, 30_00L, "checking has room"), (s.Cents, s.WaitCents, s.NowCents, s.WaitFor));
+        Assert.Equal("Checking can spare $30.00 of this now; the other $20.00 once checking has room.", s.Status);
+
+        // A bonus expected Feb 26 pays for the month's savings (263): the whole $100 is this check's, and the rest waits for it.
+        (await c.PostAsJsonAsync("/api/payday/expected", new { name = "Test bonus", amountCents = 1_000_00, expectedDate = "2027-02-26" }, Json)).EnsureSuccessStatusCode();
+        s = await SavingsTask();
+        Assert.Equal((100_00L, 70_00L, 30_00L, "Test bonus lands Feb 26"), (s.Cents, s.WaitCents, s.NowCents, s.WaitFor));
+    }
+
+    [Fact]
     public async Task The_plan_for_the_check_you_are_on_fills_itself_in_from_your_accounts()
     {
         // Feb 24, 2027: living on the Feb 22 check (Feb 1-15, from the February schedule) until Mar 8.

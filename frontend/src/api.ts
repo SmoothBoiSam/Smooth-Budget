@@ -1153,6 +1153,11 @@ export interface PlanItem {
   skipped?: boolean
   /** For "send": the tasks to the same account merged into it, each checked off on its own (DECISIONS.md 220). */
   parts?: PlanItem[] | null
+  /** For the check you're on: the part of this move checking can't spare yet, and what it waits for (DECISIONS.md 308). */
+  waitCents?: number
+  /** With waitCents: what checking can spare for it now (single tasks; a merged one works it out from its parts). */
+  nowCents?: number
+  waitFor?: string | null
 }
 export interface PayCheck {
   payDate: string

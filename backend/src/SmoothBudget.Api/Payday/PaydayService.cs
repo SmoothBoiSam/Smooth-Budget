@@ -18,9 +18,13 @@ public record AmountDto(string Name, long Cents);
 /// <param name="Skippable">"Pay off what you charged" can be skipped (DECISIONS.md 195); <paramref name="Skipped"/> when you did.</param>
 /// <param name="Parts">For a "send" task: the tasks merged into it, each still checked off (and skipped) on its own
 /// (DECISIONS.md 220). Its amount is what's still to send: the parts' total, less any skipped part.</param>
+/// <param name="WaitCents">For the check you're on: the part of this move checking can't spare yet (DECISIONS.md 308).</param>
+/// <param name="NowCents">With <paramref name="WaitCents"/>: what checking can spare for it now.</param>
+/// <param name="WaitFor">With <paramref name="WaitCents"/>: what it waits for ("Bonus lands Nov 30").</param>
 public record PlanItemDto(string Key, string Kind, string Label, long Cents, string Destination, string Why, bool Done,
     bool Auto = false, string? Status = null, IReadOnlyList<PlanBillDto>? Bills = null, long ShortCents = 0,
-    bool Skippable = false, bool Skipped = false, IReadOnlyList<PlanItemDto>? Parts = null);
+    bool Skippable = false, bool Skipped = false, IReadOnlyList<PlanItemDto>? Parts = null,
+    long WaitCents = 0, long NowCents = 0, string? WaitFor = null);
 public record PlanBillDto(string Name, long Cents, DateOnly Due);
 /// <summary>Money still to land before the next payday (DECISIONS.md 277): "Bonus lands Nov 24", "Jane sends $800.00".</summary>
 /// <param name="Date">When it's expected: a bonus's date, or the start of a friend's usual window.</param>
@@ -805,7 +809,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 }
             }
 
-            var tasks = plan.Items.Select(x =>
+            var tasks = Affordable(plan.Items.Select(x =>
             {
                 var (auto, status) = Status(x);
                 // A check's tasks open on its payday (DECISIONS.md 221): one ticked off before then (back when that was
@@ -816,7 +820,80 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 var skipped = skippable && !auto && done.Any(d => d.PayDate == pay && d.Key == SkipPrefix + x.Key);
                 return new PlanItemDto(x.Key, x.Kind, x.Label, x.Cents, x.Destination, x.Why, !skipped && (manual || auto), auto, skipped ? "Skipped: these charges stay on the card." : status,
                     x.Bills?.Select(b => new PlanBillDto(b.Name, b.Cents, b.Due)).ToList(), ShortBy(x), skippable, skipped);
-            }).ToList();
+            }).ToList());
+
+            // Never ask for a move checking can't make yet (DECISIONS.md 308). For the check you're on, what checking can
+            // spare now is its balance (pending counted) less the bills it keeps and anything held for the next check. That
+            // goes to the moves still open in order: card minimums, paying off what you charged, extra card payments, last
+            // month's leftover, then savings. The rest of a move waits for money still to come: a bonus, or room in checking.
+            List<PlanItemDto> Affordable(List<PlanItemDto> list)
+            {
+                var fromAccounts = accounts.Where(a => a.Type == AccountType.Checking).ToList();
+                if (!current || fromAccounts.Count == 0 || fromAccounts.Any(a => a.PlaidAccountId is null)) return list;
+                bool InChecking(PlanItem x) => AccountFor(x) is { Type: AccountType.Checking };
+                var kept = plan.Items.Where(x => x.Kind == "keep" && InChecking(x)).Sum(x => x.Cents - (x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents)))
+                           + plan.Items.Where(x => x.Kind == "hold" && InChecking(x)).Sum(x => x.Cents);
+                var free = Math.Max(0, fromAccounts.Sum(Balance) - kept);
+
+                // What each open move still needs, after what's already gone toward it.
+                var lumped = cardPaid; // with no card's own side seen, the checking side pays the card lines in order
+                long Left(PlanItemDto t)
+                {
+                    if (t.Done || t.Skipped) return 0;
+                    switch (t.Kind)
+                    {
+                        case "debt" when t.Key.StartsWith("debt:", StringComparison.Ordinal):
+                            if (cardSideSeen && debts.FirstOrDefault(d => t.Key == $"debt:{d.Id}")?.AccountId is { } cardAccount)
+                                return Math.Max(0, t.Cents - PaidTo(cardAccount));
+                            var take = Math.Min(t.Cents, lumped);
+                            lumped -= take;
+                            return t.Cents - take;
+                        case "debt": return Math.Max(0, t.Cents - cardPaid);
+                        case "cardspend":
+                            if (!cardSideSeen || !Guid.TryParse(t.Key["cardspend:".Length..], out var spentOn)) return t.Cents;
+                            var line = list.Where(y => y.Kind == "debt" && y.Destination == t.Destination).Sum(y => y.Cents);
+                            return Math.Max(0, t.Cents - Math.Max(0, PaidTo(spentOn) - line));
+                        case "savings": return Math.Max(0, t.Cents - intoSavings);
+                        case "sweep": return t.Cents;
+                        default: return 0;
+                    }
+                }
+                var left = list.ToDictionary(t => t.Key, Left);
+                var now = list.ToDictionary(t => t.Key, _ => 0L);
+                void Give(PlanItemDto t, long upTo)
+                {
+                    var g = Math.Min(free, Math.Min(upTo, left[t.Key] - now[t.Key]));
+                    if (g <= 0) return;
+                    now[t.Key] += g;
+                    free -= g;
+                }
+                long Minimum(PlanItemDto t)
+                {
+                    var month = c.Calendar.MonthContaining(pay);
+                    var inMonth = PayCalendar.From(month.Start, c.Rules).TakeWhile(p => p.PayDate <= month.End).Select(p => p.PayDate).ToList();
+                    var index = Math.Max(0, inMonth.IndexOf(pay));
+                    var cards = t.Key == "debt" ? debts : debts.Where(d => t.Key == $"debt:{d.Id}");
+                    return cards.Sum(d => PaydayPlan.Share(Math.Min(d.MinimumPaymentCents ?? 0, d.BalanceCents), inMonth.Count, index));
+                }
+                foreach (var t in list.Where(t => t.Kind == "debt")) Give(t, Minimum(t));
+                foreach (var kind in new[] { "cardspend", "debt", "sweep", "savings" })
+                    foreach (var t in list.Where(t => t.Kind == kind)) Give(t, long.MaxValue);
+
+                var bonus = coming.OrderBy(x => x.ExpectedDate).FirstOrDefault();
+                var waitFor = bonus is not null ? $"{bonus.Name} lands {bonus.ExpectedDate:MMM d}" : "checking has room";
+                var afterBills = kept > 0 ? " after the bills it keeps" : "";
+                return list.Select(t =>
+                {
+                    var wait = left[t.Key] - now[t.Key];
+                    if (wait <= 0) return t;
+                    var progress = t.Status is { } s && !s.StartsWith("No ", StringComparison.Ordinal) ? s + " " : "";
+                    var room = now[t.Key] > 0
+                        ? $"Checking can spare {PayEngine.Dollars(now[t.Key])} of this now{afterBills}; the other {PayEngine.Dollars(wait)} once {waitFor}."
+                        : kept > 0 ? $"Checking needs what it has for the bills it keeps; this can go once {waitFor}."
+                        : $"Checking can't spare this yet; it can go once {waitFor}.";
+                    return t with { WaitCents = wait, NowCents = now[t.Key], WaitFor = waitFor, Status = progress + room };
+                }).ToList();
+            }
 
             var shortCents = plan.ShortCents - heldEarlier;
             // The check you're on has landed, so what matters is whether the accounts cover what's still to go out
@@ -897,6 +974,8 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             return new PlanItemDto("send:" + string.Join("+", parts.Select(p => p.Key)), "send", $"{parts.Count} payments",
                 parts.Where(p => !p.Skipped).Sum(p => p.Cents), parts[0].Destination, "",
                 Done: !allSkipped && open.Count == 0, Auto: !allSkipped && parts.All(p => p.Auto || p.Skipped), Status: status,
-                Skipped: allSkipped, Parts: parts);
+                Skipped: allSkipped, Parts: parts,
+                // What has to wait (DECISIONS.md 308): the open parts' together.
+                WaitCents: open.Sum(p => p.WaitCents), WaitFor: open.Select(p => p.WaitFor).FirstOrDefault(w => w is not null));
         }).ToList();
 }

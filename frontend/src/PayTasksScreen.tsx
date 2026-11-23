@@ -253,12 +253,27 @@ function partName(p: PlanItem) {
   return p.label
 }
 
+/**
+ * A move checking can't make in full yet (DECISIONS.md 308): only what it can spare now, and the rest once the money it
+ * waits for lands. Null when nothing has to wait.
+ */
+function waitingText(i: PlanItem, left: number, what: string) {
+  const wait = i.done ? 0 : (i.waitCents ?? 0)
+  if (wait <= 0 || !i.waitFor) return null
+  const now = Math.max(0, left - wait)
+  return now > 0
+    ? `Send ${formatCents(now)} to ${i.destination}${what} now, ${formatCents(wait)} more once ${i.waitFor}`
+    : `Send ${formatCents(wait)} to ${i.destination}${what} once ${i.waitFor}`
+}
+
 function planText(i: PlanItem) {
   const amount = formatCents(i.cents)
   switch (i.kind) {
     case 'send': {
       // Partly sent: say what's left (the done parts are crossed off in the breakdown).
       const left = (i.parts ?? []).filter((p) => !p.done && !p.skipped).reduce((n, p) => n + p.cents, 0)
+      const waiting = waitingText(i, left, '')
+      if (waiting) return waiting
       return !i.done && left < i.cents ? `Send ${formatCents(left)} more to ${i.destination}` : `Send ${amount} to ${i.destination}`
     }
     case 'keep':
@@ -268,8 +283,14 @@ function planText(i: PlanItem) {
       return `Keep ${amount} more in ${i.destination} for ${i.label}`
     case 'cardspend':
       // What you charged to a card: paid from the spending money left in checking, not from this check.
-      return `Pay ${amount} to ${i.destination} for what you charged${i.label === 'Charged so far' ? ' so far' : ''}`
+      return (
+        waitingText(i, (i.nowCents ?? 0) + (i.waitCents ?? 0), ' for what you charged') ??
+        `Pay ${amount} to ${i.destination} for what you charged${i.label === 'Charged so far' ? ' so far' : ''}`
+      )
     default:
-      return `Send ${amount} to ${i.destination} (${i.label.toLowerCase()})`
+      return (
+        waitingText(i, (i.nowCents ?? 0) + (i.waitCents ?? 0), ` (${i.label.toLowerCase()})`) ??
+        `Send ${amount} to ${i.destination} (${i.label.toLowerCase()})`
+      )
   }
 }
