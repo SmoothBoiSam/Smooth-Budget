@@ -336,3 +336,77 @@ button[aria-expanded="true"] ~ *,
 details[open] > :not(summary) {
   animation: rise-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/*
+  Lola (DECISIONS.md 295): asleep on top of a card, z's drifting off her; tapped, she hisses and runs off the screen.
+  She's inside the card she sits on, so she's in front of the card above it, and under the tab bar.
+*/
+/* Whatever she's on is her positioning box, only while she's there. */
+:where(*):has(> .lola) {
+  position: relative;
+}
+.lola {
+  position: absolute;
+  bottom: calc(100% - 5px);
+  z-index: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  line-height: 0;
+}
+.lola[data-mode="run"] {
+  transform: translateX(calc(var(--lola-dir) * 110vw));
+  transition: transform 900ms cubic-bezier(0.5, 0, 0.9, 0.5);
+}
+.lola-breathe {
+  transform-origin: 50% 100%;
+  animation: lola-breathe 3.4s ease-in-out infinite;
+}
+.lola-shake {
+  animation: lola-shake 90ms linear 5;
+}
+.lola[data-mode="run"] svg {
+  animation: lola-hop 180ms ease-in-out infinite alternate;
+}
+.lola-z i {
+  position: absolute;
+  right: 6px;
+  top: 8px;
+  font: 700 11px/1 ui-rounded, system-ui, sans-serif;
+  font-style: normal;
+  color: var(--color-ink-soft);
+  opacity: 0;
+  animation: lola-z 3.6s ease-out infinite;
+  pointer-events: none;
+}
+.lola-z i:nth-child(2) { font-size: 13px; animation-delay: 1.2s; }
+.lola-z i:nth-child(3) { font-size: 16px; animation-delay: 2.4s; }
+.lola-hiss {
+  position: absolute;
+  right: -10px;
+  top: -20px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-danger);
+  font: 800 12px/1.2 ui-rounded, system-ui, sans-serif;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.25);
+  animation: lola-pop 220ms cubic-bezier(0.22, 1.6, 0.36, 1) both;
+}
+@keyframes lola-breathe {
+  50% { transform: scaleY(1.045); }
+}
+@keyframes lola-z {
+  0% { opacity: 0; transform: translate(0, 0) rotate(-12deg); }
+  15% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(26px, -38px) rotate(10deg); }
+}
+@keyframes lola-shake {
+  25% { transform: translateX(-1.5px); }
+  75% { transform: translateX(1.5px); }
+}
+@keyframes lola-hop {
+  to { transform: translateY(-5px); }
+}
+@keyframes lola-pop {
+  from { opacity: 0; transform: scale(0.4) translateY(6px); }
+}

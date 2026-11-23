@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, api, budgetApi, onDataChanged, payBadge, paydayApi, type Me } from './api'
 import BottomNav, { type Route } from './BottomNav'
+import Lola from './Lola'
 import BudgetScreen from './BudgetScreen'
 import DebtScreen from './DebtScreen'
 import HomeScreen from './HomeScreen'
@@ -225,6 +226,8 @@ export default function App() {
       {route === 'more' && <MoreScreen me={me} onChanged={refreshInbox} onSignedOut={signedOut} />}
       </div>
       <BottomNav route={route} badges={{ home: homeCount, tasks: inboxCount + planCount }} />
+      {/* Lola, the other cat (DECISIONS.md 295): now and then asleep on a card. */}
+      <Lola />
     </>
   )
 }

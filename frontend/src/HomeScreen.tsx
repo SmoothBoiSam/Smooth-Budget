@@ -445,7 +445,7 @@ function Gauge({ s, shown }: { s: HomeSummary; shown: ReturnType<typeof useShown
               fill="none"
               strokeWidth="10"
               strokeLinecap="round"
-              className="stroke-ink-faint/35 transition-[stroke-dasharray] duration-500"
+              className="stroke-ink-soft/60 transition-[stroke-dasharray] duration-500"
               strokeDasharray={`${arc * shown.ghost} 999`}
             />
           )}
