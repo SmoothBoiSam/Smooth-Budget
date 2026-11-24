@@ -7,7 +7,8 @@ using SmoothBudget.Core.Budgeting;
 
 namespace SmoothBudget.Api.Savings;
 
-public record SavingsAccountDto(Guid Id, string Name, string? Mask, long BalanceCents, bool BalanceFromBank, long PaceCents);
+/// <param name="SharePercent">Its part of each month's savings (DECISIONS.md 314).</param>
+public record SavingsAccountDto(Guid Id, string Name, string? Mask, long BalanceCents, bool BalanceFromBank, long PaceCents, int SharePercent = 0);
 
 public record SavingsGoalDto(
     Guid Id, string Name, long TargetCents, Guid? AccountId, string? AccountName, long? ManualSavedCents, long? MonthlyCentsSet, bool IsStarter,
@@ -29,6 +30,8 @@ public record SavingsHistoryItemDto(Guid Id, DateOnly Date, long Cents, string A
 public record GoalRequest(string Name, long TargetCents, Guid? AccountId, long? ManualSavedCents, long? MonthlyCents);
 public record PriorityRequest(List<PriorityStep> Order);
 public record BalanceRequest(long BalanceCents);
+public record SplitShare(Guid AccountId, int Percent);
+public record SplitRequest(List<SplitShare>? Shares);
 
 /// <summary>
 /// The Savings tab (SPEC 4.5): savings accounts, goals with progress and a projected date from account balances, the
@@ -70,6 +73,7 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var goals = await db.SavingsGoals.AsNoTracking().Include(g => g.Account)
             .Where(g => g.HouseholdId == householdId).OrderBy(g => g.SortOrder).ThenBy(g => g.CreatedUtc).ToListAsync(ct);
         var statuses = SavingsGoals.Status(goals.Select(Input).ToList(), balances, pace, today);
+        var shares = SavingsSplit.Shares(accounts);
 
         // The chart: total savings at the end of each of the last 12 budget months, and today.
         var ends = new List<DateOnly>();
@@ -86,10 +90,10 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var moves = ids.Count > 0
             ? await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId) && t.AmountCents < 0)
                 .OrderByDescending(t => t.Date).Take(60)
-                .Select(t => new SavingsTransferDto(t.Date, -t.AmountCents, t.Account.Name, t.IsTransfer ? "Moved to savings" : t.Description)).ToListAsync(ct)
+                .Select(t => new SavingsTransferDto(t.Date, -t.AmountCents, t.Account.Nickname ?? t.Account.Name, t.IsTransfer ? "Moved to savings" : t.Description)).ToListAsync(ct)
             : await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && t.AmountCents > 0 && t.CategoryId != null && savingsCats.Contains(t.CategoryId.Value))
                 .OrderByDescending(t => t.Date).Take(60)
-                .Select(t => new SavingsTransferDto(t.Date, t.AmountCents, t.Account.Name, "Moved to savings")).ToListAsync(ct);
+                .Select(t => new SavingsTransferDto(t.Date, t.AmountCents, t.Account.Nickname ?? t.Account.Name, "Moved to savings")).ToListAsync(ct);
         var thisMonth = moves.Where(m => current.Contains(m.Date)).Sum(m => m.Cents);
         // The savings lines as the budget has them this month, a "this month only" change included (DECISIONS.md 251).
         var monthOnly = await BudgetMonthService.MonthOnlyLimitsAsync(db, householdId, current.Start, ct);
@@ -98,11 +102,12 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
 
         return new SavingsSummaryDto(
             accounts.Sum(a => Math.Max(0, balances[a.Id])) + goals.Where(g => g.AccountId is null).Sum(g => g.ManualSavedCents ?? 0),
-            accounts.Select(a => new SavingsAccountDto(a.Id, a.Name, a.Mask, balances[a.Id], a.PlaidAccountId is not null, pace[a.Id])).ToList(),
+            accounts.Select(a => new SavingsAccountDto(a.Id, AccountNames.Short(a), a.Nickname is null ? a.Mask : null, balances[a.Id], a.PlaidAccountId is not null, pace[a.Id],
+                shares.FirstOrDefault(s => s.Account.Id == a.Id).Percent)).ToList(),
             goals.Select(g =>
             {
                 var s = statuses.Single(x => x.Id == g.Id);
-                return new SavingsGoalDto(g.Id, g.Name, g.TargetCents, g.AccountId, g.Account?.Name, g.ManualSavedCents, g.MonthlyCents, g.IsStarter,
+                return new SavingsGoalDto(g.Id, g.Name, g.TargetCents, g.AccountId, g.Account is { } ga ? AccountNames.Short(ga) : null, g.ManualSavedCents, g.MonthlyCents, g.IsStarter,
                     s.SavedCents, s.RemainingCents, s.Percent, s.Reached, s.MonthlyCents, s.MonthlySource, s.MonthsToGo, s.ProjectedDate);
             }).ToList(),
             Order(household.SavingsPriority).Select(x => x.ToString()).ToList(),
@@ -148,7 +153,7 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         new(g.Id, g.Name, g.TargetCents, g.AccountId, g.ManualSavedCents, g.MonthlyCents, g.IsStarter, g.SortOrder);
 }
 
-/// <summary>SPEC section 9: <c>GET/PUT /savings/goals</c>, plus the priority order and a CSV-only account's balance.</summary>
+/// <summary>SPEC section 9: <c>GET/PUT /savings/goals</c>, plus the priority order, the split between accounts and a CSV-only account's balance.</summary>
 public static class SavingsEndpoints
 {
     public const long MaxCents = 100_000_000_00;
@@ -174,12 +179,12 @@ public static class SavingsEndpoints
             var rows = ids.Count > 0
                 ? await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId))
                     .OrderByDescending(t => t.Date).ThenBy(t => t.Merchant).Take(500)
-                    .Select(t => new { t.Id, t.Date, Cents = -t.AmountCents, Account = t.Account.Name, t.IsTransfer, t.Merchant, t.Description, Line = (string?)null })
+                    .Select(t => new { t.Id, t.Date, Cents = -t.AmountCents, Account = t.Account.Nickname ?? t.Account.Name, t.IsTransfer, t.Merchant, t.Description, Line = (string?)null })
                     .ToListAsync(ct)
                 : await db.Transactions.AsNoTracking()
                     .Where(t => t.HouseholdId == householdId && t.Category != null && t.Category.Type == CategoryType.SavingsTransfer)
                     .OrderByDescending(t => t.Date).ThenBy(t => t.Merchant).Take(500)
-                    .Select(t => new { t.Id, t.Date, Cents = t.AmountCents, Account = t.Account.Name, t.IsTransfer, t.Merchant, t.Description, Line = (string?)t.Category!.Name })
+                    .Select(t => new { t.Id, t.Date, Cents = t.AmountCents, Account = t.Account.Nickname ?? t.Account.Name, t.IsTransfer, t.Merchant, t.Description, Line = (string?)t.Category!.Name })
                     .ToListAsync(ct);
             return rows.Select(t => new SavingsHistoryItemDto(t.Id, t.Date, t.Cents, t.Account,
                 t.IsTransfer ? (t.Cents >= 0 ? "Moved to savings" : "Moved out of savings") : (string.IsNullOrWhiteSpace(t.Merchant) ? t.Description : t.Merchant),
@@ -232,6 +237,23 @@ public static class SavingsEndpoints
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["order"] = ["List the starter fund, debt and savings once each."] });
             var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
             h.SavingsPriority = string.Join(",", req.Order);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        // Where each month's savings goes (DECISIONS.md 314): a whole percent for each savings account, adding up to 100.
+        // Accounts left out get none.
+        g.MapPut("/split", async (SplitRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var accounts = await db.Accounts.Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget).ToListAsync(ct);
+            var shares = req.Shares ?? [];
+            if (shares.Any(s => s.Percent is < 0 or > 100) || shares.Sum(s => s.Percent) != 100 || shares.Select(s => s.AccountId).Distinct().Count() != shares.Count)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["shares"] = ["Give each account a percent, adding up to 100%."] });
+            if (shares.Any(s => accounts.All(a => a.Id != s.AccountId)))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["shares"] = ["Pick your own savings accounts."] });
+            foreach (var a in accounts)
+                a.SavingsPercent = shares.FirstOrDefault(s => s.AccountId == a.Id)?.Percent ?? 0;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });

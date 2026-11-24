@@ -172,7 +172,7 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
       {plan && (
         <section aria-labelledby="plan-h" className="mt-4 rounded-3xl neu p-4">
           <h2 id="plan-h" className="text-sm font-semibold">
-            Your plan
+            Payment settings
           </h2>
           {/* No choice to make when both orders come out the same (DECISIONS.md 149). */}
           {!sameEitherWay && (
@@ -194,7 +194,8 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
             ))}
           </div>
           )}
-          {s.comparison && <Comparison plan={plan} cmp={s.comparison} />}
+          {/* One card: no order to compare, so nothing to say (DECISIONS.md 315). */}
+          {s.comparison && visible.filter((d) => d.balanceCents > 0).length > 1 && <Comparison plan={plan} cmp={s.comparison} />}
 
           <label className="mt-5 block">
             <span className="flex items-baseline justify-between gap-3 text-sm">

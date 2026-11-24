@@ -2,6 +2,7 @@ import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { DracoOnBar, DracoOnCard, Slithering } from './Draco'
 import { reducedMotion } from './motion'
+import { takeSummoned } from './summon'
 
 /**
  * The pets (DECISIONS.md 295, 297). Each time a page opens, one roll of the dice:
@@ -176,7 +177,7 @@ export default function Pets() {
     // One roll per page; then, while the page is still loading, a few more looks for somewhere to be.
     const visitPage = () => {
       window.clearTimeout(timer)
-      const force = forced()
+      const force = forced() ?? takeSummoned()
       const kind = force ?? roll()
       if (!kind) return
       const look = (tries: number) => {

@@ -149,7 +149,7 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
             {
                 var outcome = plan?.Debts.FirstOrDefault(o => o.Id == d.Id);
                 var limit = d.CreditLimitCents;
-                return new DebtDto(d.Id, d.Name, d.Account?.Mask, d.AccountId is not null, d.BalanceCents, d.AprBps, d.MinimumPaymentCents, d.DueDay,
+                return new DebtDto(d.Id, d.Account?.Nickname ?? d.Name, d.Account?.Nickname is null ? d.Account?.Mask : null, d.AccountId is not null, d.BalanceCents, d.AprBps, d.MinimumPaymentCents, d.DueDay,
                     d.DueDay is { } day ? NextDue(today, day) : null, limit,
                     limit is > 0 ? (int)Math.Round(d.BalanceCents * 100m / limit.Value, MidpointRounding.AwayFromZero) : null,
                     d.StartingBalanceCents, d.StartedOn, d.FromBank, d.IsHidden,
@@ -290,7 +290,7 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
 
     private static DebtInput Input(DebtAccount d) => new(d.Id, Label(d), d.BalanceCents, d.AprBps ?? 0, d.MinimumPaymentCents ?? 0);
 
-    public static string Label(DebtAccount d) => d.Account?.Mask is { } mask ? $"{d.Name} ••{mask}" : d.Name;
+    public static string Label(DebtAccount d) => d.Account is { } a ? AccountNames.Label(d.Name, a.Mask, a.Nickname) : d.Name;
 
     /// <summary>The next due date on or after today. Day 31 means "the last day of the month"; any day past the end of a short month falls on its last day.</summary>
     public static DateOnly NextDue(DateOnly today, int dueDay)

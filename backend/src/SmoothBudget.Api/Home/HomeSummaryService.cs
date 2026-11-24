@@ -148,9 +148,11 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             .Select(i => new ItemSyncInfo(i.InstitutionName, i.Status, i.StatusMessage, i.LastSyncedUtc))
             .ToListAsync(ct);
 
+        // A sweep's destination was saved with the account's name then; shown as it's called now (DECISIONS.md 310).
+        var named = pendingSweeps.Count == 0 ? [] : await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId).ToListAsync(ct);
         return new CurrentMonthData(today, month.Range, row, month.Categories, month.Transactions, month.CarriedInDeficitCents,
             lastUpdated, connections,
-            pendingSweeps.Select(s => new PendingSweepDto(s.Id, s.Kind.ToString(), s.AmountCents, s.Destination,
+            pendingSweeps.Select(s => new PendingSweepDto(s.Id, s.Kind.ToString(), s.AmountCents, AccountNames.Current(named, s.Destination),
                 calendar.MonthContaining(s.StartDate).Label.ToString("MMMM yyyy", CultureInfo.InvariantCulture))).ToList(),
             reviewCount, month.Contributions, month.PartnerShortfallCents,
             await CashAsync(householdId, today, month, pendingSweeps.Sum(s => s.AmountCents), ct));

@@ -48,7 +48,7 @@ public static class DebtEndpoints
                 .Where(c => c.HouseholdId == householdId && c.Type == Core.Budgeting.CategoryType.FixedBill && c.Name == Core.Transactions.CardInterest.CategoryName)
                 .Select(c => (Guid?)c.Id).FirstOrDefaultAsync(ct);
             var debts = await db.DebtAccounts.AsNoTracking().Where(d => d.HouseholdId == householdId)
-                .Select(d => new { d.Id, d.Name, Mask = d.Account != null ? d.Account.Mask : null }).ToDictionaryAsync(d => d.Id, ct);
+                .Select(d => new { d.Id, d.Name, Mask = d.Account != null ? d.Account.Mask : null, Nick = d.Account != null ? d.Account.Nickname : null }).ToDictionaryAsync(d => d.Id, ct);
             var charges = line is not { } lineId ? [] : await db.Transactions.AsNoTracking()
                 .Where(t => t.HouseholdId == householdId && t.CategoryId == lineId && t.AmountCents > 0)
                 .OrderByDescending(t => t.Date).ThenBy(t => t.Merchant).Take(500)
@@ -58,7 +58,7 @@ public static class DebtEndpoints
             var months = Enumerable.Range(0, 12).Select(i => thisMonth.AddMonths(i - 11))
                 .Select(m => new InterestMonthDto(m, charges.Where(t => t.Date >= m && t.Date < m.AddMonths(1)).Sum(t => t.AmountCents), m == thisMonth))
                 .ToList();
-            string? Name(Guid? id) => id is { } d && debts.TryGetValue(d, out var x) ? (x.Mask is null ? x.Name : $"{x.Name} ••{x.Mask}") : null;
+            string? Name(Guid? id) => id is { } d && debts.TryGetValue(d, out var x) ? AccountNames.Label(x.Name, x.Mask, x.Nick) : null;
             return Results.Ok(new InterestHistoryDto(months,
                 charges.Select(t => new InterestChargeDto(t.Id, t.Date, t.Merchant, t.AmountCents, t.DebtAccountId, Name(t.DebtAccountId))).ToList(),
                 months.Sum(m => m.Cents)));
@@ -70,7 +70,7 @@ public static class DebtEndpoints
         {
             var householdId = ctx.User.HouseholdId();
             var debts = await db.DebtAccounts.AsNoTracking().Where(d => d.HouseholdId == householdId)
-                .Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null }).ToListAsync(ct);
+                .Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null, Nick = d.Account != null ? d.Account.Nickname : null }).ToListAsync(ct);
             var byAccount = debts.Where(d => d.AccountId is not null).GroupBy(d => d.AccountId!.Value).ToDictionary(g => g.Key, g => g.First().Id);
             var unlinked = debts.Where(d => d.AccountId is null).Select(d => d.Id).ToList();
             var onCards = (await CardPayments.LoadAsync(db, householdId, null, null, ct)).Take(500)
@@ -80,7 +80,7 @@ public static class DebtEndpoints
                             && t.Category != null && t.Category.Type == Core.Budgeting.CategoryType.DebtPayment)
                 .OrderByDescending(t => t.Date).Take(500)
                 .Select(t => new { t.Id, t.Date, t.Merchant, Cents = t.AmountCents, t.AccountId, Debt = t.DebtAccountId }).ToListAsync(ct);
-            string? Name(Guid? id) => debts.FirstOrDefault(d => d.Id == id) is { } d ? (d.Mask is null ? d.Name : $"{d.Name} ••{d.Mask}") : null;
+            string? Name(Guid? id) => debts.FirstOrDefault(d => d.Id == id) is { } d ? AccountNames.Label(d.Name, d.Mask, d.Nick) : null;
             return onCards.Concat(toward)
                 .Select(t =>
                 {

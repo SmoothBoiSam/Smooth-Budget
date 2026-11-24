@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ApiError, savingsApi, type GoalFields, type PriorityStep, type SavingsGoal, type SavingsSummary } from './api'
+import { ApiError, savingsApi, type GoalFields, type SavingsGoal, type SavingsSummary } from './api'
 import { useResume } from './offline'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
 import { AccountsCard } from './Accounts'
@@ -7,15 +7,11 @@ import { centsToInput, formatCents, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 const formatMonth = (iso: string) => monthFmt.format(new Date(iso + 'T00:00:00Z'))
-const stepLabel: Record<PriorityStep, { title: string; hint: string }> = {
-  StarterFund: { title: 'Starter emergency fund', hint: 'Fill the rainy-day fund first' },
-  Debt: { title: 'High-APR debt', hint: 'Extra to the card with the highest APR' },
-  Savings: { title: 'Larger savings', hint: 'Your other goals' },
-}
 
 /**
  * The Savings tab (SPEC 4.5): what you've saved with a chart of it over the last year, each goal with progress from its
- * account's balance and a projected date at your monthly rate, and the order money left over goes in.
+ * account's balance and a projected date at your monthly rate, and where each month's savings goes. Where money left over
+ * goes is in Budget's settings.
  */
 export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [s, setS] = useState<SavingsSummary | null>(null)
@@ -56,15 +52,6 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
     }
   }
 
-  function move(i: number, d: -1 | 1) {
-    if (!s) return
-    const order = [...s.priority]
-    const j = i + d
-    if (j < 0 || j >= order.length) return
-    ;[order[i], order[j]] = [order[j], order[i]]
-    void act(() => savingsApi.setPriority(order), 'Priority saved. The next budget you build follows it.')
-  }
-
   return (
     <Page>
       <PageHeader title="Savings" back={{ href: '#/payday', label: 'Money' }} />
@@ -80,6 +67,13 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
         <>
           <SavedCard s={s} />
           <AccountsCard section="savings" />
+          {s.accounts.length > 0 && (
+            <PaymentSettings
+              key={s.accounts.map((a) => a.id + ':' + a.sharePercent).join()}
+              s={s}
+              onSave={(shares) => act(() => savingsApi.setSplit(shares), 'Saved. Your pay tasks send each account its part.')}
+            />
+          )}
 
           <section aria-labelledby="goals-h" className="mt-6">
             <h2 id="goals-h" className="px-1 text-sm font-semibold text-ink-soft">
@@ -97,32 +91,6 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
             </button>
           </section>
 
-          <section aria-labelledby="prio-h" className="mt-6">
-            <h2 id="prio-h" className="px-1 text-sm font-semibold text-ink-soft">
-              Where money left over goes
-            </h2>
-            <p className="px-1 text-xs text-ink-faint">What’s left after spending, bills and minimums.</p>
-            <ol className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
-              {s.priority.map((p, i) => (
-                <li key={p} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="w-5 text-sm font-semibold tabular-nums text-ink-faint">{i + 1}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium">{stepLabel[p].title}</span>
-                    <span className="block text-xs text-ink-soft">{stepLabel[p].hint}</span>
-                  </span>
-                  <span className="flex shrink-0 gap-1">
-                    <button type="button" aria-label={`Move ${stepLabel[p].title} up`} disabled={i === 0} onClick={() => move(i, -1)} className="rounded-lg px-2 py-1 text-ink-soft disabled:opacity-30">
-                      ↑
-                    </button>
-                    <button type="button" aria-label={`Move ${stepLabel[p].title} down`} disabled={i === s.priority.length - 1} onClick={() => move(i, 1)} className="rounded-lg px-2 py-1 text-ink-soft disabled:opacity-30">
-                      ↓
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </section>
-
         </>
       )}
 
@@ -136,6 +104,102 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
         />
       )}
     </Page>
+  )
+}
+
+/**
+ * Payment settings (DECISIONS.md 314): where each month's savings goes, a whole percent for each savings account. Your pay
+ * tasks send each account its part. With two accounts, changing one sets the other to the rest.
+ */
+function PaymentSettings({ s, onSave }: { s: SavingsSummary; onSave: (shares: { accountId: string; percent: number }[]) => void }) {
+  const [pct, setPct] = useState<Record<string, string>>(() => Object.fromEntries(s.accounts.map((a) => [a.id, String(a.sharePercent)])))
+  const value = (id: string) => {
+    const n = Number(pct[id])
+    return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null
+  }
+  const values = s.accounts.map((a) => value(a.id))
+  const total = values.reduce<number>((t, v) => t + (v ?? 0), 0)
+  const valid = values.every((v) => v !== null) && total === 100
+  const changed = s.accounts.some((a) => value(a.id) !== a.sharePercent)
+
+  function set(id: string, v: string) {
+    const next = { ...pct, [id]: v.replace(/[^0-9]/g, '').slice(0, 3) }
+    const n = Number(next[id])
+    if (s.accounts.length === 2 && next[id] !== '' && n <= 100) {
+      const other = s.accounts.find((a) => a.id !== id)!
+      next[other.id] = String(100 - n)
+    }
+    setPct(next)
+  }
+
+  const goalsIn = (id: string) => s.goals.filter((g) => g.accountId === id).map((g) => g.name)
+  return (
+    <section aria-labelledby="split-h" className="mt-4 rounded-3xl neu p-4">
+      <h2 id="split-h" className="text-sm font-semibold">
+        Payment settings
+      </h2>
+      <p className="mt-0.5 text-xs text-ink-soft">Where each month’s savings goes. Your pay tasks send each account its part.</p>
+      <ul className="mt-3 divide-y divide-ink/[0.07]">
+        {s.accounts.map((a) => {
+          const p = value(a.id) ?? 0
+          const goals = goalsIn(a.id)
+          return (
+            <li key={a.id} className="flex items-center gap-3 py-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">
+                  {a.name}
+                  {a.mask && <span className="text-ink-faint"> ••{a.mask}</span>}
+                </span>
+                <span className="block text-xs text-ink-soft">
+                  {s.plannedCents > 0 && `${formatCents(Math.round((s.plannedCents * p) / 100))} a month`}
+                  {s.plannedCents > 0 && goals.length > 0 && ' · '}
+                  {goals.length > 0 && `for ${goals.join(', ')}`}
+                </span>
+              </span>
+              {s.accounts.length === 1 ? (
+                <span className="shrink-0 text-sm font-semibold">All of it</span>
+              ) : (
+                <span className="flex w-20 shrink-0 items-center rounded-xl neu-inset px-2 py-1.5">
+                  <input
+                    aria-label={`${a.name}'s percent`}
+                    value={pct[a.id] ?? ''}
+                    onChange={(e) => set(a.id, e.target.value)}
+                    inputMode="numeric"
+                    className="w-full bg-transparent text-right text-base tabular-nums outline-none"
+                  />
+                  <span className="pl-0.5 text-sm text-ink-soft">%</span>
+                </span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {s.accounts.length === 1 && <p className="mt-1 text-xs text-ink-faint">Add another savings account to split it between them.</p>}
+      {s.accounts.length > 1 && !valid && (
+        <p role="alert" className="mt-1 text-xs text-danger">
+          These add up to {total}%. Make it 100%.
+        </p>
+      )}
+      {changed && (
+        <div className="mt-3 flex gap-3">
+          <button
+            type="button"
+            onClick={() => setPct(Object.fromEntries(s.accounts.map((a) => [a.id, String(a.sharePercent)])))}
+            className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-ink-soft"
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            disabled={!valid}
+            onClick={() => onSave(s.accounts.map((a) => ({ accountId: a.id, percent: value(a.id) ?? 0 })))}
+            className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-50"
+          >
+            Save
+          </button>
+        </div>
+      )}
+    </section>
   )
 }
 

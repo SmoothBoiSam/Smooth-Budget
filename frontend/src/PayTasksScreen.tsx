@@ -44,13 +44,10 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
   }, [fail, onOpenItems])
   useResume(load)
 
-  async function toggle(check: PayCheck, item: PlanItem, skip?: boolean) {
+  // Tasks check themselves off from your accounts (DECISIONS.md 313); the one choice left is skipping paying off a card.
+  async function skip(check: PayCheck, item: PlanItem, skipped: boolean) {
     try {
-      if (skip !== undefined) await paydayApi.setSkipped(check.payDate, item.key, skip)
-      else if (item.parts) {
-        // A merged task ticks (or unticks) each of its parts the accounts haven't already settled.
-        for (const p of item.parts) if (!p.auto && !p.skipped && p.done === item.done) await paydayApi.setDone(check.payDate, p.key, !item.done)
-      } else await paydayApi.setDone(check.payDate, item.key, !item.done)
+      await paydayApi.setSkipped(check.payDate, item.key, skipped)
       await load()
     } catch (e) {
       fail(e)
@@ -80,7 +77,7 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
         <ul className="mt-6 space-y-4">
           {open.map((c) => (
             <li key={c.payDate}>
-              <TaskCard c={c} onToggle={(item, skip) => void toggle(c, item, skip)} />
+              <TaskCard c={c} onSkip={(item, skipped) => void skip(c, item, skipped)} />
             </li>
           ))}
         </ul>
@@ -98,7 +95,7 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
             <ul className="mt-2 space-y-3">
               {done.map((c) => (
                 <li key={c.payDate}>
-                  <TaskCard c={c} onToggle={(item, skip) => void toggle(c, item, skip)} />
+                  <TaskCard c={c} onSkip={(item, skipped) => void skip(c, item, skipped)} />
                 </li>
               ))}
             </ul>
@@ -109,7 +106,7 @@ export default function PayTasksScreen({ onSignedOut, onOpenItems }: { onSignedO
   )
 }
 
-function TaskCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, skip?: boolean) => void }) {
+function TaskCard({ c, onSkip }: { c: PayCheck; onSkip: (item: PlanItem, skipped: boolean) => void }) {
   const [folded, setFolded] = useState(!c.isCurrent)
   const plan = c.plan!
   const doneCount = plan.items.filter((i) => i.done || i.skipped).length
@@ -157,12 +154,12 @@ function TaskCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, ski
           for it.
         </p>
       )}
-      {/* A later check's tasks open on its payday (DECISIONS.md 221): the money isn't there yet. */}
-      {!c.isCurrent && <p className="mt-2 text-xs text-ink-soft">You can check these off on payday, {weekday(c.payDate)}.</p>}
-      <ul className="mt-2 space-y-1">
+      {/* A later check's tasks start on its payday (DECISIONS.md 221): the money isn't there yet. */}
+      {!c.isCurrent && <p className="mt-2 text-xs text-ink-soft">These start on payday, {weekday(c.payDate)}.</p>}
+      <ul className="mt-2 divide-y divide-ink/[0.07]">
         {plan.items.map((item) => (
           <li key={item.key}>
-            <PlanRow item={item} locked={!c.isCurrent} onToggle={() => onToggle(item)} onSkip={(part, skip) => onToggle(part, skip)} />
+            <PlanRow item={item} live={c.isCurrent} onSkip={onSkip} />
           </li>
         ))}
       </ul>
@@ -170,127 +167,177 @@ function TaskCard({ c, onToggle }: { c: PayCheck; onToggle: (item: PlanItem, ski
   )
 }
 
-/** One part of the payday plan: check it off, or it's done on its own from your accounts. Locked until payday. */
-function PlanRow({ item, locked, onToggle, onSkip }: { item: PlanItem; locked: boolean; onToggle: () => void; onSkip: (part: PlanItem, skip: boolean) => void }) {
+/**
+ * One task (DECISIONS.md 313). It checks itself off from your accounts: what it asks, then how far along it is, and a bar.
+ * Keeping money for bills: how far over or short the account is. A move: what it's made of, and how much has gone so far.
+ */
+function PlanRow({ item, live, onSkip }: { item: PlanItem; live: boolean; onSkip: (item: PlanItem, skipped: boolean) => void }) {
   const [billsOpen, setBillsOpen] = useState(false)
-  const body = (
-    <span className="min-w-0 flex-1">
-      <span className={`block text-sm ${item.done || item.skipped ? 'text-ink-faint line-through' : ''}`}>{planText(item)}</span>
-      {item.status && <span className={`block text-xs ${item.done ? 'text-good' : item.skipped ? 'text-ink-soft' : 'text-gold-ink'}`}>{item.status}</span>}
-      {item.why && <span className="block text-xs text-ink-soft">{item.why}</span>}
-    </span>
-  )
+  const keeps = item.kind === 'keep' || item.kind === 'hold'
+  // Paying off what you charged can be skipped, on its own or as part of a card's payment.
+  const skippable = (item.parts ?? [item]).filter((p) => p.skippable && !p.done)
   return (
-    <div className="px-1 py-1.5">
-      <label className={`flex items-start gap-3 ${locked ? '' : 'cursor-pointer'}`}>
-        <input
-          type="checkbox"
-          checked={item.done}
-          disabled={locked || item.auto || item.skipped}
-          onChange={onToggle}
-          aria-label={item.auto ? `${planText(item)}: done, from your accounts` : planText(item)}
-          className="mt-1 size-4 shrink-0 accent-accent"
-        />
-        {body}
-      </label>
-      {item.skippable && !item.done && <SkipButton item={item} onSkip={(skip) => onSkip(item, skip)} />}
-      {item.parts && (
-        // What the one transfer is made of (DECISIONS.md 220), each part with its own reason.
-        <ul aria-label="Breakdown" className="ml-7 mt-2 divide-y divide-ink/[0.07] rounded-xl neu-inset px-3 text-xs">
-          {item.parts.map((p) => (
-            <li key={p.key} className="py-2">
-              <div className={`flex justify-between gap-3 font-medium ${p.done || p.skipped ? 'text-ink-faint line-through' : ''}`}>
-                <span>{partName(p)}</span>
-                <span className="shrink-0 tabular-nums">{formatCents(p.cents)}</span>
-              </div>
-              <p className="mt-0.5 text-ink-soft">{p.why}</p>
-              {p.skipped && p.status && <p className="mt-0.5 text-ink-soft">{p.status}</p>}
-              {p.skippable && !p.done && <SkipButton item={p} onSkip={(skip) => onSkip(p, skip)} />}
-            </li>
-          ))}
-        </ul>
-      )}
-      {item.bills && item.bills.length > 0 && (
-        <div className="ml-7">
-          <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-accent">
-            <Caret open={billsOpen} />
-            {billsOpen ? 'Hide the bills' : 'Show the bills'}
-          </button>
-          {billsOpen && (
-            <ul className="mt-1 divide-y divide-ink/[0.07] text-xs">
-              {item.bills.map((b) => (
-                <li key={b.name + b.due} className="flex justify-between gap-3 py-1">
-                  <span>
-                    {b.name} <span className="text-ink-faint">· {formatDay(b.due)}</span>
-                  </span>
-                  <span className="tabular-nums">{formatCents(b.cents)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+    <div className="flex gap-3 px-1 py-3">
+      <DoneMark item={item} />
+      <div className="min-w-0 flex-1">
+        {keeps ? <KeepLines item={item} live={live} /> : <SendLines item={item} live={live} />}
+        {skippable.map((p) => (
+          <SkipButton key={p.key} item={p} onSkip={(skipped) => onSkip(p, skipped)} />
+        ))}
+        {item.bills && item.bills.length > 0 && (
+          <div className="mt-1.5">
+            <button type="button" onClick={() => setBillsOpen(!billsOpen)} aria-expanded={billsOpen} className="flex items-center gap-1 text-xs font-medium text-accent">
+              <Caret open={billsOpen} />
+              {billsOpen ? 'Hide the bills' : 'Show the bills'}
+            </button>
+            {billsOpen && (
+              <ul className="mt-1 divide-y divide-ink/[0.07] text-xs">
+                {item.bills.map((b) => (
+                  <li key={b.name + b.due} className="flex justify-between gap-3 py-1">
+                    <span>
+                      {b.name} <span className="text-ink-faint">· {formatDay(b.due)}</span>
+                    </span>
+                    <span className="tabular-nums">{formatCents(b.cents)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
-/** "Skip this time" for paying off what you charged (DECISIONS.md 195). */
-function SkipButton({ item, onSkip }: { item: PlanItem; onSkip: (skip: boolean) => void }) {
-  return (
-    <div className="mt-1.5">
-      <button type="button" onClick={() => onSkip(!item.skipped)} className={item.skipped ? smallBtnOn : `${smallBtn} text-danger`}>
-        {item.skipped ? 'Pay it off after all' : 'Skip this time'}
-      </button>
-      {!item.skipped && <span className="ml-1 text-xs text-ink-faint">The charges stay on the card as debt.</span>}
-    </div>
-  )
+/** Done or not, as your accounts show it: nothing to tap. */
+function DoneMark({ item }: { item: PlanItem }) {
+  if (item.done)
+    return (
+      <span role="img" aria-label="Done" className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-good text-white">
+        <svg viewBox="0 0 16 16" className="size-3" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="m3.5 8.5 3 3 6-7" />
+        </svg>
+      </span>
+    )
+  return <span role="img" aria-label={item.skipped ? 'Skipped' : 'Not done yet'} className="mt-0.5 size-5 shrink-0 rounded-full border-2 border-ink/20" />
 }
 
-/** A part's name in a merged task's breakdown. */
-function partName(p: PlanItem) {
-  if (p.kind === 'cardspend') return p.label === 'Charged so far' ? 'What you’ve charged so far' : 'What you charged'
-  if (p.kind === 'sweep') return 'Last month’s leftover'
-  return p.label
+/** "Keep $1,650.00 in Checking for Bills", how far over or short the account is, and a bar. */
+function KeepLines({ item, live }: { item: PlanItem; live: boolean }) {
+  const what = item.kind === 'hold' ? `Keep ${formatCents(item.cents)} more in ${item.destination} for ${item.label}` : `Keep ${formatCents(item.cents)} in ${item.destination} for Bills`
+  const have = item.haveCents
+  const need = item.needCents
+  const known = live && have != null && need != null
+  const diff = known ? have - need : 0
+  return (
+    <>
+      <p className="text-sm font-medium">{what}</p>
+      {known ? (
+        <>
+          <p className={`mt-0.5 text-xs font-medium ${diff < 0 ? 'text-gold-ink' : 'text-good'}`}>
+            {diff < 0 ? `⚠️ ${formatCents(-diff)} short` : diff > 0 ? `✅ ${formatCents(diff)} over` : '✅ Exactly enough'}
+          </p>
+          <KeepBar have={have} need={need} />
+        </>
+      ) : (
+        live && item.status && <p className="mt-0.5 text-xs text-ink-soft">{item.status}</p>
+      )}
+    </>
+  )
 }
 
 /**
- * A move checking can't make in full yet (DECISIONS.md 308): only what it can spare now, and the rest once the money it
- * waits for lands. Null when nothing has to wait.
+ * Short: how much of what the bills need the account has (gold). Over: the account's whole balance, grey up to the line
+ * where the bills' part ends and green past it.
  */
-function waitingText(i: PlanItem, left: number, what: string) {
-  const wait = i.done ? 0 : (i.waitCents ?? 0)
-  if (wait <= 0 || !i.waitFor) return null
-  const now = Math.max(0, left - wait)
-  return now > 0
-    ? `Send ${formatCents(now)} to ${i.destination}${what} now, ${formatCents(wait)} more once ${i.waitFor}`
-    : `Send ${formatCents(wait)} to ${i.destination}${what} once ${i.waitFor}`
+function KeepBar({ have, need }: { have: number; need: number }) {
+  const label = `${formatCents(Math.max(0, have))} of ${formatCents(need)} needed`
+  if (have < need)
+    return (
+      <div role="img" aria-label={label} className="mt-2 h-2 overflow-hidden rounded-full neu-inset">
+        <div className="h-full rounded-full bg-gold" style={{ width: `${need > 0 ? Math.max(0, (have / need) * 100) : 0}%` }} />
+      </div>
+    )
+  const at = have > 0 ? (need / have) * 100 : 100
+  return (
+    <div role="img" aria-label={label} className="relative mt-2">
+      <div className="flex h-2 overflow-hidden rounded-full neu-inset">
+        <div className="h-full bg-ink/25" style={{ width: `${at}%` }} />
+        <div className="h-full flex-1 bg-good" />
+      </div>
+      {need > 0 && <span aria-hidden className="absolute -top-1 h-4 w-0.5 -translate-x-1/2 rounded-full bg-ink" style={{ left: `${at}%` }} />}
+    </div>
+  )
 }
 
-function planText(i: PlanItem) {
-  const amount = formatCents(i.cents)
-  switch (i.kind) {
-    case 'send': {
-      // Partly sent: say what's left (the done parts are crossed off in the breakdown).
-      const left = (i.parts ?? []).filter((p) => !p.done && !p.skipped).reduce((n, p) => n + p.cents, 0)
-      const waiting = waitingText(i, left, '')
-      if (waiting) return waiting
-      return !i.done && left < i.cents ? `Send ${formatCents(left)} more to ${i.destination}` : `Send ${amount} to ${i.destination}`
+/** "Send $917.26 to Visa", what it's waiting for if anything, what it's made of, and how much has gone so far. */
+function SendLines({ item, live }: { item: PlanItem; live: boolean }) {
+  const sent = item.done ? item.cents : Math.min(item.cents, item.sentCents ?? 0)
+  const left = item.cents - sent
+  const wait = item.done ? 0 : Math.min(left, item.waitCents ?? 0)
+  const of = wait > 0 && wait < left ? `${formatCents(wait)} of it ` : ''
+  const waiting =
+    wait <= 0 ? null : item.waitDate && item.waitName ? `⏳ ${of}on ${formatDay(item.waitDate)} when ${item.waitName} arrives` : `⏳ ${of}once checking has room`
+  const terms = breakdown(item)
+  const showTerms = terms.length > 1 || (terms.length === 1 && (item.kind === 'cardspend' || item.kind === 'sweep'))
+  return (
+    <>
+      {live && waiting && <p className="text-xs font-medium text-gold-ink">{waiting}</p>}
+      <p className={`text-sm font-medium ${item.skipped ? 'text-ink-faint line-through' : ''}`}>
+        Send {formatCents(item.cents)} to {item.destination}
+      </p>
+      {showTerms && <p className="mt-0.5 text-xs text-ink-soft">{terms.join(' + ')}</p>}
+      {item.skipped && <p className="mt-0.5 text-xs text-ink-soft">Skipped: these charges stay on the card.</p>}
+      {live && !item.skipped && item.cents > 0 && (
+        <div role="img" aria-label={`${formatCents(sent)} of ${formatCents(item.cents)} sent`} className="mt-2 h-2 overflow-hidden rounded-full neu-inset">
+          <div className={`h-full rounded-full ${item.done ? 'bg-good' : 'bg-accent'}`} style={{ width: `${(sent / item.cents) * 100}%` }} />
+        </div>
+      )}
+    </>
+  )
+}
+
+/**
+ * What a move is made of: "$160.00 minimum payment + $757.26 extra", "$50.00 savings + $20.00 last month's leftover".
+ * Parts of the same kind add up into one (two months' leftovers are one "leftover").
+ */
+function breakdown(i: PlanItem) {
+  const terms = new Map<string, number>()
+  const add = (what: string, cents: number) => cents > 0 && terms.set(what, (terms.get(what) ?? 0) + cents)
+  for (const p of (i.parts ?? [i]).filter((x) => !x.skipped))
+    switch (p.kind) {
+      case 'debt': {
+        const min = Math.min(p.minimumCents ?? 0, p.cents)
+        if (min <= 0) add('card payment', p.cents)
+        else {
+          add('minimum payment', min)
+          add('extra', p.cents - min)
+        }
+        break
+      }
+      case 'cardspend':
+        add(`for what you charged${p.label === 'Charged so far' ? ' so far' : ''}`, p.cents)
+        break
+      case 'sweep':
+        add('leftover from last month', p.cents)
+        break
+      case 'savings':
+        add('savings', p.cents)
+        break
+      default:
+        add(p.label.toLowerCase(), p.cents)
     }
-    case 'keep':
-      return `Keep ${amount} in ${i.destination} for ${i.label}`
-    case 'hold':
-      // On top of the bills above: the next check won't cover everything planned for it.
-      return `Keep ${amount} more in ${i.destination} for ${i.label}`
-    case 'cardspend':
-      // What you charged to a card: paid from the spending money left in checking, not from this check.
-      return (
-        waitingText(i, (i.nowCents ?? 0) + (i.waitCents ?? 0), ' for what you charged') ??
-        `Pay ${amount} to ${i.destination} for what you charged${i.label === 'Charged so far' ? ' so far' : ''}`
-      )
-    default:
-      return (
-        waitingText(i, (i.nowCents ?? 0) + (i.waitCents ?? 0), ` (${i.label.toLowerCase()})`) ??
-        `Send ${amount} to ${i.destination} (${i.label.toLowerCase()})`
-      )
-  }
+  return [...terms].map(([what, cents]) => `${formatCents(cents)} ${what}`)
+}
+
+/** "Skip this time" for paying off what you charged (DECISIONS.md 195). */
+function SkipButton({ item, onSkip }: { item: PlanItem; onSkip: (skipped: boolean) => void }) {
+  return (
+    <div className="mt-2">
+      <button type="button" onClick={() => onSkip(!item.skipped)} className={item.skipped ? smallBtnOn : `${smallBtn} text-danger`}>
+        {item.skipped ? 'Pay off what you charged after all' : 'Skip paying off what you charged'}
+      </button>
+      {!item.skipped && <p className="mt-1 text-xs text-ink-faint">The charges stay on the card as debt.</p>}
+    </div>
+  )
 }

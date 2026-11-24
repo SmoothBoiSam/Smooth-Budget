@@ -344,7 +344,7 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
     public async Task<(string? Debt, string? Savings)> SweepDestinationsAsync(Guid householdId, CancellationToken ct)
     {
         var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
-        static string Label(Account a) => a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}";
+        static string Label(Account a) => AccountNames.Label(a);
         var highestApr = await db.DebtAccounts.AsNoTracking().Include(d => d.Account)
             .Where(d => d.HouseholdId == householdId && !d.IsHidden && d.AprBps != null
                         && (d.Account == null ? d.BalanceCents > 0 : d.Account.IncludedInBudget && d.Account.CurrentBalanceCents < 0))

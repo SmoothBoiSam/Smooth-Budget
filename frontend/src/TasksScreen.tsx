@@ -88,7 +88,7 @@ export default function TasksScreen({
           {/* Schedules and stubs to upload (DECISIONS.md 238): they keep the paycheck forecast right. */}
           {uploads.length > 0 ? (
             <Row
-              icon={icons.payday}
+              icon={icons.upload}
               label={
                 <span className="font-semibold">
                   Upload {both ? 'schedule and pay stubs' : uploads[0].kind === 'schedule' ? (uploads.length === 1 ? 'your schedule' : 'schedules') : uploads.length === 1 ? 'a pay stub' : 'pay stubs'}
@@ -99,7 +99,7 @@ export default function TasksScreen({
               href="#/income"
             />
           ) : (
-            <Row icon={icons.payday} label={<span className="font-semibold">Upload</span>} hint="Nothing to upload right now" disabled />
+            <Row icon={icons.upload} label={<span className="font-semibold">Upload</span>} hint="Nothing to upload right now" disabled />
           )}
         </Rows>
       </Card>

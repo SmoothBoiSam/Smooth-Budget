@@ -30,7 +30,7 @@ public class IncomeHistory(AppDbContext db, TimeProvider clock)
             .OrderByDescending(t => t.Date).ThenByDescending(t => t.CreatedUtc)
             .Select(t => new
             {
-                t.Id, t.Date, t.AmountCents, t.Merchant, Account = t.Account.Name, t.Kind, t.IncomeType, t.CategorySource, t.NeedsReview,
+                t.Id, t.Date, t.AmountCents, t.Merchant, Account = t.Account.Nickname ?? t.Account.Name, t.Kind, t.IncomeType, t.CategorySource, t.NeedsReview,
                 Friend = t.Friend != null ? t.Friend.Name : null,
             })
             .ToListAsync(ct);

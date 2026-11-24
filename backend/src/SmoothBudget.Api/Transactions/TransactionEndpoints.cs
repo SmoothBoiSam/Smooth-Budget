@@ -259,7 +259,7 @@ public static partial class TransactionEndpoints
         {
             var householdId = ctx.User.HouseholdId();
             var debts = await db.DebtAccounts.AsNoTracking().Where(d => d.HouseholdId == householdId && !d.IsHidden)
-                .OrderByDescending(d => d.BalanceCents).Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null }).ToListAsync(ct);
+                .OrderByDescending(d => d.BalanceCents).Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null, Nick = d.Account != null ? d.Account.Nickname : null }).ToListAsync(ct);
             var goals = await db.SavingsGoals.AsNoTracking().Where(g => g.HouseholdId == householdId && g.AccountId != null)
                 .OrderBy(g => g.SortOrder).ThenBy(g => g.Name).Select(g => new { g.Id, g.Name, g.AccountId }).ToListAsync(ct);
             var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId)
@@ -271,10 +271,10 @@ public static partial class TransactionEndpoints
                 .OrderBy(x => x.ExpectedDate).Select(x => new ChoiceBonusDto(x.Id, x.Name, x.AmountCents, x.ExpectedDate, x.DepositTransactionId)).ToListAsync(ct);
             static string Kind(AccountType t) => t switch { AccountType.Savings => "savings", AccountType.CreditCard => "card", _ => "checking" };
             return new ChoicesDto(
-                accounts.Select(a => new ChoiceAccountDto(a.Id, TransferFiling.Label(a.Name, a.Mask), Kind(a.Type), debts.FirstOrDefault(d => d.AccountId == a.Id)?.Id,
+                accounts.Select(a => new ChoiceAccountDto(a.Id, TransferFiling.Label(a.Name, a.Mask, a.Nickname), Kind(a.Type), debts.FirstOrDefault(d => d.AccountId == a.Id)?.Id,
                     goals.Where(g => g.AccountId == a.Id).Select(g => new ChoiceDto(g.Id, g.Name)).ToList())).ToList(),
                 debts.Where(d => d.AccountId == null).Select(d => new ChoiceDto(d.Id, d.Name)).ToList(),
-                debts.Select(d => new ChoiceDto(d.Id, TransferFiling.Label(d.Name, d.Mask))).ToList(),
+                debts.Select(d => new ChoiceDto(d.Id, TransferFiling.Label(d.Name, d.Mask, d.Nick))).ToList(),
                 friends, bonuses);
         });
 
@@ -326,12 +326,12 @@ public static partial class TransactionEndpoints
                 var line = await interestService.LineAsync(householdId, ct);
                 (t.CategoryId, t.DebtAccountId, t.TransferAccountId) = (line.Id, debt.Id, null);
                 t.Kind = t.AmountCents > 0 ? TransactionKind.Fee : TransactionKind.Refund;
-                t.CategoryReason = Clip($"Interest on {TransferFiling.Label(debt.Name, debt.Account?.Mask)}: you said so.");
+                t.CategoryReason = Clip($"Interest on {TransferFiling.Label(debt.Name, debt.Account?.Mask, debt.Account?.Nickname)}: you said so.");
             }
             else
             {
                 (t.CategoryId, t.DebtAccountId, t.TransferAccountId, t.Kind) = (null, null, savings!.Id, TransactionKind.Interest);
-                t.CategoryReason = Clip($"Interest from {TransferFiling.Label(savings.Name, savings.Mask)}: you said so.");
+                t.CategoryReason = Clip($"Interest from {TransferFiling.Label(savings.Name, savings.Mask, savings.Nickname)}: you said so.");
             }
             await db.SaveChangesAsync(ct);
             await payday.MatchDepositsAsync(householdId, ct);
@@ -547,19 +547,19 @@ public static partial class TransactionEndpoints
             await savings.EnsureStarterAsync(householdId, ct); // the starter goal, as the Savings tab makes it
             var debts = await db.DebtAccounts.AsNoTracking()
                 .Where(d => d.HouseholdId == householdId && !d.IsHidden && (d.AccountId == null || d.Account!.IncludedInBudget))
-                .OrderByDescending(d => d.BalanceCents).Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null }).ToListAsync(ct);
+                .OrderByDescending(d => d.BalanceCents).Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null, Nick = d.Account != null ? d.Account.Nickname : null }).ToListAsync(ct);
             var accounts = await db.Accounts.AsNoTracking()
                 .Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget)
-                .OrderBy(a => a.Name).Select(a => new { a.Id, a.Name, a.Mask }).ToListAsync(ct);
+                .OrderBy(a => a.Name).Select(a => new { a.Id, a.Name, a.Mask, a.Nickname }).ToListAsync(ct);
             var goals = await db.SavingsGoals.AsNoTracking().Where(g => g.HouseholdId == householdId)
                 .OrderBy(g => g.SortOrder).ThenBy(g => g.Name).Select(g => new { g.Id, g.Name }).ToListAsync(ct);
-            static string Label(string name, string? mask) => mask is null ? name : $"{name} ••{mask}";
+            static string Label(string name, string? mask, string? nick) => TransferFiling.Label(name, mask, nick);
             // Savings is your goals: the account it lands in is the same either way (DECISIONS.md 228).
             return new TowardChoicesDto(
-                debts.Select(d => new TowardChoiceDto(d.Id, Label(d.Name, d.Mask), d.AccountId)).ToList(),
+                debts.Select(d => new TowardChoiceDto(d.Id, Label(d.Name, d.Mask, d.Nick), d.AccountId)).ToList(),
                 goals.Count > 0
                     ? goals.Select(g => new TowardChoiceDto(g.Id, g.Name)).ToList()
-                    : accounts.Select(a => new TowardChoiceDto(a.Id, Label(a.Name, a.Mask))).ToList());
+                    : accounts.Select(a => new TowardChoiceDto(a.Id, Label(a.Name, a.Mask, a.Nickname))).ToList());
         });
 
         // It went toward this debt or savings: filed under the debt or savings line for it (the one named after it, else
@@ -581,13 +581,13 @@ public static partial class TransactionEndpoints
             if (type == CategoryType.DebtPayment)
             {
                 var d = await db.DebtAccounts.AsNoTracking().Where(x => x.Id == req.Id && x.HouseholdId == householdId)
-                    .Select(x => new { x.Id, x.Name, Mask = x.Account != null ? x.Account.Mask : null }).SingleOrDefaultAsync(ct);
-                if (d is not null) (toward, names, debtId) = (d.Mask is null ? d.Name : $"{d.Name} ••{d.Mask}", [d.Name], d.Id);
+                    .Select(x => new { x.Id, x.Name, Mask = x.Account != null ? x.Account.Mask : null, Nick = x.Account != null ? x.Account.Nickname : null }).SingleOrDefaultAsync(ct);
+                if (d is not null) (toward, names, debtId) = (TransferFiling.Label(d.Name, d.Mask, d.Nick), [d.Name], d.Id);
             }
             else if (await db.Accounts.AsNoTracking().Where(a => a.Id == req.Id && a.HouseholdId == householdId && a.Type == AccountType.Savings)
-                         .Select(a => new { a.Name, a.Mask }).SingleOrDefaultAsync(ct) is { } a)
+                         .Select(a => new { a.Name, a.Mask, a.Nickname }).SingleOrDefaultAsync(ct) is { } a)
             {
-                toward = a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}";
+                toward = TransferFiling.Label(a.Name, a.Mask, a.Nickname);
                 names = [a.Name, .. await db.SavingsGoals.AsNoTracking().Where(g => g.AccountId == req.Id).OrderBy(g => g.SortOrder).Select(g => g.Name).ToListAsync(ct)];
             }
             else if (await db.SavingsGoals.AsNoTracking().Where(g => g.Id == req.Id && g.HouseholdId == householdId).Select(g => g.Name).SingleOrDefaultAsync(ct) is { } goal)
@@ -750,9 +750,9 @@ public static partial class TransactionEndpoints
             .Select(t => new TransactionDto(
                 t.Id, t.Date, t.AmountCents, t.Merchant, t.Description, t.Kind.ToString(),
                 t.CategoryId, t.Category != null ? t.Category.Name : null, t.CategorySource.ToString(), t.IsTransfer, t.Pending,
-                t.AccountId, t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason, t.CategoryUnsure, t.IsPartnerTransfer, t.SuggestedCategoryId,
+                t.AccountId, t.Account.Nickname ?? t.Account.Name, t.BankCategory, t.NeedsReview, t.CategoryReason, t.CategoryUnsure, t.IsPartnerTransfer, t.SuggestedCategoryId,
                 t.FriendId, t.Friend != null ? t.Friend.Name : null,
                 t.IncomeType == IncomeType.Paycheck ? "paycheck" : t.IncomeType == IncomeType.Other ? "other" : t.IncomeType == IncomeType.Friend ? "friend" : null,
-                t.TransferAccountId, t.TransferAccount != null ? (t.TransferAccount.Mask != null ? t.TransferAccount.Name + " ••" + t.TransferAccount.Mask : t.TransferAccount.Name) : null,
-                t.DebtAccountId, t.DebtAccount != null ? t.DebtAccount.Name : null));
+                t.TransferAccountId, t.TransferAccount != null ? (t.TransferAccount.Nickname != null ? t.TransferAccount.Nickname : t.TransferAccount.Mask != null ? t.TransferAccount.Name + " ••" + t.TransferAccount.Mask : t.TransferAccount.Name) : null,
+                t.DebtAccountId, t.DebtAccount != null ? (t.DebtAccount.Account != null && t.DebtAccount.Account.Nickname != null ? t.DebtAccount.Account.Nickname : t.DebtAccount.Name) : null));
 }

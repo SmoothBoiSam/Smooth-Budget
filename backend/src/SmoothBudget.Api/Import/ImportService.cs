@@ -57,7 +57,7 @@ public class ImportService(AppDbContext db, TransferDetectionService transfers, 
                 && a.PlaidItemId != null && a.Type == account.Type && a.Mask == account.Mask, ct);
             if (twin is not null)
                 throw new ImportException(
-                    $"\"{twin.Name}\" ••{twin.Mask} already syncs this account from your bank. Import the file into \"{twin.Name}\" instead so nothing is counted twice.");
+                    $"\"{AccountNames.Label(twin)}\" already syncs this account from your bank. Import the file into \"{AccountNames.Short(twin)}\" instead so nothing is counted twice.");
         }
 
         var min = parsed.Rows.Min(r => r.Date);

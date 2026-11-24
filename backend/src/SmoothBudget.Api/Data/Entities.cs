@@ -90,6 +90,18 @@ public class Account
     /// <summary>Last four digits only. Full account numbers are never stored.</summary>
     public string? Mask { get; set; }
 
+    /// <summary>
+    /// What you call it (More → Account nicknames, DECISIONS.md 310), shown everywhere instead of its name from the bank
+    /// and its last four digits. <see cref="Name"/> stays what the bank or the import called it.
+    /// </summary>
+    public string? Nickname { get; set; }
+
+    /// <summary>
+    /// A savings account's share of each month's savings, in percent (Savings → Payment settings, DECISIONS.md 314). Null
+    /// or 0 is none; with no account given one, it all goes to the first savings account.
+    /// </summary>
+    public int? SavingsPercent { get; set; }
+
     /// <summary>From the owner's point of view: money in a bank account is positive, a card balance owed is negative.</summary>
     public long CurrentBalanceCents { get; set; }
     /// <summary>

@@ -537,7 +537,7 @@ public class RecurringService(AppDbContext db, CategorizationService categorizat
             var dto = new RecurringItemDto(
                 s.Key, r?.Name ?? s.Name, s.Name, (r?.Kind ?? s.Kind).ToString(), s.Frequency.ToString(), status,
                 s.AmountCents, s.PreviousAmountCents, s.PriceChangedOn, s.MonthlyCents, s.LastDate, next, r?.DueDay, s.Occurrences,
-                account is null ? "" : account.Mask is null ? account.Name : $"{account.Name} ••{account.Mask}",
+                account is null ? "" : AccountNames.Label(account),
                 cat?.Id, cat?.Name, cat?.Type == CategoryType.FixedBill, r?.Confirmed ?? false, s.PossibleDuplicate, !multi.Contains(s.MerchantKey),
                 s.TransactionIds.Select(byId.GetValueOrDefault).OfType<RecurringTxn>().OrderByDescending(t => t.Date)
                     .Select(t => new BillChargeDto(t.Date, t.AmountCents)).ToList(),

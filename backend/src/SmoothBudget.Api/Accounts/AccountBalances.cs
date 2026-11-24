@@ -10,6 +10,11 @@ namespace SmoothBudget.Api.Accounts;
 /// <param name="BankSynced">Its balance comes from the bank; otherwise it's tracked from what you gave and its activity since.</param>
 public record AccountBalanceDto(Guid Id, string Name, string Type, string? Mask, bool BankSynced, bool IncludedInBudget, long BalanceCents, long PendingCents);
 
+/// <summary>One account on More → Account nicknames (DECISIONS.md 310): what the bank or the import calls it, and your nickname.</summary>
+public record AccountNicknameDto(Guid Id, string Name, string? Mask, string Type, string? Nickname);
+
+public record NicknameRequest(string? Nickname);
+
 /// <summary>Debit's Cash card (DECISIONS.md 257): the money in your checking accounts now, and at the end of each day before.</summary>
 public record CashDto(long TotalCents, IReadOnlyList<Core.Budgeting.BalancePoint> History);
 
@@ -48,7 +53,7 @@ public static class AccountBalances
             var balance = a.PlaidAccountId is not null
                 ? a.CurrentBalanceCents - pend
                 : a.CurrentBalanceCents - activity.Where(t => t.AccountId == a.Id && (a.BalanceAsOf is null || t.Date > a.BalanceAsOf)).Sum(t => t.AmountCents);
-            return new AccountBalanceDto(a.Id, a.Name, a.Type.ToString(), a.Mask, a.PlaidAccountId is not null, a.IncludedInBudget, balance, pend);
+            return new AccountBalanceDto(a.Id, AccountNames.Short(a), a.Type.ToString(), a.Nickname is null ? a.Mask : null, a.PlaidAccountId is not null, a.IncludedInBudget, balance, pend);
         }).ToList();
     }
 
@@ -86,6 +91,29 @@ public static class AccountBalances
             var householdId = ctx.User.HouseholdId();
             var (_, today, _) = await months.ContextAsync(householdId, ct);
             return await CashAsync(db, householdId, today, ct);
+        });
+
+        // More → Account nicknames (DECISIONS.md 310): every account, with what it's called now.
+        g.MapGet("/nicknames", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            return await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId)
+                .OrderBy(a => a.Type).ThenByDescending(a => a.IncludedInBudget).ThenBy(a => a.Name)
+                .Select(a => new AccountNicknameDto(a.Id, a.Name, a.Mask, a.Type.ToString(), a.Nickname)).ToListAsync(ct);
+        });
+
+        // Give an account a nickname, or clear it (empty) to go back to its name from the bank.
+        g.MapPut("/{id:guid}/nickname", async (Guid id, NicknameRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var a = await db.Accounts.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
+            if (a is null) return Results.NotFound();
+            var nick = req.Nickname?.Trim();
+            if (nick is { Length: > AccountNames.MaxNickname })
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["nickname"] = [$"Keep it to {AccountNames.MaxNickname} characters."] });
+            a.Nickname = string.IsNullOrEmpty(nick) ? null : nick;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new AccountNicknameDto(a.Id, a.Name, a.Mask, a.Type.ToString(), a.Nickname));
         });
 
         g.MapGet("/balances", async (string? type, HttpContext ctx, AppDbContext db, CancellationToken ct) =>

@@ -5,11 +5,13 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using SmoothBudget.Api.Accounts;
 using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Import;
 using SmoothBudget.Api.Payday;
+using SmoothBudget.Api.Savings;
 using SmoothBudget.Core.Pay;
 using SmoothBudget.Core.Tests;
 using SmoothBudget.Core.Transactions;
@@ -245,6 +247,53 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Savings_split_between_two_accounts_is_a_move_to_each_counted_on_its_own()
+    {
+        // DECISIONS.md 314. Feb 24, 2027: on the Feb 22 check, whose savings is half the month's $100: $50, split 60/40.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var h = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+        var checking = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = $"test-chk-{Guid.NewGuid():N}", CurrentBalanceCents = 2_000_00, CreatedUtc = DateTime.UtcNow };
+        var first = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Savings", Mask = "2222", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow.AddDays(-1) };
+        var second = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Vacation", Mask = "3333", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AddRange(checking, first, second,
+                new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 });
+            await db.SaveChangesAsync();
+        }
+
+        // Nothing set: all of it goes to the first savings account, as before.
+        var one = Assert.Single((await Payday(c)).Checks[0].Plan!.AllParts(), i => i.Kind == "savings");
+        Assert.Equal(("savings", 50_00L, "Test Savings ••2222"), (one.Key, one.Cents, one.Destination));
+
+        // Percents have to add up to 100, on your own savings accounts.
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/savings/split", new SplitRequest([new(first.Id, 60), new(second.Id, 30)]), Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/savings/split", new SplitRequest([new(checking.Id, 100)]), Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/savings/split", new SplitRequest([new(first.Id, 60), new(second.Id, 40)]), Json)).StatusCode);
+        var summary = (await c.GetFromJsonAsync<SavingsSummaryDto>("/api/savings", Json))!;
+        Assert.Equal([60, 40], summary.Accounts.OrderBy(a => a.Mask).Select(a => a.SharePercent));
+
+        // $30 reaches the first; the second is still to go.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Transactions.Add(new Transaction
+            {
+                Id = Guid.NewGuid(), HouseholdId = h, AccountId = checking.Id, Date = new DateOnly(2027, 2, 23), AmountCents = 30_00, Merchant = "ONLINE TRANSFER TO SAV",
+                Description = "TEST", Kind = TransactionKind.Transfer, IsTransfer = true, TransferAccountId = first.Id, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var moves = (await Payday(c)).Checks[0].Plan!.AllParts().Where(i => i.Kind == "savings").ToList();
+        Assert.Equal([($"savings:{first.Id}", 30_00L, "Test Savings ••2222", true, 30_00L), ($"savings:{second.Id}", 20_00L, "Test Vacation ••3333", false, 0L)],
+            moves.Select(m => (m.Key, m.Cents, m.Destination, m.Done, m.SentCents)));
+        Assert.Equal("Moved $30.00 to Test Savings since payday.", moves[0].Status);
+        Assert.EndsWith("40% of it goes here.", moves[1].Why);
+    }
+
+    [Fact]
     public async Task A_move_checking_cant_make_yet_says_what_it_can_send_now_and_what_waits()
     {
         // DECISIONS.md 308. Feb 24, 2027, on the Feb 22 check: savings is half the month's $100, and checking has $30.
@@ -270,6 +319,8 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         (await c.PostAsJsonAsync("/api/payday/expected", new { name = "Test bonus", amountCents = 1_000_00, expectedDate = "2027-02-26" }, Json)).EnsureSuccessStatusCode();
         s = await SavingsTask();
         Assert.Equal((100_00L, 70_00L, 30_00L, "Test bonus lands Feb 26"), (s.Cents, s.WaitCents, s.NowCents, s.WaitFor));
+        // The task's waiting line names the day and the money (DECISIONS.md 313); nothing has gone to savings yet.
+        Assert.Equal(((DateOnly?)new DateOnly(2027, 2, 26), "Test bonus", 0L), (s.WaitDate, s.WaitName, s.SentCents));
     }
 
     [Fact]
@@ -610,6 +661,8 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         var keep = await Keep();
         Assert.Equal((1_650_00L, 0L, true), (keep.Cents, keep.ShortCents, keep.Done));
         Assert.Equal("Test Checking has $1,000.00, enough for these with the $800.00 Test Friend sends still to come.", keep.Status);
+        // Its bar (DECISIONS.md 313): what checking has against the $850 that's yours.
+        Assert.Equal(((long?)1_000_00, (long?)850_00), (keep.HaveCents, keep.NeedCents));
         // Rent comes off in full and the $800 counts from when it's due (DECISIONS.md 277, 293): $1,000 - $1,650 + $800.
         var plan = (await Payday(c)).Checks[0].Plan!;
         var coming = Assert.Single(plan.Coming!);
@@ -626,6 +679,25 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
         keep = await Keep();
         Assert.Equal((350_00L, false), (keep.ShortCents, keep.Done));
         Assert.Equal("Test Checking has $500.00: $350.00 short for these with the $800.00 Test Friend sends still to come.", keep.Status);
+        Assert.Equal(((long?)500_00, (long?)850_00), (keep.HaveCents, keep.NeedCents));
+
+        // Ticking it off by hand doesn't make it done (DECISIONS.md 313): only the balance does.
+        (await c.PutAsJsonAsync($"/api/payday/plan/{(await Payday(c)).Checks[0].PayDate:yyyy-MM-dd}/{Uri.EscapeDataString(keep.Key)}", new ChecklistRequest(true), Json)).EnsureSuccessStatusCode();
+        Assert.False((await Keep()).Done);
+
+        // With a nickname (DECISIONS.md 310), the task calls the account by it, without its last four digits.
+        (await c.PutAsJsonAsync($"/api/accounts/{checkingId}/nickname", new { nickname = " Bills account " }, Json)).EnsureSuccessStatusCode();
+        keep = await Keep();
+        Assert.Equal(("Bills account", (long?)500_00), (keep.Destination, keep.HaveCents));
+        Assert.StartsWith("Bills account has $500.00:", keep.Status);
+        var named = await c.GetFromJsonAsync<List<AccountNicknameDto>>("/api/accounts/nicknames", Json);
+        Assert.Equal(("Test Checking", "1111", "Bills account"), (named![0].Name, named[0].Mask, named[0].Nickname));
+        var balance = Assert.Single((await c.GetFromJsonAsync<List<AccountBalanceDto>>("/api/accounts/balances?type=checking", Json))!);
+        Assert.Equal(("Bills account", (string?)null), (balance.Name, balance.Mask));
+        // Cleared, it's back to its name from the bank.
+        (await c.PutAsJsonAsync($"/api/accounts/{checkingId}/nickname", new { nickname = "" }, Json)).EnsureSuccessStatusCode();
+        Assert.Equal("Test Checking ••1111", (await Keep()).Destination);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync($"/api/accounts/{checkingId}/nickname", new { nickname = new string('x', 41) }, Json)).StatusCode);
         // Home's one warning shows (DECISIONS.md 275): nothing is safe to spend until payday, even with nothing left to spend.
         Assert.Equal(0L, (await c.GetFromJsonAsync<HomeSummaryDto>("/api/home/summary", Json))!.SafeToSpend!.SafeCents);
     }

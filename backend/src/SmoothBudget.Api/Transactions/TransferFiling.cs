@@ -37,8 +37,8 @@ public sealed class TransferFiling(AppDbContext db, Guid householdId)
         return accounts!.GetValueOrDefault(id);
     }
 
-    /// <summary>"Chase Checking ••1234", or what a loan or an outside account is called.</summary>
-    public static string Label(string name, string? mask) => mask is null ? name : $"{name} ••{mask}";
+    /// <summary>"Chase Checking ••1234", its nickname, or what a loan or an outside account is called.</summary>
+    public static string Label(string name, string? mask, string? nickname = null) => AccountNames.Label(name, mask, nickname);
 
     /// <summary>
     /// Makes <paramref name="t"/> a transfer with <paramref name="other"/> (null: an account not in the app, or the hand-tracked

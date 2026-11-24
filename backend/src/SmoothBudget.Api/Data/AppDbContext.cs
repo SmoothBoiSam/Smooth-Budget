@@ -52,6 +52,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.Mask).HasMaxLength(4);
+            e.Property(x => x.Nickname).HasMaxLength(AccountNames.MaxNickname);
             e.Property(x => x.PlaidAccountId).HasMaxLength(100);
             e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.PlaidItem).WithMany().HasForeignKey(x => x.PlaidItemId).OnDelete(DeleteBehavior.SetNull);

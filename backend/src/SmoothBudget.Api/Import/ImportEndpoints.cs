@@ -21,7 +21,7 @@ public static partial class ImportEndpoints
         accounts.MapGet("", async (HttpContext ctx, AppDbContext db, CancellationToken ct) =>
             await db.Accounts.Where(a => a.HouseholdId == ctx.User.HouseholdId())
                 .OrderBy(a => a.Type).ThenBy(a => a.Name)
-                .Select(a => new AccountDto(a.Id, a.Name, a.Type.ToString(), a.Mask, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null))
+                .Select(a => new AccountDto(a.Id, a.Nickname ?? a.Name, a.Type.ToString(), a.Nickname == null ? a.Mask : null, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null))
                 .ToListAsync(ct));
 
         accounts.MapPost("", async (CreateAccountRequest req, HttpContext ctx, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
@@ -76,7 +76,7 @@ public static partial class ImportEndpoints
         {
             var rows = await db.ImportBatches.Where(b => b.HouseholdId == ctx.User.HouseholdId())
                 .OrderByDescending(b => b.ImportedUtc).Take(50)
-                .Select(b => new { b.Id, b.AccountId, AccountName = b.Account.Name, b.FileName, b.Format, b.ImportedUtc, b.RowCount, b.ImportedCount, b.DuplicateCount, b.ErrorCount })
+                .Select(b => new { b.Id, b.AccountId, AccountName = b.Account.Nickname ?? b.Account.Name, b.FileName, b.Format, b.ImportedUtc, b.RowCount, b.ImportedCount, b.DuplicateCount, b.ErrorCount })
                 .ToListAsync(ct);
             return rows.Select(b => new ImportBatchDto(b.Id, b.AccountId, b.AccountName, b.FileName, ImportService.Describe(b.Format), b.ImportedUtc,
                 b.RowCount, b.ImportedCount, b.DuplicateCount, b.ErrorCount));

@@ -25,8 +25,9 @@ The app has five tabs.
 - **Tasks:**
   - **Review transactions:** file anything the app couldn't categorize. One card covers spending, bills, income and transfers, and can make a merchant rule.
   - **Pay period tasks:** for each paycheck, what to keep in checking for bills, what to pay the cards, and what to move to savings.
-    - Tasks check themselves off from your accounts, and moves to the same account merge into one.
-    - They never ask for more than checking can spare right now. The rest waits for a bonus still to come, or for room in checking.
+    - Tasks only check themselves off, from what your accounts show; there's nothing to tick by hand. Moves to the same account merge into one.
+    - Each task shows how far along it is: how far over or short an account is for its bills, or how much of a move has been sent, with a bar.
+    - They never ask for more than checking can spare right now. The rest waits for a bonus still to come, or for room in checking, and the task says when.
   - **Upload** a new schedule or pay stub.
 - **Money:**
   - **Paychecks:** import the monthly SkedPlus+ schedule (the detailed text export, or the older CSV) and past pay stub PDFs. Stubs are reviewed before saving, and the app learns your taxes and deductions from them.
@@ -35,11 +36,12 @@ The app has five tabs.
   - **Income:** past and expected income, including bonuses you expect.
   - **Debit:** checking and cash.
   - **Debt:** cards followed from their accounts and loans by hand, APR and minimums from the bank (Plaid Liabilities), and expected interest.
-    - The payoff engine uses Avalanche by default and compares Snowball. It shows a debt-free date, a payoff chart, and an "extra each month" what-if.
-  - **Savings:** balances, counting transfers still on their way in. Goals with projected dates, a rainy-day fund, a 12-month chart, and the order leftover money goes in.
+    - The payoff engine uses Avalanche by default and compares Snowball. It shows a debt-free date, a payoff chart, and an "extra each month" what-if, under **Payment settings**.
+  - **Savings:** balances, counting transfers still on their way in. Goals with projected dates, a rainy-day fund, and a 12-month chart. **Payment settings** splits each month's savings between your savings accounts by percent, and the pay period tasks send each its part.
   - **Transactions:** every transaction, with search.
 - **More:**
-  - Bank connections (Plaid), CSV import (Chase checking, Chase credit, Apple Card), and **Friends**.
+  - **Accounts:** bank connections (Plaid), CSV import (Chase checking, Chase credit, Apple Card), and **account nicknames**: a name of your own for each account, used everywhere in place of its bank name and last four digits.
+  - **Sharing:** **Friends**.
     - Friends are people you share costs with. They can have their own linked account or none, and each friend has a settle-up balance. A fixed contribution toward a bill, like part of the rent, is matched to their transfers.
   - Appearance (System, Light or Dark) and Notifications (Web Push: alerts when something happens, and reminders for paydays and due dates that wait for daytime).
 
@@ -184,12 +186,12 @@ Each area maps its own endpoints in its folder under `backend/src/SmoothBudget.A
 |---|---|---|
 | Auth | `Auth/AuthEndpoints.cs` | Sign up (with a friend's invite), sign in and out, `me`, the demo (`POST /api/auth/demo`) |
 | Home | `Program.cs`, `Home/` | `GET /api/home/summary`: Left to Spend, Safe to Spend, the month overview, notices, sync health |
-| Accounts | `Accounts/` | Accounts and balances, Debit |
+| Accounts | `Accounts/` | Accounts and balances, Debit, account nicknames |
 | Transactions | `Transactions/TransactionEndpoints.cs` | Search, Review, filing a transaction, merchant rules, income |
 | Budget | `Budget/BudgetEndpoints.cs` | Categories, the summary, the automatic budget and generator, month close and sweeps, settings |
 | Bills | `Bills/RecurringEndpoints.cs` | Bills and subscriptions found from your transactions |
 | Debt | `Debt/DebtEndpoints.cs` | Cards and loans, the payoff plan, interest |
-| Savings | `Savings/` | Savings accounts, goals, the leftover order |
+| Savings | `Savings/` | Savings accounts, goals, the split between accounts |
 | Payday | `Payday/PaydayEndpoints.cs` | Schedules, pay stubs, the withholding model, pay rules, expected income, the next checks and their tasks |
 | Friends | `Shared/SharedEndpoints.cs` | Friends, invites, shared costs and settle-up |
 | Import | `Import/ImportEndpoints.cs` | CSV import and undo |

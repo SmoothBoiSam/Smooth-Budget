@@ -214,6 +214,19 @@ export const icons = {
       ))}
     </>,
   ),
+  /** A page with a gold arrow going up: a schedule or pay stub to upload (DECISIONS.md 312). */
+  upload: art(
+    <>
+      {outlined(
+        <>
+          <path d="M8 4h11l6.5 6.5v18A1.5 1.5 0 0 1 24 30H8a1.5 1.5 0 0 1-1.5-1.5v-23A1.5 1.5 0 0 1 8 4z" fill={C.body} />
+        </>,
+      )}
+      <path d="M19 4v5a1.5 1.5 0 0 0 1.5 1.5h5z" fill={C.ring} />
+      <path d="M16 25.5v-10" stroke={C.coin} strokeWidth={2.6} strokeLinecap="round" />
+      <path d="m11.6 19.6 4.4-4.6 4.4 4.6" fill="none" stroke={C.coin} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
+    </>,
+  ),
   more: art(
     <>
       {outlined(

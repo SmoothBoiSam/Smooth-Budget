@@ -412,6 +412,19 @@ details[open] > :not(summary) {
   from { opacity: 0; transform: scale(0.4) translateY(6px); }
 }
 
+/* The "?" on More (DECISIONS.md 311): purple question marks drift up out of it and fade. */
+.mystery-mark {
+  color: #a26bf5;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  animation: mystery-float 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes mystery-float {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5) rotate(0deg); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--rise))) scale(1.1) rotate(var(--turn)); }
+}
+
 /*
   Draco (DECISIONS.md 297): coiled round a progress bar, tongue flicking; tapped, he pulls back and slithers off. When he
   meets Lola he slithers up along her card, and flees back the way he came when she hisses.

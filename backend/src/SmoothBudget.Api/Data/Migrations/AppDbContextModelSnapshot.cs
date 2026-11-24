@@ -205,12 +205,19 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("Nickname")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<string>("PlaidAccountId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
                     b.Property<Guid?>("PlaidItemId")
                         .HasColumnType("uuid");
+
+                    b.Property<int?>("SavingsPercent")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Source")
                         .HasColumnType("integer");

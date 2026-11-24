@@ -132,7 +132,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         // Each card's expected interest, for the Card interest line (DECISIONS.md 285).
         var cards = await db.DebtAccounts.AsNoTracking()
             .Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0 && d.AprBps > 0)
-            .Select(d => new { d.Id, Name = d.Account != null ? d.Account.Name : d.Name, d.BalanceCents, Apr = d.AprBps!.Value })
+            .Select(d => new { d.Id, Name = d.Account != null ? d.Account.Nickname ?? d.Account.Name : d.Name, d.BalanceCents, Apr = d.AprBps!.Value })
             .ToListAsync(ct);
         var expectedInterest = Core.Transactions.CardInterest.Expected(cards.Select(c => new Core.Debt.DebtInput(c.Id, c.Name, c.BalanceCents, c.Apr, 0)))
             .Select(x => new CardInterestDto(x.Card.Name, x.Cents, x.Card.AprBps)).ToList();
@@ -241,8 +241,10 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         IReadOnlyList<SweepItemDto> sweeps;
         if (ended.Closed)
         {
+            // Saved with the account's name then; shown as it's called now (DECISIONS.md 310).
+            var named = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId).ToListAsync(ct);
             sweeps = db.SweepTasks.Where(s => s.BudgetMonthId == ended.Row.Id).OrderBy(s => s.Kind).AsEnumerable()
-                .Select(s => new SweepItemDto(s.Id, s.Kind.ToString(), s.AmountCents, s.Destination, s.DoneUtc is not null)).ToList();
+                .Select(s => new SweepItemDto(s.Id, s.Kind.ToString(), s.AmountCents, AccountNames.Current(named, s.Destination), s.DoneUtc is not null)).ToList();
         }
         else
         {

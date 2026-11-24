@@ -1095,7 +1095,8 @@ export interface SavingsGoal {
 
 export interface SavingsSummary {
   totalSavedCents: number
-  accounts: { id: string; name: string; mask: string | null; balanceCents: number; balanceFromBank: boolean; paceCents: number }[]
+  /** sharePercent: its part of each month's savings (Payment settings); they add up to 100. */
+  accounts: { id: string; name: string; mask: string | null; balanceCents: number; balanceFromBank: boolean; paceCents: number; sharePercent: number }[]
   goals: SavingsGoal[]
   priority: PriorityStep[]
   history: { date: string; balanceCents: number }[]
@@ -1119,7 +1120,7 @@ export const savingsApi = {
   addGoal: (g: GoalFields) => request<{ id: string }>('POST', '/savings/goals', g),
   updateGoal: (id: string, g: GoalFields) => request<void>('PUT', `/savings/goals/${id}`, g),
   removeGoal: (id: string) => request<void>('DELETE', `/savings/goals/${id}`),
-  setPriority: (order: PriorityStep[]) => request<void>('PUT', '/savings/priority', { order }),
+  setSplit: (shares: { accountId: string; percent: number }[]) => request<void>('PUT', '/savings/split', { shares }),
   setBalance: (accountId: string, balanceCents: number) => request<void>('PUT', `/savings/accounts/${accountId}/balance`, { balanceCents }),
 }
 
@@ -1158,6 +1159,16 @@ export interface PlanItem {
   /** With waitCents: what checking can spare for it now (single tasks; a merged one works it out from its parts). */
   nowCents?: number
   waitFor?: string | null
+  /** With waitCents: the day the bonus it waits for is expected, and its name (none: it waits for room in checking). */
+  waitDate?: string | null
+  waitName?: string | null
+  /** For a move on the check you're on: how much has gone toward it since payday (DECISIONS.md 313). */
+  sentCents?: number
+  /** For "keep" and "hold" on the check you're on: what the account has now, and what it needs (null: the app can't tell). */
+  haveCents?: number | null
+  needCents?: number | null
+  /** For a card's payment: the part that's the card's minimum (the rest is extra). */
+  minimumCents?: number
 }
 export interface PayCheck {
   payDate: string
@@ -1406,8 +1417,20 @@ export interface Cash {
   history: { date: string; balanceCents: number }[]
 }
 
+/** More → Account nicknames (DECISIONS.md 310): what the bank or the import calls an account, and your name for it. */
+export interface AccountNickname {
+  id: string
+  name: string
+  mask: string | null
+  type: string
+  nickname: string | null
+}
+
 export const accountsApi = {
   cash: () => request<Cash>('GET', '/accounts/cash'),
+  nicknames: () => request<AccountNickname[]>('GET', '/accounts/nicknames'),
+  /** An empty nickname clears it. */
+  setNickname: (id: string, nickname: string) => request<AccountNickname>('PUT', `/accounts/${id}/nickname`, { nickname }),
   balances: (kind: AccountKind) => request<AccountBalance[]>('GET', `/accounts/balances?type=${kind}`),
   /** Newest first, up to 200: every account of that kind, or just one. */
   transactions: (kind: AccountKind, accountId?: string) =>

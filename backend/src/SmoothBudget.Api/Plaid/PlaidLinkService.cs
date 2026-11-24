@@ -90,7 +90,7 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
         }).ToList();
 
         return new LinkResultDto(item.Id, item.InstitutionName, proposals,
-            existing.Select(a => new AccountDto(a.Id, a.Name, a.Type.ToString(), a.Mask, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null)).ToList());
+            existing.Select(a => new AccountDto(a.Id, AccountNames.Short(a), a.Type.ToString(), a.Nickname is null ? a.Mask : null, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null)).ToList());
     }
 
     public async Task<SyncResultDto> ConfirmAccountsAsync(Guid householdId, Guid itemId, IReadOnlyList<AccountMappingRequest> mappings, CancellationToken ct)
@@ -174,9 +174,9 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
         var items = await db.PlaidItems.Where(i => i.HouseholdId == householdId).OrderBy(i => i.CreatedUtc).ToListAsync(ct);
         var ids = items.Select(i => i.Id).ToList();
         var accounts = await db.Accounts.Where(a => a.PlaidItemId != null && ids.Contains(a.PlaidItemId.Value))
-            .Select(a => new { a.PlaidItemId, a.Name, a.Mask }).ToListAsync(ct);
+            .Select(a => new { a.PlaidItemId, a.Name, a.Mask, a.Nickname }).ToListAsync(ct);
         return items.Select(i => new PlaidItemDto(i.Id, i.InstitutionName, i.Status.ToString(), i.StatusMessage, i.LastSyncedUtc,
-            accounts.Where(a => a.PlaidItemId == i.Id).Select(a => a.Mask is null ? a.Name : $"{a.Name} ••{a.Mask}").ToList(),
+            accounts.Where(a => a.PlaidItemId == i.Id).Select(a => AccountNames.Label(a.Name, a.Mask, a.Nickname)).ToList(),
             BankChecks.For(i, clock.GetUtcNow().UtcDateTime, options))).ToList();
     }
 

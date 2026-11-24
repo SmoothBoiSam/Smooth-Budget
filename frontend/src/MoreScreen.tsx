@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ask } from './confirm'
 import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me } from './api'
+import AccountNicknames from './AccountNicknames'
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
+import Mystery from './Mystery'
 import BankConnections from './BankConnections'
 import { formatCents, formatTime } from './format'
 import { Card, Chevron, ErrorNotice, headerActionCls, Page, PageHeader, Row, Rows, smallBtn } from './ui'
@@ -67,6 +69,14 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
       </Page>
     )
 
+  if (sub === 'nicknames')
+    return (
+      <Page>
+        <PageHeader title="Account nicknames" back={back} />
+        <AccountNicknames />
+      </Page>
+    )
+
   if (sub === 'notifications')
     return (
       <Page>
@@ -97,6 +107,13 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
         <Rows>
           <Row label="Bank connections" href="#/more/banks" />
           <Row label="Import a CSV" href="#/more/import" />
+          <Row label="Account nicknames" href="#/more/nicknames" />
+        </Rows>
+      </Card>
+
+      {/* Friends are people, not accounts: their own section (DECISIONS.md 311). */}
+      <Card title="Sharing">
+        <Rows>
           <Row label="Friends" href="#/friends" />
         </Rows>
       </Card>
@@ -115,6 +132,8 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
           </li>
         </Rows>
       </Card>
+
+      <Mystery />
     </Page>
   )
 }
@@ -197,7 +216,9 @@ const subFromHash = () => {
       ? 'banks'
       : h.startsWith('#/more/notifications')
         ? 'notifications'
-        : null
+        : h.startsWith('#/more/nicknames')
+          ? 'nicknames'
+          : null
 }
 
 function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Account[]; onImported: () => void; onAccountAdded: () => void }) {
