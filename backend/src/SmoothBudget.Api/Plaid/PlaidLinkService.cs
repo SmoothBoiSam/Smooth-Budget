@@ -85,12 +85,12 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
             var mask = Last4(pa.Mask);
             var already = existing.FirstOrDefault(a => a.PlaidAccountId == pa.AccountId);
             var suggestion = already ?? (type is null || mask is null ? null
-                : existing.FirstOrDefault(a => a.Type == type && a.Mask == mask && a.PlaidAccountId == null));
+                : existing.FirstOrDefault(a => a.Type == type && a.Mask == mask && a.PlaidAccountId == null && a.ClosedOn == null));
             return new PlaidAccountProposal(pa.AccountId, pa.OfficialName ?? pa.Name, mask, pa.Type, pa.Subtype, type?.ToString(), suggestion?.Id);
         }).ToList();
 
         return new LinkResultDto(item.Id, item.InstitutionName, proposals,
-            existing.Select(a => new AccountDto(a.Id, AccountNames.Short(a), a.Type.ToString(), a.Nickname is null ? a.Mask : null, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null)).ToList());
+            existing.Where(a => a.ClosedOn == null || proposals.Any(p => p.SuggestedAccountId == a.Id)).Select(a => new AccountDto(a.Id, AccountNames.Short(a), a.Type.ToString(), a.Nickname is null ? a.Mask : null, a.Source.ToString(), a.IncludedInBudget, a.PlaidItemId != null)).ToList());
     }
 
     public async Task<SyncResultDto> ConfirmAccountsAsync(Guid householdId, Guid itemId, IReadOnlyList<AccountMappingRequest> mappings, CancellationToken ct)
@@ -162,8 +162,13 @@ public class PlaidLinkService(AppDbContext db, PlaidClient plaid, SecretBox secr
         {
             log.LogWarning("Plaid item/remove failed for {ItemId}: {Code}; removing locally anyway", item.Id, ex.ErrorCode);
         }
+        // Its accounts keep the last balance the bank gave, as of today (DECISIONS.md 318): only later activity moves it, as for
+        // any account the bank doesn't sync (189). Left without a day, every transaction it ever had would be taken off again.
+        var zone = await db.Households.Where(h => h.Id == householdId).Select(h => h.TimeZoneId).SingleAsync(ct);
+        var today = Home.HomeSummaryService.TodayIn(zone, clock);
         await db.Accounts.Where(a => a.PlaidItemId == item.Id)
-            .ExecuteUpdateAsync(s => s.SetProperty(a => a.PlaidItemId, (Guid?)null).SetProperty(a => a.PlaidAccountId, (string?)null), ct);
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.PlaidItemId, (Guid?)null).SetProperty(a => a.PlaidAccountId, (string?)null)
+                .SetProperty(a => a.BalanceAsOf, today), ct);
         db.PlaidItems.Remove(item);
         await db.SaveChangesAsync(ct);
         return true;

@@ -401,7 +401,7 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && !c.IsHidden)
             .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
             .Select(c => new GeneratorCategory(c.Id, c.Name, c.Type, c.Priority, c.MonthlyLimitCents)).ToListAsync(ct);
-        var hasCardDebt = await db.Accounts.AnyAsync(a => a.HouseholdId == householdId && a.IncludedInBudget
+        var hasCardDebt = await db.Accounts.AnyAsync(a => a.HouseholdId == householdId && a.IncludedInBudget && a.ClosedOn == null
             && a.Type == AccountType.CreditCard && a.CurrentBalanceCents < 0, ct);
 
         var cardDebts = await debts.CardInputsAsync(householdId, ct); // milestone 5: minimums + extra to the highest APR

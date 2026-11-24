@@ -166,7 +166,11 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
     {
         var range = month.Range;
         var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget)
-            .Select(a => new { a.Id, a.Type, a.PlaidAccountId, a.CurrentBalanceCents }).ToListAsync(ct);
+            .Select(a => new { a.Id, a.Type, a.PlaidAccountId, a.CurrentBalanceCents, a.ClosedOn }).ToListAsync(ct);
+        // The balances are the open accounts' (DECISIONS.md 318); what landed in or was paid from checking this month counts
+        // from a checking account closed since, too.
+        var everChecking = accounts.Where(a => a.Type == AccountType.Checking).Select(a => a.Id).ToList();
+        accounts = accounts.Where(a => a.ClosedOn == null).ToList();
         var checking = accounts.Where(a => a.Type == AccountType.Checking).ToList();
         if (checking.Count == 0 || checking.Any(a => a.PlaidAccountId is null))
             return null;
@@ -176,7 +180,7 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
 
         // Paychecks that landed count against the month's expected income, including one that came a few days early.
         var deposits = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && checkingIds.Contains(t.AccountId) && t.Kind == TransactionKind.Income && t.AmountCents < 0
+            .Where(t => t.HouseholdId == householdId && everChecking.Contains(t.AccountId) && t.Kind == TransactionKind.Income && t.AmountCents < 0
                         && !t.IsTransfer && !t.IsPartnerTransfer && t.Date >= range.Start.AddDays(-5) && t.Date <= range.End)
             .Select(t => new { t.Id, t.Date, t.AmountCents }).ToListAsync(ct);
         var paidEarly = await db.PayPeriodForecasts.AsNoTracking()
@@ -231,7 +235,7 @@ public class CurrentMonthLoader(AppDbContext db, BudgetMonthService months, Time
             }
         }
         var paid = await db.Transactions.AsNoTracking()
-            .Where(t => t.HouseholdId == householdId && checkingIds.Contains(t.AccountId) && t.Kind == TransactionKind.CardPayment && t.AmountCents > 0
+            .Where(t => t.HouseholdId == householdId && everChecking.Contains(t.AccountId) && t.Kind == TransactionKind.CardPayment && t.AmountCents > 0
                         && t.Date >= range.Start && t.Date <= today)
             .SumAsync(t => t.AmountCents, ct);
         // Pending activity (DECISIONS.md 255): the bank's current balance leaves out charges and deposits still pending, so

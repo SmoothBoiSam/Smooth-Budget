@@ -56,7 +56,7 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
     public async Task<List<DebtAccount>> SyncCardsAsync(Guid householdId, CancellationToken ct)
     {
         var today = await TodayAsync(householdId, ct);
-        var cards = await db.Accounts.Where(a => a.HouseholdId == householdId && a.Type == AccountType.CreditCard && a.IncludedInBudget).ToListAsync(ct);
+        var cards = await db.Accounts.Where(a => a.HouseholdId == householdId && a.Type == AccountType.CreditCard && a.IncludedInBudget && a.ClosedOn == null).ToListAsync(ct);
         var debts = await db.DebtAccounts.Include(d => d.Account).Where(d => d.HouseholdId == householdId).ToListAsync(ct);
         foreach (var card in cards)
         {
@@ -79,7 +79,8 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
         }
         await FollowTypedBalancesAsync(householdId, debts, ct);
         await db.SaveChangesAsync(ct);
-        return debts.Where(d => d.AccountId is null || d.Account!.IncludedInBudget).ToList();
+        // A closed card leaves Debt (DECISIONS.md 318); its payments stay in the months they were made.
+        return debts.Where(d => d.AccountId is null || d.Account!.IncludedInBudget && d.Account.ClosedOn == null).ToList();
     }
 
     /// <summary>

@@ -39,22 +39,31 @@ public static class AccountBalances
 
     public static async Task<List<AccountBalanceDto>> ListAsync(AppDbContext db, Guid householdId, AccountType type, CancellationToken ct)
     {
-        var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.Type == type)
+        // A closed account isn't money you have now (DECISIONS.md 318).
+        var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.Type == type && a.ClosedOn == null)
             .OrderByDescending(a => a.IncludedInBudget).ThenBy(a => a.Name).ToListAsync(ct);
+        var balances = await BalancesAsync(db, accounts, ct);
+        return accounts.Select(a => new AccountBalanceDto(a.Id, AccountNames.Short(a), a.Type.ToString(), a.Nickname is null ? a.Mask : null,
+            a.PlaidAccountId is not null, a.IncludedInBudget, balances[a.Id].Balance, balances[a.Id].Pending)).ToList();
+    }
+
+    /// <summary>Each account's balance now and what's pending on it, as <see cref="ListAsync"/> shows them.</summary>
+    public static async Task<Dictionary<Guid, (long Balance, long Pending)>> BalancesAsync(AppDbContext db, IReadOnlyCollection<Account> accounts, CancellationToken ct)
+    {
         var ids = accounts.Select(a => a.Id).ToList();
         var pending = await db.Transactions.AsNoTracking().Where(t => ids.Contains(t.AccountId) && t.Pending)
             .GroupBy(t => t.AccountId).Select(g => new { g.Key, Cents = g.Sum(t => t.AmountCents) }).ToDictionaryAsync(x => x.Key, x => x.Cents, ct);
         var unlinked = accounts.Where(a => a.PlaidAccountId is null).Select(a => a.Id).ToList();
         var activity = await db.Transactions.AsNoTracking().Where(t => unlinked.Contains(t.AccountId))
             .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
-        return accounts.Select(a =>
+        return accounts.ToDictionary(a => a.Id, a =>
         {
             var pend = pending.GetValueOrDefault(a.Id);
             var balance = a.PlaidAccountId is not null
                 ? a.CurrentBalanceCents - pend
                 : a.CurrentBalanceCents - activity.Where(t => t.AccountId == a.Id && (a.BalanceAsOf is null || t.Date > a.BalanceAsOf)).Sum(t => t.AmountCents);
-            return new AccountBalanceDto(a.Id, AccountNames.Short(a), a.Type.ToString(), a.Nickname is null ? a.Mask : null, a.PlaidAccountId is not null, a.IncludedInBudget, balance, pend);
-        }).ToList();
+            return (balance, pend);
+        });
     }
 
     /// <summary>

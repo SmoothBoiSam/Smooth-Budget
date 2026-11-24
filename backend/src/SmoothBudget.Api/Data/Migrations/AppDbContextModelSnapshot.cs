@@ -181,6 +181,9 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.Property<DateOnly?>("BalanceAsOf")
                         .HasColumnType("date");
 
+                    b.Property<DateOnly?>("ClosedOn")
+                        .HasColumnType("date");
+
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -214,6 +217,9 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.Property<Guid?>("PlaidItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReplacedById")
                         .HasColumnType("uuid");
 
                     b.Property<int?>("SavingsPercent")

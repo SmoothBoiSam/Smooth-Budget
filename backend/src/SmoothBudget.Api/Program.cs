@@ -184,6 +184,7 @@ app.MapAuthEndpoints();
 app.MapDemoEndpoints();
 app.MapImportEndpoints();
 app.MapAccountBalanceEndpoints();
+app.MapAccountManagementEndpoints();
 app.MapTransactionEndpoints();
 app.MapBudgetEndpoints();
 app.MapPlaidEndpoints();

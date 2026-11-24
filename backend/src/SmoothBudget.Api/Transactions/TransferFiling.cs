@@ -8,8 +8,9 @@ namespace SmoothBudget.Api.Transactions;
 /// <summary>
 /// Files a transfer between your accounts (DECISIONS.md 259), whoever decided it: you in Review, transfer detection, or the
 /// app finding the other half of one you confirmed. Money out to a card or a loan you track is a payment toward that debt
-/// (its debt line); money out to savings is a savings transfer (the line for its goal); anything else, and every side
-/// money arrives on, counts nowhere. Loaded once per household and reused for many rows.
+/// (its debt line); money out to savings is a savings transfer (the line for its goal), unless it comes from another savings
+/// account (DECISIONS.md 317): that's savings already, moved; anything else, and every side money arrives on, counts
+/// nowhere. Loaded once per household and reused for many rows.
 /// </summary>
 public sealed class TransferFiling(AppDbContext db, Guid householdId)
 {
@@ -67,7 +68,8 @@ public sealed class TransferFiling(AppDbContext db, Guid householdId)
                 return name;
             }
             t.Kind = TransactionKind.Transfer;
-            if (to is { Type: AccountType.Savings })
+            // Savings moved from one savings account to another isn't saved again (DECISIONS.md 317).
+            if (to is { Type: AccountType.Savings } && own is not { Type: AccountType.Savings })
             {
                 var ofAccount = goals!.Where(g => g.AccountId == to.Id).ToList();
                 var goal = goalId is { } gid ? goals!.FirstOrDefault(g => g.Id == gid) : ofAccount.Count == 1 ? ofAccount[0] : null;

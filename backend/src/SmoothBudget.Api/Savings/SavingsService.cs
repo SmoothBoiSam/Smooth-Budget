@@ -46,13 +46,19 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
     {
         await EnsureStarterAsync(householdId, ct);
         var (household, today, calendar) = await months.ContextAsync(householdId, ct);
-        var accounts = await db.Accounts.AsNoTracking()
+        // A closed savings account (DECISIONS.md 318) is in the chart's past and in what moved into savings then, not in the
+        // balances or the split now.
+        var everyAccount = await db.Accounts.AsNoTracking()
             .Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget)
             .OrderBy(a => a.Name).ToListAsync(ct);
-        var ids = accounts.Select(a => a.Id).ToList();
+        var accounts = everyAccount.Where(a => a.ClosedOn == null).ToList();
+        var ids = everyAccount.Select(a => a.Id).ToList();
         var txns = await db.Transactions.AsNoTracking()
             .Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId))
-            .Select(t => new { t.AccountId, t.Date, t.AmountCents, t.Pending }).ToListAsync(ct);
+            .Select(t => new { t.AccountId, t.Date, t.AmountCents, t.Pending, t.TransferAccountId }).ToListAsync(ct);
+        // Money moved between two of your savings accounts isn't saving (DECISIONS.md 317): it stays out of the pace and of
+        // what moved into savings, though the balances (and the chart) still follow it.
+        bool BetweenSavings(Guid? other) => other is { } o && ids.Contains(o);
 
         // Pace: the last few complete budget months.
         var current = calendar.MonthContaining(today);
@@ -63,12 +69,12 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         // A bank-synced balance is the bank's, with what's still pending counted, as on the account's own row (DECISIONS.md
         // 256, 304): money on its way in is saved already. Otherwise: the balance last given (by a CSV or by you), moved by
         // every transaction after that day, or the sum of all of them if none was ever given (DECISIONS.md 189).
-        var balances = accounts.ToDictionary(a => a.Id, a => a.PlaidAccountId is not null
+        var balances = everyAccount.ToDictionary(a => a.Id, a => a.PlaidAccountId is not null
             ? a.CurrentBalanceCents - txns.Where(t => t.AccountId == a.Id && t.Pending).Sum(t => t.AmountCents)
             : a.CurrentBalanceCents - txns.Where(t => t.AccountId == a.Id && (a.BalanceAsOf is null || t.Date > a.BalanceAsOf)).Sum(t => t.AmountCents));
 
         var pace = accounts.ToDictionary(a => a.Id,
-            a => SavingsGoals.Pace(txns.Where(t => t.AccountId == a.Id).Select(t => (t.Date, t.AmountCents)).ToList(), paceMonths));
+            a => SavingsGoals.Pace(txns.Where(t => t.AccountId == a.Id && !BetweenSavings(t.TransferAccountId)).Select(t => (t.Date, t.AmountCents)).ToList(), paceMonths));
 
         var goals = await db.SavingsGoals.AsNoTracking().Include(g => g.Account)
             .Where(g => g.HouseholdId == householdId).OrderBy(g => g.SortOrder).ThenBy(g => g.CreatedUtc).ToListAsync(ct);
@@ -81,14 +87,16 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         for (var i = 0; i < 12; i++)
             ends.Insert(0, (m = calendar.MonthContaining(m.Start.AddDays(-1))).End);
         ends.Add(today);
-        var history = ends.Select(d => new BalancePoint(d, accounts.Sum(a =>
+        // A closed account counts up to the day it closed: after that its money isn't in your savings.
+        var history = ends.Select(d => new BalancePoint(d, everyAccount.Where(a => a.ClosedOn is not { } closed || d < closed).Sum(a =>
             SavingsGoals.History(balances[a.Id], txns.Where(t => t.AccountId == a.Id).Select(t => (t.Date, t.AmountCents)).ToList(), [d])[0].BalanceCents))).ToList();
 
         // Transfers into savings, tracked automatically: money into a savings account (or, with none linked, transfers out
         // of checking filed as savings).
         var savingsCats = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer).Select(c => c.Id).ToListAsync(ct);
         var moves = ids.Count > 0
-            ? await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId) && t.AmountCents < 0)
+            ? await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && ids.Contains(t.AccountId) && t.AmountCents < 0
+                                                              && (t.TransferAccountId == null || !ids.Contains(t.TransferAccountId.Value)))
                 .OrderByDescending(t => t.Date).Take(60)
                 .Select(t => new SavingsTransferDto(t.Date, -t.AmountCents, t.Account.Nickname ?? t.Account.Name, t.IsTransfer ? "Moved to savings" : t.Description)).ToListAsync(ct)
             : await db.Transactions.AsNoTracking().Where(t => t.HouseholdId == householdId && t.AmountCents > 0 && t.CategoryId != null && savingsCats.Contains(t.CategoryId.Value))
@@ -132,7 +140,7 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
     {
         if (await db.SavingsGoals.AnyAsync(g => g.HouseholdId == householdId, ct))
             return;
-        var account = await db.Accounts.Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget)
+        var account = await db.Accounts.Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget && a.ClosedOn == null)
             .OrderBy(a => a.CreatedUtc).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
         db.SavingsGoals.Add(new SavingsGoal
         {
@@ -246,7 +254,7 @@ public static class SavingsEndpoints
         g.MapPut("/split", async (SplitRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
         {
             var householdId = ctx.User.HouseholdId();
-            var accounts = await db.Accounts.Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget).ToListAsync(ct);
+            var accounts = await db.Accounts.Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget && a.ClosedOn == null).ToListAsync(ct);
             var shares = req.Shares ?? [];
             if (shares.Any(s => s.Percent is < 0 or > 100) || shares.Sum(s => s.Percent) != 100 || shares.Select(s => s.AccountId).Distinct().Count() != shares.Count)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["shares"] = ["Give each account a percent, adding up to 100%."] });

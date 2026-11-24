@@ -97,6 +97,10 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
     /// <summary>A checklist row with this before a plan item's key means you skipped that item for that check.</summary>
     public const string SkipPrefix = "skip:";
 
+    /// <summary>A card payment or a transfer: what went to the cards and to savings over some days.</summary>
+    private sealed record Move(DateOnly Date, long AmountCents, TransactionKind Kind, AccountType Type, Guid? CategoryId, Guid AccountId,
+        bool IsTransfer, Guid? TransferAccountId, Guid? TransferGroupId);
+
     /// <summary>The payday before a check's: where its "Pay off what you charged" window starts.</summary>
     public static DateOnly PaydayBefore(DateOnly pay, PayRules rules) =>
         PayCalendar.From(pay.AddDays(-45), rules).TakeWhile(p => p.PayDate < pay).Select(p => p.PayDate).LastOrDefault(pay.AddDays(-14));
@@ -471,7 +475,10 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         bool Paid(DateOnly pay) => pay <= c.Today || landedOn.ContainsKey(pay);
         DateOnly Start(DateOnly pay) => PeriodStart(pay, landedOn);
         DateOnly Since(DateOnly pay) => Start(pay) < pay ? Start(pay) : pay;
-        var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
+        // Closed accounts (DECISIONS.md 318) aren't anywhere to keep or send money, but what moved through them still tells a
+        // transfer to savings or a card's bill apart, and a sweep or bill naming one goes to what replaced it.
+        var everyAccount = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
+        var accounts = everyAccount.Where(a => a.ClosedOn == null).ToList();
         // The bank's balance leaves out pending charges and deposits; every check of a balance here counts them
         // (DECISIONS.md 276), so the payday tasks and Home's warning see the same money.
         var accountIds = accounts.Select(a => a.Id).ToList();
@@ -492,7 +499,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         // Where the savings goes (Savings → Payment settings, DECISIONS.md 314): all to the first savings account, or split.
         var savingsShares = Savings.SavingsSplit.Shares(accounts);
         var savingsAccount = savingsShares.Select(s => Label(s.Account)).FirstOrDefault() ?? "savings";
-        var cards = accounts.Where(a => a.Type == AccountType.CreditCard).SelectMany(a => new[] { a.Name, Label(a), AccountNames.Imported(a) }).ToHashSet();
+        var cards = everyAccount.Where(a => a.Type == AccountType.CreditCard).SelectMany(a => new[] { a.Name, Label(a), AccountNames.Imported(a) }).ToHashSet();
         var categories = await db.Categories.AsNoTracking().Where(x => x.HouseholdId == householdId && !x.IsHidden).ToListAsync(ct);
         var debts = await db.DebtAccounts.AsNoTracking().Include(d => d.Account).Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0).ToListAsync(ct);
         // The card payment is the debt-payment line plus the Card interest bill: the interest is charged on the cards and the
@@ -505,6 +512,40 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                           + (debts.Count > 0 ? categories.Where(x => CardInterest.IsInterestCategory(x.Name, x.Type)).Sum(x => Limit(x, monthStart)) : 0);
         long SavingsMonthly(DateOnly monthStart) => categories.Where(x => x.Type == CategoryType.SavingsTransfer).Sum(x => Limit(x, monthStart));
         var savingsCategories = categories.Where(x => x.Type == CategoryType.SavingsTransfer).Select(x => x.Id).ToHashSet();
+        var savingsIds = everyAccount.Where(a => a.Type == AccountType.Savings).Select(a => a.Id).ToHashSet();
+        Task<List<Move>> MovesAsync(DateOnly from, DateOnly before) => db.Transactions.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId && t.Date >= from && t.Date < before && (t.Kind == TransactionKind.CardPayment || t.IsTransfer))
+            .Select(t => new Move(t.Date, t.AmountCents, t.Kind, t.Account.Type, t.CategoryId, t.AccountId, t.IsTransfer, t.TransferAccountId, t.TransferGroupId))
+            .ToListAsync(ct);
+        // Money into savings, in all and by account where the account is known.
+        (long Total, Dictionary<Guid, long> By) IntoSavings(List<Move> moves)
+        {
+            var by = new Dictionary<Guid, long>();
+            if (savingsIds.Count == 0)
+                return (moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.CategoryId is { } id && savingsCategories.Contains(id)).Sum(m => m.AmountCents), by);
+            // Money that arrived on a savings account, and money that left checking for one (DECISIONS.md 302): you said
+            // which account in Review, or the app matched it. A savings account that isn't bank-synced shows its side only
+            // once you import its file, so the checking side counts until then; once it's there, the transfer counts once.
+            // Not money moved from another savings account (DECISIONS.md 317): that was saved already.
+            var arrived = moves.Where(m => savingsIds.Contains(m.AccountId) && m.AmountCents < 0 && !(m.TransferAccountId is { } from && savingsIds.Contains(from))).ToList();
+            var seen = arrived.Select(m => (m.AccountId, Cents: -m.AmountCents, m.Date, m.TransferGroupId)).ToList();
+            foreach (var m in arrived) by[m.AccountId] = by.GetValueOrDefault(m.AccountId) - m.AmountCents;
+            long sent = 0;
+            foreach (var m in moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.IsTransfer
+                                               && (m.TransferAccountId is { } to ? savingsIds.Contains(to) : m.CategoryId is { } id && savingsCategories.Contains(id))))
+            {
+                var twin = seen.FindIndex(s => (m.TransferGroupId is { } g && s.TransferGroupId == g)
+                                               || (s.Cents == m.AmountCents && (m.TransferAccountId is null || s.AccountId == m.TransferAccountId)
+                                                   && Math.Abs(s.Date.DayNumber - m.Date.DayNumber) <= Transactions.TransferFiling.OtherHalfDays));
+                if (twin >= 0) seen.RemoveAt(twin);
+                else
+                {
+                    sent += m.AmountCents;
+                    if (m.TransferAccountId is { } into && savingsIds.Contains(into)) by[into] = by.GetValueOrDefault(into) + m.AmountCents;
+                }
+            }
+            return (arrived.Sum(m => -m.AmountCents) + sent, by);
+        }
         var snowball = c.Household.DebtStrategy == DebtStrategy.Snowball;
         var targetDebt = (snowball
             ? debts.OrderBy(d => d.BalanceCents)
@@ -549,6 +590,49 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             : await ExpectedIncomes.StillComingAsync(db, householdId, checks[0].Period.PayDate, checks[^1].Period.End.AddDays(1), c.Today, ct);
         List<ExpectedIncome> BonusesFor(DateOnly pay, DateOnly next) => bonuses.Where(x => x.ExpectedDate >= pay && x.ExpectedDate < next).ToList();
 
+        // What the checks already gone by this budget month sent toward its card payment and savings (DECISIONS.md 316). The
+        // checks still to come split the rest of the month's lines, not an even share each: one that sent less (a bonus was
+        // going to pay for the extra, and only landed later) leaves more for the next, and one that sent more leaves less.
+        // To the cards, that's what was paid less what you'd charged (that check paid it off from its spending money, unless
+        // you skipped it) and last month's leftover marked sent; to savings, what went in less last month's leftover. Only
+        // when every check gone by this month has landed: otherwise the app can't tell what came from them.
+        var gone = new List<DateOnly>();
+        var lineBefore = new Dictionary<Guid, long>(); // by card account
+        long savedBefore = 0;
+        DateOnly? goneMonth = null;
+        if (checks.Count > 0)
+        {
+            var first = checks[0].Period.PayDate;
+            var m0 = c.Calendar.MonthContaining(first);
+            var earlier = PayCalendar.From(m0.Start, c.Rules).TakeWhile(p => p.PayDate <= m0.End).Select(p => p.PayDate).Where(p => p < first).ToList();
+            if (earlier.Count > 0 && earlier.All(landed.ContainsKey))
+            {
+                (gone, goneMonth) = (earlier, m0.Start);
+                var (from, to) = (Since(gone[0]), (Paid(first) ? Since(first) : c.Today.AddDays(1)).AddDays(-1));
+                var marked = sweeps.Where(s => s.DoneUtc is { } d && DateOnly.FromDateTime(d) >= from && DateOnly.FromDateTime(d) <= to).ToList();
+                var paid = (await Debt.CardPayments.LoadAsync(db, householdId, from, to, ct)).GroupBy(p => p.CardAccountId).ToDictionary(g => g.Key, g => g.Sum(p => p.Cents));
+                foreach (var card in cardAccounts)
+                {
+                    var payOff = gone.Where(g => !done.Any(d => d.PayDate == g && d.Key == SkipPrefix + $"cardspend:{card.Id}"))
+                        .Sum(g => Math.Max(0, charged.Where(t => t.AccountId == card.Id && t.Date >= Start(PaydayBefore(g)) && t.Date <= Start(g).AddDays(-1)).Sum(t => t.AmountCents)));
+                    var leftover = marked.Where(s => s.Kind != SweepKind.Savings && AccountNames.Current(everyAccount, s.Destination) == Label(card)).Sum(s => s.AmountCents);
+                    lineBefore[card.Id] = Math.Max(0, paid.GetValueOrDefault(card.Id) - payOff - leftover);
+                }
+                savedBefore = Math.Max(0, IntoSavings(await MovesAsync(from, to.AddDays(1))).Total - marked.Where(s => s.Kind == SweepKind.Savings).Sum(s => s.AmountCents));
+            }
+        }
+        // How many of a month's checks have gone by, for a check in it.
+        int Settled(DateOnly monthStart, IReadOnlyList<DateOnly> inMonth, DateOnly pay) => monthStart == goneMonth && inMonth.Contains(pay) ? gone.Count : 0;
+        // A card's minimum for a check: its share of what's left of the month's minimum after the checks gone by.
+        long MinimumShare(DebtAccount d, DateOnly pay)
+        {
+            var month = c.Calendar.MonthContaining(pay);
+            var inMonth = PayCalendar.From(month.Start, c.Rules).TakeWhile(p => p.PayDate <= month.End).Select(p => p.PayDate).ToList();
+            var settled = Settled(month.Start, inMonth, pay);
+            var sent = settled > 0 && d.AccountId is { } card ? lineBefore.GetValueOrDefault(card) : 0;
+            return PaydayPlan.Share(Math.Max(0, Math.Min(d.MinimumPaymentCents ?? 0, d.BalanceCents) - sent), inMonth.Count - settled, Math.Max(0, inMonth.IndexOf(pay)) - settled);
+        }
+
         // One check's plan before anything is carried between checks. It reads nothing from the database, so the loop
         // below can ask for the checks either side of the one it's on (DECISIONS.md 253).
         (PaydayPlanResult Plan, long NetCents, bool Current, DateOnly Pay, DateOnly Next, List<ExpectedIncome> Bonuses, long BonusFunded, List<ComingDto> FriendsComing)? Draft(int i)
@@ -566,6 +650,11 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             var index = Math.Max(0, inMonth.IndexOf(pay));
             var share = $"{(inMonth.Count == 2 ? "Half" : $"1/{inMonth.Count}")} of the month's";
             var (debtMonthly, savingsMonthly) = (DebtMonthly(month.Start), SavingsMonthly(month.Start));
+            // The month's checks gone by (DECISIONS.md 316): what they sent comes off, and this check and the ones after it
+            // split the rest.
+            var settled = Settled(month.Start, inMonth, pay);
+            var (debtBefore, saveBefore) = settled > 0 ? (cardAccounts.Sum(a => lineBefore.GetValueOrDefault(a.Id)), savedBefore) : (0L, 0L);
+            var left = inMonth.Count - settled;
 
             // The budget gives a month's leftover to extra card payments and savings, and a bonus is part of that month's
             // money (DECISIONS.md 263). The part of those a bonus pays for comes from the check the bonus lands with; the
@@ -585,22 +674,29 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                 long Part(int k) => byBonus * bonusEach[k] / bonusMonth;
                 return index == lastWithBonus ? byBonus - Enumerable.Range(0, bonusEach.Count).Where(k => k != index).Sum(Part) : Part(index);
             }
-            long Split(long line, long extra) => BySplit()
-                ? PaydayPlan.Share(line - extra * funded / flex, inMonth.Count, index) + BonusPart(extra)
-                : PaydayPlan.Share(line, inMonth.Count, index);
+            long Split(long line, long extra, long before) => BySplit()
+                ? PaydayPlan.Share(Math.Max(0, line - extra * funded / flex - before), left, index - settled) + BonusPart(extra)
+                : PaydayPlan.Share(Math.Max(0, line - before), left, index - settled);
+            // What the checks gone by sent toward a line, for its note.
+            string Gone(long before, string toward = "it") => settled == 0 ? ""
+                : $" Your {string.Join(" and ", gone.Select(g => $"{g:MMM d}"))} check{(settled > 1 ? "s" : "")} sent {(before > 0 ? PayEngine.Dollars(before) : "nothing")} toward {toward}.";
             // What the card payment and savings lines say (DECISIONS.md 305): how much is this check's share, and how much a
             // bonus pays for, so the note matches the amount.
-            string Why(string what, long line, long extra)
+            string Why(string what, long line, long extra, long before)
             {
                 var whole = PayEngine.Dollars(line);
-                if (!BySplit()) return inMonth.Count > 1 ? $"{share} {whole} {what} in your budget." : $"Your budget's {whole} {what}.";
+                if (!BySplit())
+                    return settled > 0
+                        ? $"{(left > 1 ? $"{(left == 2 ? "Half" : $"1/{left}")} of what's left" : "What's left")} of the month's {whole} {what}.{Gone(before)}"
+                        : inMonth.Count > 1 ? $"{share} {whole} {what} in your budget." : $"Your budget's {whole} {what}.";
                 var bonus = BonusPart(extra);
-                var own = Split(line, extra) - bonus;
+                var own = Split(line, extra, before) - bonus;
                 var name = coming.Count == 1 ? coming[0].Name : "your bonuses";
                 return bonus <= 0 ? $"This check's share of the month's {whole} {what}. The part your bonus pays for comes from the check it lands with."
                     : own <= 0 ? $"The month's {whole} {what}, all from this check: {name} pays for it."
                     : $"{PayEngine.Dollars(own)} is this check's share of the month's {whole} {what}, plus {PayEngine.Dollars(bonus)} that {name} pays for.";
             }
+            string WhyWithGone(string text, long before) => text + Gone(before, "the month's card payments");
 
             // Bills still to come before the next payday (for the current check: from today, since paid ones are done).
             // A bill your partner's fixed contribution goes toward (rent) still needs all of it in the account when it's
@@ -625,27 +721,26 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
                     covered > 0 ? $"{b.Name} counts in full: {who} {PayEngine.Dollars(covered)} of it to this account, so {PayEngine.Dollars(b.AmountCents - covered)} is yours from this check." : null,
                     covered, Math.Min(covered, toward.Sum(a => Math.Min(a.AmountCents, Arrived(a.Id, b.NextExpected)))));
             }).ToList();
-            var debtShare = Split(debtMonthly, debtExtra);
+            var debtShare = Split(debtMonthly, debtExtra, debtBefore);
             var transfers = new List<PlanTransfer>();
             if (withMinimums.Count > 1)
             {
                 var split = PaydayPlan.SplitCardPayment(debtShare,
-                    withMinimums.Select(d => new CardMinimum($"debt:{d.Id}", DebtLabel(d),
-                        PaydayPlan.Share(Math.Min(d.MinimumPaymentCents ?? 0, d.BalanceCents), inMonth.Count, index))).ToList(),
+                    withMinimums.Select(d => new CardMinimum($"debt:{d.Id}", DebtLabel(d), MinimumShare(d, pay))).ToList(),
                     $"debt:{targetDebt!.Id}");
                 var why = snowball ? "smallest balance" : "highest interest";
                 var checkShare = inMonth.Count > 1 ? " (this check's share)" : "";
                 transfers.AddRange(split.Select(s => s.Card.Key == $"debt:{targetDebt.Id}"
                     ? new PlanTransfer(s.Card.Key, s.ExtraCents > 0 ? "Minimum + extra" : "Minimum payment", s.Cents, s.Card.Destination,
-                        s.ExtraCents > 0
+                        WhyWithGone(s.ExtraCents > 0
                             ? $"The {PayEngine.Dollars(s.Card.MinimumCents)} minimum{checkShare}, plus {PayEngine.Dollars(s.ExtraCents)} extra ({why})."
-                            : $"The minimum{checkShare}. Extra goes here first ({why}).")
+                            : $"The minimum{checkShare}. Extra goes here first ({why}).", debtBefore))
                     : new PlanTransfer(s.Card.Key, "Minimum payment", s.Cents, s.Card.Destination,
                         $"Just the minimum{checkShare}. Extra goes to {target} first.")));
             }
             else
                 transfers.Add(new("debt", "Card payment", debtShare, target,
-                    Why("card payment", debtMonthly, debtExtra)));
+                    Why("card payment", debtMonthly, debtExtra, debtBefore)));
 
             // The check you're on pays off what you charged between the last payday and this one. The next check shows
             // what you've charged since this payday so far. It comes from the spending money still in checking (you spent
@@ -669,9 +764,9 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             }
             if (i == 0)
                 transfers.AddRange(sweeps.Where(s => s.DoneUtc == null || (current && s.DoneUtc >= Since(pay).ToDateTime(TimeOnly.MinValue)))
-                    .Select(s => new PlanTransfer($"sweep:{s.Id}", "Last month's leftover", s.AmountCents, AccountNames.Current(accounts, s.Destination), "Left over from last month.")));
-            var toSave = Split(savingsMonthly, savingsMonthly);
-            var saveWhy = Why("savings", savingsMonthly, savingsMonthly);
+                    .Select(s => new PlanTransfer($"sweep:{s.Id}", "Last month's leftover", s.AmountCents, AccountNames.Current(everyAccount, s.Destination), "Left over from last month.")));
+            var toSave = Split(savingsMonthly, savingsMonthly, saveBefore);
+            var saveWhy = Why("savings", savingsMonthly, savingsMonthly, saveBefore);
             if (savingsShares.Count <= 1)
                 transfers.Add(new("savings", "Savings", toSave, savingsAccount, saveWhy));
             else
@@ -721,12 +816,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
 
             // What happened since payday, for the check you're on now.
             var paidOn = Since(pay);
-            var moves = current
-                ? await db.Transactions.AsNoTracking()
-                    .Where(t => t.HouseholdId == householdId && t.Date >= paidOn && t.Date < next && (t.Kind == TransactionKind.CardPayment || t.IsTransfer))
-                    .Select(t => new { t.Date, t.AmountCents, t.Kind, Type = t.Account.Type, t.CategoryId, t.AccountId, t.IsTransfer, t.TransferAccountId, t.TransferGroupId })
-                    .ToListAsync(ct)
-                : [];
+            var moves = current ? await MovesAsync(paidOn, next) : [];
             var cardPaid = moves.Where(m => m.Kind == TransactionKind.CardPayment && m.Type == AccountType.Checking && m.AmountCents > 0).Sum(m => m.AmountCents);
             // Per card (DECISIONS.md 244): the payment as the card's own account shows it, or as it left checking when the card
             // isn't synced (or its statement isn't uploaded yet). With none tied to a card, the checking side for all cards.
@@ -734,35 +824,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             long PaidTo(Guid? accountId) => toCards.Where(p => p.CardAccountId == accountId).Sum(p => p.Cents);
             var cardSideSeen = toCards.Count > 0;
             var allDebtLines = plan.Items.Where(x => x.Kind == "debt").Sum(x => x.Cents);
-            long intoSavings;
-            var intoBy = new Dictionary<Guid, long>(); // what reached each savings account whose side or transfer says so
-            var savingsIds = accounts.Where(a => a.Type == AccountType.Savings).Select(a => a.Id).ToHashSet();
-            if (savingsIds.Count > 0)
-            {
-                // Money that arrived on a savings account, and money that left checking for one (DECISIONS.md 302): you said
-                // which account in Review, or the app matched it. A savings account that isn't bank-synced shows its side only
-                // once you import its file, so the checking side counts until then; once it's there, the transfer counts once.
-                var arrived = moves.Where(m => savingsIds.Contains(m.AccountId) && m.AmountCents < 0).ToList();
-                var seen = arrived.Select(m => (m.AccountId, Cents: -m.AmountCents, m.Date, m.TransferGroupId)).ToList();
-                foreach (var m in arrived) intoBy[m.AccountId] = intoBy.GetValueOrDefault(m.AccountId) - m.AmountCents;
-                long sent = 0;
-                foreach (var m in moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.IsTransfer
-                                                   && (m.TransferAccountId is { } to ? savingsIds.Contains(to) : m.CategoryId is { } id && savingsCategories.Contains(id))))
-                {
-                    var twin = seen.FindIndex(s => (m.TransferGroupId is { } g && s.TransferGroupId == g)
-                                                   || (s.Cents == m.AmountCents && (m.TransferAccountId is null || s.AccountId == m.TransferAccountId)
-                                                       && Math.Abs(s.Date.DayNumber - m.Date.DayNumber) <= Transactions.TransferFiling.OtherHalfDays));
-                    if (twin >= 0) seen.RemoveAt(twin);
-                    else
-                    {
-                        sent += m.AmountCents;
-                        if (m.TransferAccountId is { } into && savingsIds.Contains(into)) intoBy[into] = intoBy.GetValueOrDefault(into) + m.AmountCents;
-                    }
-                }
-                intoSavings = arrived.Sum(m => -m.AmountCents) + sent;
-            }
-            else
-                intoSavings = moves.Where(m => m.Type == AccountType.Checking && m.AmountCents > 0 && m.CategoryId is { } id && savingsCategories.Contains(id)).Sum(m => m.AmountCents);
+            var (intoSavings, intoBy) = IntoSavings(moves); // what reached each savings account whose side or transfer says so
 
             Account? AccountFor(PlanItem x) => accounts.FirstOrDefault(a => Label(a) == x.Destination || AccountNames.Imported(a) == x.Destination || a.Name == x.Destination);
             // What has gone toward each move to savings: the savings first, then last month's leftover sent to savings. With
@@ -924,14 +986,7 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             }
 
             // A card payment's minimum: this check's share of the card's (or every card's) minimum this month.
-            long Minimum(string key)
-            {
-                var month = c.Calendar.MonthContaining(pay);
-                var inMonth = PayCalendar.From(month.Start, c.Rules).TakeWhile(p => p.PayDate <= month.End).Select(p => p.PayDate).ToList();
-                var index = Math.Max(0, inMonth.IndexOf(pay));
-                var cards = key == "debt" ? debts : debts.Where(d => key == $"debt:{d.Id}");
-                return cards.Sum(d => PaydayPlan.Share(Math.Min(d.MinimumPaymentCents ?? 0, d.BalanceCents), inMonth.Count, index));
-            }
+            long Minimum(string key) => (key == "debt" ? debts : debts.Where(d => key == $"debt:{d.Id}")).Sum(d => MinimumShare(d, pay));
 
             var tasks = Affordable(plan.Items.Select(x =>
             {

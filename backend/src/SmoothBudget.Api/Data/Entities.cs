@@ -112,6 +112,13 @@ public class Account
     /// <summary>A credit card's limit, from the bank when it reports one (for utilization).</summary>
     public long? CreditLimitCents { get; set; }
     public bool IncludedInBudget { get; set; } = true;
+    /// <summary>
+    /// The day you said it's closed (More → Accounts, DECISIONS.md 318). A closed account keeps its history (past months,
+    /// transfers, bills) but leaves everything about now: balances, cash, debt, savings, the payday tasks and choices.
+    /// </summary>
+    public DateOnly? ClosedOn { get; set; }
+    /// <summary>The account that took over from this closed one: what a bill, a sweep or a task naming this one goes to now.</summary>
+    public Guid? ReplacedById { get; set; }
     public DataSource Source { get; set; }
     public DateTime CreatedUtc { get; set; }
 

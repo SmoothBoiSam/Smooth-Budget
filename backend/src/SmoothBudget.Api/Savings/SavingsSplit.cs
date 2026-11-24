@@ -11,7 +11,7 @@ public static class SavingsSplit
     /// <summary>The savings accounts that get some of it, oldest first, with their percent (adding up to 100).</summary>
     public static IReadOnlyList<(Account Account, int Percent)> Shares(IEnumerable<Account> accounts)
     {
-        var savings = accounts.Where(a => a.Type == AccountType.Savings && a.IncludedInBudget).OrderBy(a => a.CreatedUtc).ThenBy(a => a.Id).ToList();
+        var savings = accounts.Where(a => a.Type == AccountType.Savings && a.IncludedInBudget && a.ClosedOn == null).OrderBy(a => a.CreatedUtc).ThenBy(a => a.Id).ToList();
         var set = savings.Where(a => a.SavingsPercent > 0).ToList();
         if (set.Count == 0) return savings.Take(1).Select(a => (a, 100)).ToList();
         // An account that left (taken out of the budget) leaves the others' percents to add up to 100 between them.

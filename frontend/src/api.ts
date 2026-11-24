@@ -161,6 +161,8 @@ export interface Account {
   source: string
   includedInBudget: boolean
   bankSynced: boolean
+  /** Set once you've closed it (DECISIONS.md 318). */
+  closedOn?: string | null
 }
 
 export interface Category {
@@ -1417,7 +1419,7 @@ export interface Cash {
   history: { date: string; balanceCents: number }[]
 }
 
-/** More → Account nicknames (DECISIONS.md 310): what the bank or the import calls an account, and your name for it. */
+/** An account's nickname (DECISIONS.md 310): what the bank or the import calls it, and your name for it. */
 export interface AccountNickname {
   id: string
   name: string
@@ -1426,9 +1428,54 @@ export interface AccountNickname {
   nickname: string | null
 }
 
+/** One account on More → Accounts (DECISIONS.md 318). Balance: money in it is positive, owed on a card is negative. */
+export interface ManagedAccount {
+  id: string
+  label: string
+  name: string
+  mask: string | null
+  nickname: string | null
+  type: 'Checking' | 'Savings' | 'CreditCard'
+  source: string
+  bankSynced: boolean
+  bankId: string | null
+  bankName: string | null
+  balanceCents: number
+  balanceAsOf: string | null
+  closedOn: string | null
+  replacedById: string | null
+  /** For a closed account: the one that took over from it. */
+  replacedBy: string | null
+  transactionCount: number
+  firstDate: string | null
+  lastDate: string | null
+}
+
+/** What closing or deleting an account would touch. */
+export interface AccountImpact {
+  balanceCents: number
+  transactionCount: number
+  firstDate: string | null
+  importCount: number
+  goals: string[]
+  savingsPercent: number
+  openSweeps: number
+  moveTo: { id: string; label: string }[]
+  bankId: string | null
+  bankName: string | null
+  lastOnBank: boolean
+}
+
 export const accountsApi = {
+  manage: () => request<ManagedAccount[]>('GET', '/accounts/manage'),
+  impact: (id: string) => request<AccountImpact>('GET', `/accounts/${id}/impact`),
+  close: (id: string, moveToId: string | null) => request<void>('POST', `/accounts/${id}/close`, { moveToId }),
+  reopen: (id: string) => request<void>('POST', `/accounts/${id}/reopen`),
+  /** Its transactions go with it. */
+  remove: (id: string, moveToId: string | null) => request<void>('DELETE', `/accounts/${id}${moveToId ? `?moveToId=${moveToId}` : ''}`),
+  /** For an account the bank doesn't sync: its balance as of today. */
+  setBalance: (id: string, balanceCents: number) => request<void>('PUT', `/accounts/${id}/balance`, { balanceCents }),
   cash: () => request<Cash>('GET', '/accounts/cash'),
-  nicknames: () => request<AccountNickname[]>('GET', '/accounts/nicknames'),
   /** An empty nickname clears it. */
   setNickname: (id: string, nickname: string) => request<AccountNickname>('PUT', `/accounts/${id}/nickname`, { nickname }),
   balances: (kind: AccountKind) => request<AccountBalance[]>('GET', `/accounts/balances?type=${kind}`),

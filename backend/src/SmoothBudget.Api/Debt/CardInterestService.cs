@@ -37,7 +37,8 @@ public class CardInterestService(AppDbContext db)
                                             && !(t.CategorySource == CategorySource.User && t.Category is not null && t.Category.Type != CategoryType.Variable)).ToList();
         var linked = await LinkAsync(householdId, cat?.Id, charges, ct);
 
-        var owesInterest = await db.DebtAccounts.AnyAsync(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0 && d.AprBps > 0, ct);
+        var owesInterest = await db.DebtAccounts.AnyAsync(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0 && d.AprBps > 0
+                                                              && (d.Account == null || d.Account.ClosedOn == null), ct);
         if (charges.Count == 0 && (cat is not null || !owesInterest))
         {
             if (linked) await db.SaveChangesAsync(ct);

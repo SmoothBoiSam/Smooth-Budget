@@ -31,7 +31,9 @@ public static class ExpectedIncomes
         var deposits = await db.Transactions.AsNoTracking().Where(t => ids.Contains(t.Id)).ToDictionaryAsync(t => t.Id, t => (t.Date, Cents: -t.AmountCents), ct);
         return rows.Select(x =>
         {
-            var landed = x.DepositTransactionId is { } id && deposits.TryGetValue(id, out var d) ? d : ((DateOnly, long)?)null;
+            // A deposit whose account you deleted (DECISIONS.md 318) still landed: on the day it was due, for what was expected.
+            var landed = x.DepositTransactionId is not { } id ? ((DateOnly, long)?)null
+                : deposits.TryGetValue(id, out var d) ? d : (x.ExpectedDate, x.AmountCents);
             return new ExpectedIncomeDto(x.Id, x.Name, x.AmountCents, x.ExpectedDate, landed?.Item1, landed?.Item2,
                 landed is null && today > x.ExpectedDate.AddDays(LateDays));
         }).ToList();
@@ -56,10 +58,12 @@ public static class ExpectedIncomes
         var changed = false;
 
         var linkedIds = all.Where(x => x.DepositTransactionId != null).Select(x => x.DepositTransactionId!.Value).ToList();
-        var stillIncome = (await db.Transactions.AsNoTracking()
-            .Where(t => linkedIds.Contains(t.Id) && t.Kind == TransactionKind.Income && t.IncomeType != IncomeType.Paycheck && !t.IsTransfer)
+        // Let go only of a deposit since marked as something else. One that's gone with an account you deleted (DECISIONS.md
+        // 318) still landed: let go, the bonus would be expected all over again.
+        var notIncome = (await db.Transactions.AsNoTracking()
+            .Where(t => linkedIds.Contains(t.Id) && !(t.Kind == TransactionKind.Income && t.IncomeType != IncomeType.Paycheck && !t.IsTransfer))
             .Select(t => t.Id).ToListAsync(ct)).ToHashSet();
-        foreach (var x in all.Where(x => x.DepositTransactionId is { } id && !stillIncome.Contains(id)))
+        foreach (var x in all.Where(x => x.DepositTransactionId is { } id && notIncome.Contains(id)))
         {
             x.DepositTransactionId = null;
             changed = true;

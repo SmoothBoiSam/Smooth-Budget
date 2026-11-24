@@ -27,6 +27,7 @@ The app has five tabs.
   - **Pay period tasks:** for each paycheck, what to keep in checking for bills, what to pay the cards, and what to move to savings.
     - Tasks only check themselves off, from what your accounts show; there's nothing to tick by hand. Moves to the same account merge into one.
     - Each task shows how far along it is: how far over or short an account is for its bills, or how much of a move has been sent, with a bar.
+    - A later check in the month sends what the earlier ones left of the month's card payment and savings, not just an even share.
     - They never ask for more than checking can spare right now. The rest waits for a bonus still to come, or for room in checking, and the task says when.
   - **Upload** a new schedule or pay stub.
 - **Money:**
@@ -40,7 +41,9 @@ The app has five tabs.
   - **Savings:** balances, counting transfers still on their way in. Goals with projected dates, a rainy-day fund, and a 12-month chart. **Payment settings** splits each month's savings between your savings accounts by percent, and the pay period tasks send each its part.
   - **Transactions:** every transaction, with search.
 - **More:**
-  - **Accounts:** bank connections (Plaid), CSV import (Chase checking, Chase credit, Apple Card), and **account nicknames**: a name of your own for each account, used everywhere in place of its bank name and last four digits.
+  - **Accounts:** every account by kind, with its bank and balance. Add one (connect a bank through Plaid, or add one you upload CSVs for: Chase checking, Chase credit, Apple Card), and manage bank connections and uploaded files.
+    - Each account has its own page: a **nickname** used everywhere in place of its bank name and last four digits, the balance of one the bank doesn't sync, its activity, and uploading a file for it.
+    - **Close** an account and it keeps its history (past months, transfers, bills) but leaves balances, Debt, Savings and the pay period tasks. **Delete** also deletes its transactions. Either way its savings goals, its savings share and any leftover move go to the account you pick, and bills paid from it follow. **Reopen** brings a closed one back.
   - **Sharing:** **Friends**.
     - Friends are people you share costs with. They can have their own linked account or none, and each friend has a settle-up balance. A fixed contribution toward a bill, like part of the rent, is matched to their transfers.
   - Appearance (System, Light or Dark) and Notifications (Web Push: alerts when something happens, and reminders for paydays and due dates that wait for daytime).
@@ -119,7 +122,7 @@ Open http://localhost:4173, sign in and load Home once. Stop both servers and re
 ### Importing your bank exports
 
 1. Download the CSV from Chase (checking or credit card) or Apple Card (Wallet → Card Balance → Statements → Export Transactions → CSV).
-2. In the app, open **More → Import a CSV**, add the account once (name, type, optionally the last 4 digits), pick the file, and import.
+2. In the app, open **More → Your accounts → Upload a CSV**, add the account once (name, type, optionally the last 4 digits), pick the file, and import.
 3. Card payments and transfers are detected automatically. Anything without a category shows up under **Budget → Needs a category**. Tap a transaction to set its category, and tick "Always use this category" to create a merchant rule.
 
 Re-importing an overlapping export is safe: rows already in the account are skipped, including ones your bank already synced through Plaid (in either order). Each import can be undone from **Recent imports**.
@@ -127,7 +130,7 @@ Re-importing an overlapping export is safe: rows already in the account are skip
 ### Connecting banks with Plaid
 
 1. Put your Plaid keys in `.env`: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV=sandbox`, and a `PLAID_TOKEN_KEY` (see `.env.example` for the one-line command that generates it).
-2. Open **More → Bank connections**:
+2. Open **More → Your accounts → Bank connections**:
    - **Connect a bank** opens Plaid Link. In sandbox, sign in with Plaid's test login `user_good` / `pass_good`.
    - **Add Plaid's sandbox test bank (dev only)** links Plaid's test bank without the Link screen.
 3. Choose, for each account at the bank, **Import as a new account**, **Same as …** (pick the account you already imported CSVs into, so nothing is counted twice), or **Don't import**.
@@ -186,7 +189,7 @@ Each area maps its own endpoints in its folder under `backend/src/SmoothBudget.A
 |---|---|---|
 | Auth | `Auth/AuthEndpoints.cs` | Sign up (with a friend's invite), sign in and out, `me`, the demo (`POST /api/auth/demo`) |
 | Home | `Program.cs`, `Home/` | `GET /api/home/summary`: Left to Spend, Safe to Spend, the month overview, notices, sync health |
-| Accounts | `Accounts/` | Accounts and balances, Debit, account nicknames |
+| Accounts | `Accounts/` | Accounts and balances, Debit, nicknames, closing, reopening and deleting an account |
 | Transactions | `Transactions/TransactionEndpoints.cs` | Search, Review, filing a transaction, merchant rules, income |
 | Budget | `Budget/BudgetEndpoints.cs` | Categories, the summary, the automatic budget and generator, month close and sweeps, settings |
 | Bills | `Bills/RecurringEndpoints.cs` | Bills and subscriptions found from your transactions |

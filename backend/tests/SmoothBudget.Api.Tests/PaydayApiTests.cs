@@ -12,6 +12,7 @@ using SmoothBudget.Api.Home;
 using SmoothBudget.Api.Import;
 using SmoothBudget.Api.Payday;
 using SmoothBudget.Api.Savings;
+using SmoothBudget.Api.Transactions;
 using SmoothBudget.Core.Pay;
 using SmoothBudget.Core.Tests;
 using SmoothBudget.Core.Transactions;
@@ -291,6 +292,103 @@ public class PaydayApiTests(TestApp app) : IClassFixture<TestApp>
             moves.Select(m => (m.Key, m.Cents, m.Destination, m.Done, m.SentCents)));
         Assert.Equal("Moved $30.00 to Test Savings since payday.", moves[0].Status);
         Assert.EndsWith("40% of it goes here.", moves[1].Why);
+    }
+
+    [Fact]
+    public async Task Moving_savings_from_one_savings_account_to_another_isnt_saving_again()
+    {
+        // DECISIONS.md 317. Feb 24, 2027, on the Feb 22 check: $500 moves from the old savings account to a new one.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var h = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+        var checking = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = $"test-chk-{Guid.NewGuid():N}", CurrentBalanceCents = 2_000_00, CreatedUtc = DateTime.UtcNow };
+        var old = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Old Savings", Mask = "2222", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow.AddDays(-30) };
+        var fresh = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "New Savings", Mask = "3333", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+        Transaction T(Account a, long cents, string merchant) => new()
+        {
+            Id = Guid.NewGuid(), HouseholdId = h, AccountId = a.Id, Date = new DateOnly(2027, 2, 23), AmountCents = cents, Merchant = merchant, Description = "TEST",
+            Kind = TransactionKind.Transfer, NeedsReview = true, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+        };
+        var outOfOld = T(old, 500_00, "ONLINE TRANSFER TO SAV");
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AddRange(checking, old, fresh,
+                new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 });
+            db.Transactions.AddRange(outOfOld, T(fresh, -500_00, "ONLINE TRANSFER FROM SAV"));
+            await db.SaveChangesAsync();
+        }
+        var filed = (await (await c.PostAsJsonAsync($"/api/transactions/{outOfOld.Id}/transfer", new TransferRequest(fresh.Id), Json)).Content.ReadFromJsonAsync<TransferResultDto>(Json))!;
+        Assert.True(filed.OtherHalfFound);
+
+        // Neither half is on the Savings line, so the budget doesn't count it as saved this month.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.All(await db.Transactions.Where(t => t.HouseholdId == h).ToListAsync(), t => Assert.Equal((true, (Guid?)null), (t.IsTransfer, t.CategoryId)));
+        }
+        // The check's savings is still to send, and the Savings page hasn't seen any go in.
+        var save = (await Payday(c)).Checks[0].Plan!.AllParts().Single(i => i.Kind == "savings");
+        Assert.Equal((50_00L, false, 0L), (save.Cents, save.Done, save.SentCents));
+        var summary = (await c.GetFromJsonAsync<SavingsSummaryDto>("/api/savings", Json))!;
+        Assert.Equal((0L, 0), (summary.ThisMonthCents, summary.Transfers!.Count));
+    }
+
+    [Fact]
+    public async Task The_last_check_of_the_month_sends_what_the_checks_before_it_left()
+    {
+        // DECISIONS.md 316. Feb 24, 2027, on the Feb 22 check; the Feb 8 check came before it this month. The month's card
+        // payment is $200 and savings $100.
+        var c = await NewUserAsync(new DateTimeOffset(2027, 2, 24, 19, 0, 0, TimeSpan.Zero));
+        await Schedule(c, PayFixtures.Text, "schedule.txt", confirm: true);
+        var h = (await c.GetFromJsonAsync<MeResponse>("/api/auth/me", Json))!.HouseholdId;
+        var checking = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Checking", Mask = "1111", Type = AccountType.Checking, Source = DataSource.Plaid, PlaidAccountId = $"test-chk-{Guid.NewGuid():N}", CurrentBalanceCents = 5_000_00, CreatedUtc = DateTime.UtcNow };
+        var savings = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Savings", Mask = "2222", Type = AccountType.Savings, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+        var card = new Account { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Visa", Mask = "3333", Type = AccountType.CreditCard, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow };
+        Transaction T(Account a, DateOnly d, long cents, TransactionKind kind, Guid? to = null) => new()
+        {
+            Id = Guid.NewGuid(), HouseholdId = h, AccountId = a.Id, Date = d, AmountCents = cents, Merchant = "TEST", Description = "TEST",
+            Kind = kind, IsTransfer = kind != TransactionKind.Purchase, TransferAccountId = to, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+        };
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AddRange(checking, savings, card,
+                new DebtAccount { Id = Guid.NewGuid(), HouseholdId = h, AccountId = card.Id, Name = "Test Visa", BalanceCents = 2_000_00, AprBps = 2499, MinimumPaymentCents = 40_00,
+                    StartingBalanceCents = 2_000_00, StartedOn = new DateOnly(2027, 1, 1), CreatedUtc = DateTime.UtcNow },
+                new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Card payment", Type = SmoothBudget.Core.Budgeting.CategoryType.DebtPayment, MonthlyLimitCents = 200_00 },
+                new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Savings", Type = SmoothBudget.Core.Budgeting.CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 });
+            db.Transactions.AddRange(
+                T(card, new DateOnly(2027, 2, 3), 40_00, TransactionKind.Purchase),                    // charged before Feb 8: that check paid it off
+                T(card, new DateOnly(2027, 2, 10), -60_00, TransactionKind.CardPayment),               // so $20 of this went to the card payment
+                T(checking, new DateOnly(2027, 2, 12), 20_00, TransactionKind.Transfer, to: savings.Id)); // and $20 to savings
+            await db.SaveChangesAsync();
+        }
+        async Task<(PlanItemDto Debt, PlanItemDto Savings)> Moves()
+        {
+            var parts = (await Payday(c)).Checks[0].Plan!.AllParts().ToList();
+            return (parts.Single(i => i.Kind == "debt"), parts.Single(i => i.Kind == "savings"));
+        }
+
+        // Until the Feb 8 check is known to have landed, each check is half.
+        var (debt, save) = await Moves();
+        Assert.Equal((100_00L, 50_00L), (debt.Cents, save.Cents));
+
+        // It landed: this check sends the rest of the month's, after what went out from Feb 8 to Feb 21.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.PayPeriodForecasts.Add(new PayPeriodForecast { Id = Guid.NewGuid(), HouseholdId = h, PayDate = new DateOnly(2027, 2, 8), PeriodStart = new DateOnly(2027, 1, 16),
+                PeriodEnd = new DateOnly(2027, 1, 31), ActualNetCents = 1_000_00, ActualSource = "stub" });
+            await db.SaveChangesAsync();
+        }
+        (debt, save) = await Moves();
+        Assert.Equal((180_00L, 20_00L, 80_00L), (debt.Cents, debt.MinimumCents, save.Cents));
+        Assert.Equal("What's left of the month's $200.00 card payment. Your Feb 8 check sent $20.00 toward it.", debt.Why);
+        Assert.Equal("What's left of the month's $100.00 savings. Your Feb 8 check sent $20.00 toward it.", save.Why);
+        // The next month starts over: half each.
+        var march = (await Payday(c)).Checks.First(x => x.PayDate == new DateOnly(2027, 3, 8)).Plan!.AllParts().ToList();
+        Assert.Equal((100_00L, 50_00L), (march.Single(i => i.Kind == "debt").Cents, march.Single(i => i.Kind == "savings").Cents));
     }
 
     [Fact]

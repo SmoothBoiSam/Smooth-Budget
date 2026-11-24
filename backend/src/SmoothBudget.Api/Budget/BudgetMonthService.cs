@@ -343,11 +343,11 @@ public class BudgetMonthService(AppDbContext db, TimeProvider clock)
     /// </summary>
     public async Task<(string? Debt, string? Savings)> SweepDestinationsAsync(Guid householdId, CancellationToken ct)
     {
-        var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget).ToListAsync(ct);
+        var accounts = await db.Accounts.AsNoTracking().Where(a => a.HouseholdId == householdId && a.IncludedInBudget && a.ClosedOn == null).ToListAsync(ct);
         static string Label(Account a) => AccountNames.Label(a);
         var highestApr = await db.DebtAccounts.AsNoTracking().Include(d => d.Account)
             .Where(d => d.HouseholdId == householdId && !d.IsHidden && d.AprBps != null
-                        && (d.Account == null ? d.BalanceCents > 0 : d.Account.IncludedInBudget && d.Account.CurrentBalanceCents < 0))
+                        && (d.Account == null ? d.BalanceCents > 0 : d.Account.IncludedInBudget && d.Account.ClosedOn == null && d.Account.CurrentBalanceCents < 0))
             .OrderByDescending(d => d.AprBps).ThenByDescending(d => d.BalanceCents).FirstOrDefaultAsync(ct);
         var card = accounts.Where(a => a.Type == AccountType.CreditCard && a.CurrentBalanceCents < 0).OrderBy(a => a.CurrentBalanceCents).FirstOrDefault()
                    ?? accounts.FirstOrDefault(a => a.Type == AccountType.CreditCard);

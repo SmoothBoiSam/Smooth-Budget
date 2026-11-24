@@ -131,7 +131,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         var lts = data.LeftToSpend();
         // Each card's expected interest, for the Card interest line (DECISIONS.md 285).
         var cards = await db.DebtAccounts.AsNoTracking()
-            .Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0 && d.AprBps > 0)
+            .Where(d => d.HouseholdId == householdId && !d.IsHidden && d.BalanceCents > 0 && d.AprBps > 0 && (d.Account == null || d.Account.ClosedOn == null))
             .Select(d => new { d.Id, Name = d.Account != null ? d.Account.Nickname ?? d.Account.Name : d.Name, d.BalanceCents, Apr = d.AprBps!.Value })
             .ToListAsync(ct);
         var expectedInterest = Core.Transactions.CardInterest.Expected(cards.Select(c => new Core.Debt.DebtInput(c.Id, c.Name, c.BalanceCents, c.Apr, 0)))

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ask } from './confirm'
 import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me } from './api'
-import AccountNicknames from './AccountNicknames'
+import { AccountPage, AccountsList, AddAccountForm } from './AccountsMenu'
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import Mystery from './Mystery'
@@ -59,21 +59,18 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
   }, [])
 
   const back = { href: '#/more', label: 'More' }
+  // Banks and uploads are part of More → Accounts (DECISIONS.md 318).
+  const toAccounts = { href: '#/more/accounts', label: 'Accounts' }
   const errorBox = error && <ErrorNotice message={error} onRetry={() => void load()} />
+
+  if (sub === 'accounts') return <AccountsList back={back} />
+  if (sub?.startsWith('account:')) return <AccountPage id={sub.slice('account:'.length)} onChanged={changed} />
 
   if (sub === 'banks')
     return (
       <Page>
-        <PageHeader title="Bank connections" back={back} />
+        <PageHeader title="Bank connections" back={toAccounts} />
         <BankConnections onChanged={changed} />
-      </Page>
-    )
-
-  if (sub === 'nicknames')
-    return (
-      <Page>
-        <PageHeader title="Account nicknames" back={back} />
-        <AccountNicknames />
       </Page>
     )
 
@@ -90,7 +87,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
   if (sub === 'import')
     return (
       <Page>
-        <PageHeader title="Import a CSV" back={back} />
+        <PageHeader title="Upload a CSV" back={toAccounts} />
         {errorBox}
         <ImportCard accounts={accounts} onImported={changed} onAccountAdded={load} />
         {/* Past files and their undo sit right under the import they came from (DECISIONS.md 184, 187), in a dropdown by month (293). */}
@@ -105,9 +102,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
 
       <Card title="Accounts">
         <Rows>
-          <Row label="Bank connections" href="#/more/banks" />
-          <Row label="Import a CSV" href="#/more/import" />
-          <Row label="Account nicknames" href="#/more/nicknames" />
+          <Row label="Your accounts" hint="Banks, uploads, names, closing one" href="#/more/accounts" />
         </Rows>
       </Card>
 
@@ -210,15 +205,18 @@ function ImportedFiles({ batches, onUndo }: { batches: ImportBatch[]; onUndo: (b
 const subFromHash = () => {
   const h = window.location.hash
   // Merchant rules are gone (DECISIONS.md 259): the most likely category learns from what you confirm.
+  const account = /^#\/more\/accounts\/([0-9a-f-]{36})/.exec(h)
   return h.startsWith('#/more/import') // #/more/imports, the old list page, lands here too
     ? 'import'
     : h.startsWith('#/more/banks')
       ? 'banks'
       : h.startsWith('#/more/notifications')
         ? 'notifications'
-        : h.startsWith('#/more/nicknames')
-          ? 'nicknames'
-          : null
+        : account
+          ? `account:${account[1]}`
+          : h.startsWith('#/more/accounts') || h.startsWith('#/more/nicknames') // nicknames are on each account's page now
+            ? 'accounts'
+            : null
 }
 
 function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Account[]; onImported: () => void; onAccountAdded: () => void }) {
@@ -229,7 +227,10 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
 
-  const selectedId = accountId || accounts[0]?.id || ''
+  // From an account's page (#/more/import/<id>), that account. Closed ones are listed last, for a late statement.
+  const fromHash = /^#\/more\/import\/([0-9a-f-]{36})/.exec(window.location.hash)?.[1] ?? ''
+  const listed = [...accounts.filter((a) => !a.closedOn), ...accounts.filter((a) => a.closedOn)]
+  const selectedId = accountId || (accounts.some((a) => a.id === fromHash) ? fromHash : '') || listed[0]?.id || ''
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -274,10 +275,10 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
                 className="min-w-0 flex-1 rounded-xl neu-inset px-3 py-3 text-base"
               >
                 {accounts.length === 0 && <option value="">Add an account first</option>}
-                {accounts.map((a) => (
+                {listed.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
-                    {a.mask ? ` ••${a.mask}` : ''} ({accountTypeLabel[a.type]}{a.bankSynced ? ', bank-synced' : ''})
+                    {a.mask ? ` ••${a.mask}` : ''} ({accountTypeLabel[a.type]}{a.bankSynced ? ', bank-synced' : ''}{a.closedOn ? ', closed' : ''})
                   </option>
                 ))}
               </select>
@@ -348,62 +349,5 @@ function ImportCard({ accounts, onImported, onAccountAdded }: { accounts: Accoun
         </div>
       )}
     </section>
-  )
-}
-
-function AddAccountForm({ onDone }: { onDone: (a: Account | null) => void }) {
-  const [name, setName] = useState('')
-  const [type, setType] = useState<Account['type']>('Checking')
-  const [mask, setMask] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    try {
-      onDone(await budgetApi.createAccount(name, type, mask || null))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add account.')
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl neu-inset p-3">
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-        maxLength={100}
-        placeholder="Name, e.g. Chase Checking"
-        className="block w-full rounded-xl neu-inset px-3 py-2"
-      />
-      <div className="flex gap-2">
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value as Account['type'])}
-          className="flex-1 rounded-xl neu-inset px-3 py-2"
-        >
-          <option value="Checking">Checking</option>
-          <option value="Savings">Savings</option>
-          <option value="CreditCard">Credit card</option>
-        </select>
-        <input
-          value={mask}
-          onChange={(e) => setMask(e.target.value.replace(/\D/g, '').slice(0, 4))}
-          inputMode="numeric"
-          placeholder="Last 4"
-          aria-label="Last 4 digits (optional)"
-          className="w-24 rounded-xl neu-inset px-3 py-2"
-        />
-      </div>
-      {error && <p className="text-sm text-danger">{error}</p>}
-      <div className="flex gap-3">
-        <button type="button" onClick={() => onDone(null)} className="neu flex-1 rounded-2xl py-3 text-sm font-semibold text-danger">
-          Cancel
-        </button>
-        <button type="submit" className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink">
-          Add account
-        </button>
-      </div>
-    </form>
   )
 }

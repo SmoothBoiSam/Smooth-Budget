@@ -546,10 +546,10 @@ public static partial class TransactionEndpoints
             var householdId = ctx.User.HouseholdId();
             await savings.EnsureStarterAsync(householdId, ct); // the starter goal, as the Savings tab makes it
             var debts = await db.DebtAccounts.AsNoTracking()
-                .Where(d => d.HouseholdId == householdId && !d.IsHidden && (d.AccountId == null || d.Account!.IncludedInBudget))
+                .Where(d => d.HouseholdId == householdId && !d.IsHidden && (d.AccountId == null || d.Account!.IncludedInBudget && d.Account.ClosedOn == null))
                 .OrderByDescending(d => d.BalanceCents).Select(d => new { d.Id, d.Name, d.AccountId, Mask = d.Account != null ? d.Account.Mask : null, Nick = d.Account != null ? d.Account.Nickname : null }).ToListAsync(ct);
             var accounts = await db.Accounts.AsNoTracking()
-                .Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget)
+                .Where(a => a.HouseholdId == householdId && a.Type == AccountType.Savings && a.IncludedInBudget && a.ClosedOn == null)
                 .OrderBy(a => a.Name).Select(a => new { a.Id, a.Name, a.Mask, a.Nickname }).ToListAsync(ct);
             var goals = await db.SavingsGoals.AsNoTracking().Where(g => g.HouseholdId == householdId)
                 .OrderBy(g => g.SortOrder).ThenBy(g => g.Name).Select(g => new { g.Id, g.Name }).ToListAsync(ct);
