@@ -576,6 +576,8 @@ function CategoryHeader({ line: c }: { line: BudgetCategoryLine }) {
 function backFromHash(): { href: string; label: string } {
   const back = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('back')
   const pages: Record<string, string> = { income: 'Income', debt: 'Debt', savings: 'Savings', debit: 'Debit', budget: 'Budget' }
+  // From an account's page under More → Accounts (DECISIONS.md 319).
+  if (back && /^more\/accounts\/[0-9a-f-]{36}$/.test(back)) return { href: `#/${back}`, label: 'Account' }
   return back && pages[back] ? { href: `#/${back}`, label: pages[back] } : { href: '#/payday', label: 'Money' }
 }
 

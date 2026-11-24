@@ -41,8 +41,9 @@ The app has five tabs.
   - **Savings:** balances, counting transfers still on their way in. Goals with projected dates, a rainy-day fund, and a 12-month chart. **Payment settings** splits each month's savings between your savings accounts by percent, and the pay period tasks send each its part.
   - **Transactions:** every transaction, with search.
 - **More:**
-  - **Accounts:** every account by kind, with its bank and balance. Add one (connect a bank through Plaid, or add one you upload CSVs for: Chase checking, Chase credit, Apple Card), and manage bank connections and uploaded files.
-    - Each account has its own page: a **nickname** used everywhere in place of its bank name and last four digits, the balance of one the bank doesn't sync, its activity, and uploading a file for it.
+  - **Accounts:** every account by kind, with where its numbers come from (its bank, uploads, or you), its balance, and anything it needs from you. Add one: connect a bank through Plaid, add one you upload CSVs for (Chase checking, Chase credit, Apple Card), or track one yourself with a balance you update. Bank connections and uploaded files are here too.
+    - Each account has its own page: a **nickname** used everywhere in place of its bank name and last four digits, its kind (checking and savings can swap, and its transfers are filed again), the balance of one the bank doesn't sync, when it last synced, its uploads with undo, its transactions, its savings share and goals or a card's APR, minimum and due day, and **Count in budget**.
+    - Disconnecting a bank asks whether to keep its accounts as closed history, keep tracking them, or delete them.
     - **Close** an account and it keeps its history (past months, transfers, bills) but leaves balances, Debt, Savings and the pay period tasks. **Delete** also deletes its transactions. Either way its savings goals, its savings share and any leftover move go to the account you pick, and bills paid from it follow. **Reopen** brings a closed one back.
   - **Sharing:** **Friends**.
     - Friends are people you share costs with. They can have their own linked account or none, and each friend has a settle-up balance. A fixed contribution toward a bill, like part of the rent, is matched to their transfers.

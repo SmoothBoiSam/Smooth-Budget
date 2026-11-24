@@ -97,8 +97,19 @@ public static class PlaidEndpoints
         plaidGroup.MapGet("/items", async (HttpContext ctx, PlaidLinkService link, CancellationToken ct) =>
             await link.ListAsync(ctx.User.HouseholdId(), ct));
 
-        plaidGroup.MapDelete("/items/{id:guid}", async (Guid id, HttpContext ctx, PlaidLinkService link, CancellationToken ct) =>
-            await Guard(async () => await link.RemoveAsync(ctx.User.HouseholdId(), id, ct) ? Results.NoContent() : Results.NotFound()));
+        // Disconnecting (DECISIONS.md 319): its accounts stay and stop syncing (the default), become closed history
+        // (accounts=close), or go with their transactions (accounts=delete).
+        plaidGroup.MapDelete("/items/{id:guid}", async (Guid id, string? accounts, HttpContext ctx, PlaidLinkService link, AppDbContext db,
+            Budget.BudgetMonthService months, Savings.SavingsService savings, CancellationToken ct) =>
+            await Guard(async () =>
+            {
+                var householdId = ctx.User.HouseholdId();
+                var ids = await db.Accounts.Where(a => a.HouseholdId == householdId && a.PlaidItemId == id).Select(a => a.Id).ToListAsync(ct);
+                if (!await link.RemoveAsync(householdId, id, ct)) return Results.NotFound();
+                if (accounts is "close" or "delete")
+                    await Accounts.AccountManagement.EndAllAsync(db, months, savings, ids, accounts == "delete", ct);
+                return Results.NoContent();
+            }));
 
         // Re-download everything Plaid has for this connection (resets the sync cursor). Existing rows are
         // updated in place, never duplicated, and keep your own categories. Used to pick up Plaid's

@@ -3,6 +3,7 @@ using SmoothBudget.Api.Auth;
 using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Savings;
+using SmoothBudget.Api.Transactions;
 
 namespace SmoothBudget.Api.Accounts;
 
@@ -11,9 +12,15 @@ namespace SmoothBudget.Api.Accounts;
 /// <param name="BankId">Its bank connection (Plaid), while it has one.</param>
 /// <param name="BalanceCents">As on its Accounts card: money in it is positive, owed on a card is negative.</param>
 /// <param name="ReplacedBy">For a closed account, the one that took over from it.</param>
+/// <param name="Attention">Something it needs from you, in a sentence: its bank wants you to sign in again, or it has no balance yet.</param>
+/// <param name="SavingsPercent">A savings account's share of each month's savings, as Payment settings splits it.</param>
+/// <param name="Goals">The savings goals kept in it.</param>
+/// <param name="AprBps">A card's APR, minimum and due day, from Debt.</param>
 public record ManagedAccountDto(Guid Id, string Label, string Name, string? Mask, string? Nickname, string Type, string Source,
     bool BankSynced, Guid? BankId, string? BankName, long BalanceCents, DateOnly? BalanceAsOf, DateOnly? ClosedOn, Guid? ReplacedById,
-    string? ReplacedBy, int TransactionCount, DateOnly? FirstDate, DateOnly? LastDate);
+    string? ReplacedBy, int TransactionCount, DateOnly? FirstDate, DateOnly? LastDate,
+    bool IncludedInBudget = true, DateTime? LastSyncedUtc = null, string? Attention = null, int SavingsPercent = 0,
+    IReadOnlyList<string>? Goals = null, int? AprBps = null, long? MinimumCents = null, int? DueDay = null);
 
 public record AccountChoiceDto(Guid Id, string Label);
 
@@ -26,6 +33,8 @@ public record AccountImpactDto(long BalanceCents, int TransactionCount, DateOnly
     int SavingsPercent, int OpenSweeps, IReadOnlyList<AccountChoiceDto> MoveTo, Guid? BankId, string? BankName, bool LastOnBank);
 
 public record CloseAccountRequest(Guid? MoveToId);
+public record AccountTypeRequest(AccountType Type);
+public record CountInBudgetRequest(bool Included);
 
 /// <summary>
 /// More → Accounts (DECISIONS.md 318): every account in one list, and closing, reopening or deleting one.
@@ -49,6 +58,24 @@ public static class AccountManagement
             var ids = accounts.Select(a => a.Id).ToList();
             var activity = await db.Transactions.AsNoTracking().Where(t => ids.Contains(t.AccountId)).GroupBy(t => t.AccountId)
                 .Select(x => new { x.Key, Count = x.Count(), First = x.Min(t => t.Date), Last = x.Max(t => t.Date) }).ToDictionaryAsync(x => x.Key, ct);
+            var goals = await db.SavingsGoals.AsNoTracking().Where(x => x.HouseholdId == householdId && x.AccountId != null)
+                .OrderBy(x => x.SortOrder).ThenBy(x => x.Name).Select(x => new { AccountId = x.AccountId!.Value, x.Name }).ToListAsync(ct);
+            var debts = await db.DebtAccounts.AsNoTracking().Where(d => d.HouseholdId == householdId && d.AccountId != null)
+                .Select(d => new { AccountId = d.AccountId!.Value, d.AprBps, d.MinimumPaymentCents, d.DueDay, Known = d.TypedOn != null || d.BalanceCents != 0 }).ToListAsync(ct);
+            var shares = SavingsSplit.Shares(accounts).ToDictionary(s => s.Account.Id, s => s.Percent);
+            // What it needs from you (DECISIONS.md 319): only for an account that's open.
+            string? Attention(Account a)
+            {
+                if (a.ClosedOn is not null) return null;
+                if (a.PlaidItem is { Status: PlaidItemStatus.LoginRequired or PlaidItemStatus.Error } item)
+                    return $"{item.InstitutionName ?? "The bank"} needs you to sign in again.";
+                if (a.PlaidAccountId is not null) return null;
+                // Known from a file (its newest line), from you, or (a card) from what you entered on Debt.
+                if (a.BalanceAsOf is not null || a.CurrentBalanceCents != 0) return null;
+                return a.Type == AccountType.CreditCard
+                    ? debts.Any(d => d.AccountId == a.Id && d.Known) ? null : "No balance yet: enter what it owes on Debt."
+                    : "No balance yet: add one so the pay period tasks can check themselves off.";
+            }
             return accounts
                 .OrderBy(a => a.ClosedOn is null ? 0 : 1).ThenBy(a => a.Type).ThenBy(a => a.CreatedUtc)
                 .Select(a =>
@@ -58,7 +85,11 @@ public static class AccountManagement
                     return new ManagedAccountDto(a.Id, AccountNames.Label(a), a.Name, a.Mask, a.Nickname, a.Type.ToString(), a.Source.ToString(),
                         a.PlaidAccountId is not null, a.PlaidItemId, a.PlaidItem?.InstitutionName, balances[a.Id].Balance, a.BalanceAsOf, a.ClosedOn,
                         a.ReplacedById, into is not null && into.Id != a.Id ? AccountNames.Label(into) : null,
-                        act?.Count ?? 0, act?.First, act?.Last);
+                        act?.Count ?? 0, act?.First, act?.Last,
+                        a.IncludedInBudget, a.PlaidItem?.LastSyncedUtc, Attention(a), shares.GetValueOrDefault(a.Id),
+                        goals.Where(x => x.AccountId == a.Id).Select(x => x.Name).ToList(),
+                        debts.FirstOrDefault(d => d.AccountId == a.Id)?.AprBps, debts.FirstOrDefault(d => d.AccountId == a.Id)?.MinimumPaymentCents,
+                        debts.FirstOrDefault(d => d.AccountId == a.Id)?.DueDay);
                 }).ToList();
         });
 
@@ -90,12 +121,7 @@ public static class AccountManagement
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["id"] = ["It's closed already."] });
             var (problem, into) = await ReplacementAsync(db, a, req.MoveToId, ct);
             if (problem is not null) return problem;
-            var (_, today, _) = await months.ContextAsync(householdId, ct);
-            var sweeps = await MoveDependentsAsync(db, savings, a, into, ct);
-            a.ClosedOn = today;
-            a.ReplacedById = into?.Id;
-            await db.SaveChangesAsync(ct);
-            await RedirectSweepsAsync(db, months, householdId, sweeps, into, ct);
+            await CloseAsync(db, months, savings, a, into, ct);
             return Results.NoContent();
         });
 
@@ -117,13 +143,43 @@ public static class AccountManagement
             if (a is null) return Results.NotFound();
             var (problem, into) = await ReplacementAsync(db, a, moveToId, ct);
             if (problem is not null) return problem;
-            var sweeps = await MoveDependentsAsync(db, savings, a, into, ct);
-            // A closed account this one had taken over from now follows what takes over from this one.
-            await db.Accounts.Where(x => x.HouseholdId == householdId && x.ReplacedById == id)
-                .ExecuteUpdateAsync(s => s.SetProperty(x => x.ReplacedById, into?.Id), ct);
-            db.Accounts.Remove(a);
+            await DeleteAsync(db, months, savings, a, into, ct);
+            return Results.NoContent();
+        });
+
+        // Its kind, when the bank or the import guessed it wrong (DECISIONS.md 319). Checking and savings can trade places: the
+        // transfers to and from it are filed again, since money into savings is saving and money into checking isn't. A card
+        // can't become a bank account or the other way round: its amounts read the other way round.
+        g.MapPut("/{id:guid}/type", async (Guid id, AccountTypeRequest req, HttpContext ctx, AppDbContext db, SavingsService savings, CancellationToken ct) =>
+        {
+            var householdId = ctx.User.HouseholdId();
+            var a = await db.Accounts.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
+            if (a is null) return Results.NotFound();
+            if (!Enum.IsDefined(req.Type))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["type"] = ["Unknown account type."] });
+            if (req.Type == a.Type) return Results.NoContent();
+            if (a.Type == AccountType.CreditCard || req.Type == AccountType.CreditCard)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["type"] =
+                    ["A card's amounts read the other way round from a bank account's, so one can't become the other. Add the right account and delete this one."] });
+            // Savings no more: its goals keep what they've saved, tracked by hand, and its share goes to your other savings.
+            if (a.Type == AccountType.Savings) await MoveDependentsAsync(db, savings, a, null, ct);
+            a.Type = req.Type;
             await db.SaveChangesAsync(ct);
-            await RedirectSweepsAsync(db, months, householdId, sweeps, into, ct);
+            await RefileTransfersAsync(db, householdId, a.Id, ct);
+            return Results.NoContent();
+        });
+
+        // "Count in budget" (DECISIONS.md 319): left out, it's an account you see but don't budget with. Every month leaves it
+        // out, past ones too, and so do the payday tasks, Debt and Savings.
+        g.MapPut("/{id:guid}/budget", async (Guid id, CountInBudgetRequest req, HttpContext ctx, AppDbContext db, SavingsService savings, CancellationToken ct) =>
+        {
+            var a = await db.Accounts.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == ctx.User.HouseholdId(), ct);
+            if (a is null) return Results.NotFound();
+            if (a.IncludedInBudget == req.Included) return Results.NoContent();
+            // Savings that stops counting: its goals keep what they've saved, tracked by hand, and its share goes to your other savings.
+            if (!req.Included && a.Type == AccountType.Savings) await MoveDependentsAsync(db, savings, a, null, ct);
+            a.IncludedInBudget = req.Included;
+            await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 
@@ -144,6 +200,53 @@ public static class AccountManagement
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
+    }
+
+    /// <summary>Closes an account, moving what pointed at it to <paramref name="into"/> (see <see cref="MoveDependentsAsync"/>).</summary>
+    public static async Task CloseAsync(AppDbContext db, BudgetMonthService months, SavingsService savings, Account a, Account? into, CancellationToken ct)
+    {
+        var (_, today, _) = await months.ContextAsync(a.HouseholdId, ct);
+        var sweeps = await MoveDependentsAsync(db, savings, a, into, ct);
+        (a.ClosedOn, a.ReplacedById) = (today, into?.Id);
+        await db.SaveChangesAsync(ct);
+        await RedirectSweepsAsync(db, months, a.HouseholdId, sweeps, into, ct);
+    }
+
+    /// <summary>Deletes an account and its transactions, moving what pointed at it to <paramref name="into"/> first.</summary>
+    public static async Task DeleteAsync(AppDbContext db, BudgetMonthService months, SavingsService savings, Account a, Account? into, CancellationToken ct)
+    {
+        var sweeps = await MoveDependentsAsync(db, savings, a, into, ct);
+        // A closed account this one had taken over from now follows what takes over from this one.
+        await db.Accounts.Where(x => x.HouseholdId == a.HouseholdId && x.ReplacedById == a.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.ReplacedById, into?.Id), ct);
+        db.Accounts.Remove(a);
+        await db.SaveChangesAsync(ct);
+        await RedirectSweepsAsync(db, months, a.HouseholdId, sweeps, into, ct);
+    }
+
+    /// <summary>
+    /// Disconnecting a bank (DECISIONS.md 319): its accounts kept as closed history, or deleted with their transactions.
+    /// </summary>
+    public static async Task EndAllAsync(AppDbContext db, BudgetMonthService months, SavingsService savings, IReadOnlyList<Guid> ids, bool delete, CancellationToken ct)
+    {
+        foreach (var id in ids)
+        {
+            if (await db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct) is not { } a) continue;
+            if (delete) await DeleteAsync(db, months, savings, a, null, ct);
+            else if (a.ClosedOn is null) await CloseAsync(db, months, savings, a, null, ct);
+        }
+    }
+
+    /// <summary>Files again every transfer to or from this account, as its kind now says (savings or not).</summary>
+    private static async Task RefileTransfersAsync(AppDbContext db, Guid householdId, Guid id, CancellationToken ct)
+    {
+        var touching = await db.Transactions
+            .Where(t => t.HouseholdId == householdId && t.IsTransfer && t.TransferAccountId != null && (t.TransferAccountId == id || t.AccountId == id))
+            .ToListAsync(ct);
+        var filing = new TransferFiling(db, householdId);
+        foreach (var t in touching)
+            await filing.FileAsync(t, t.TransferAccountId, null, null, create: false, ct);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>The account picked to take over: one of yours, open, of the same kind, and not this one.</summary>

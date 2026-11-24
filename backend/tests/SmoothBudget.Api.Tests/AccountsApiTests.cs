@@ -9,6 +9,8 @@ using SmoothBudget.Api.Budget;
 using SmoothBudget.Api.Data;
 using SmoothBudget.Api.Payday;
 using SmoothBudget.Api.Savings;
+using SmoothBudget.Api.Transactions;
+using SmoothBudget.Core.Security;
 using SmoothBudget.Core.Budgeting;
 using SmoothBudget.Core.Transactions;
 
@@ -157,5 +159,89 @@ public class AccountsApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/accounts/{savings.Id}")).StatusCode);
         var fund = (await c.GetFromJsonAsync<SavingsSummaryDto>("/api/savings", Json))!.Goals.Single(g => g.Name == "Test Fund");
         Assert.Equal(((Guid?)null, 250_00L, 250_00L), (fund.AccountId, fund.ManualSavedCents, fund.SavedCents));
+    }
+
+    [Fact]
+    public async Task A_savings_account_that_was_checking_all_along_files_its_transfers_again()
+    {
+        // DECISIONS.md 319: the import guessed savings; it's really a second checking account.
+        var (c, h) = await NewUserAsync();
+        var checking = New(h, "Main Checking", AccountType.Checking, 900_00, 60);
+        var wrong = New(h, "Second Account", AccountType.Savings, 300_00, 60, percent: 100);
+        var card = New(h, "Test Card", AccountType.CreditCard, -50_00, 60);
+        var line = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Savings", Type = CategoryType.SavingsTransfer, MonthlyLimitCents = 100_00 };
+        var goal = new SavingsGoal { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Goal", TargetCents = 1_000_00, AccountId = wrong.Id, CreatedUtc = DateTime.UtcNow };
+        var move = new Transaction
+        {
+            Id = Guid.NewGuid(), HouseholdId = h, AccountId = checking.Id, Date = new DateOnly(2027, 2, 20), AmountCents = 80_00, Merchant = "TRANSFER OUT",
+            Description = "TEST", Kind = TransactionKind.Transfer, NeedsReview = true, Source = DataSource.Csv, CreatedUtc = DateTime.UtcNow,
+        };
+        await SeedAsync(checking, wrong, card, line, goal, move);
+        await c.PostAsJsonAsync($"/api/transactions/{move.Id}/transfer", new TransferRequest(wrong.Id), Json);
+        Assert.Equal(line.Id, await DbAsync(db => db.Transactions.Where(t => t.Id == move.Id).Select(t => t.CategoryId).SingleAsync()));
+
+        // A card can't trade places with a bank account.
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync($"/api/accounts/{card.Id}/type", new AccountTypeRequest(AccountType.Checking), Json)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/accounts/{wrong.Id}/type", new AccountTypeRequest(AccountType.Checking), Json)).StatusCode);
+        // Money into checking isn't saving: off the Savings line. Its goal keeps what it had, by hand.
+        Assert.Null(await DbAsync(db => db.Transactions.Where(t => t.Id == move.Id).Select(t => t.CategoryId).SingleAsync()));
+        var g = await DbAsync(db => db.SavingsGoals.SingleAsync(x => x.Id == goal.Id));
+        Assert.Equal(((Guid?)null, (long?)300_00), (g.AccountId, g.ManualSavedCents));
+        Assert.Equal(2, (await c.GetFromJsonAsync<List<AccountBalanceDto>>("/api/accounts/balances?type=checking", Json))!.Count);
+    }
+
+    [Fact]
+    public async Task Leaving_an_account_out_of_the_budget_takes_its_spending_out_and_back()
+    {
+        var (c, h) = await NewUserAsync();
+        var side = New(h, "Side Checking", AccountType.Checking, 100_00, 60);
+        var food = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Food", Type = CategoryType.Variable, MonthlyLimitCents = 400_00 };
+        await SeedAsync(side, food, Spend(h, side, food, 35_00, 19));
+        var spent = await SpentAsync(c);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/accounts/{side.Id}/budget", new CountInBudgetRequest(false), Json)).StatusCode);
+        Assert.Equal(spent - 35_00, await SpentAsync(c));
+        var listed = (await c.GetFromJsonAsync<List<ManagedAccountDto>>("/api/accounts/manage", Json))!.Single(a => a.Id == side.Id);
+        Assert.False(listed.IncludedInBudget);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/accounts/{side.Id}/budget", new CountInBudgetRequest(true), Json)).StatusCode);
+        Assert.Equal(spent, await SpentAsync(c));
+    }
+
+    [Fact]
+    public async Task An_account_you_track_yourself_starts_with_its_balance_and_one_without_asks_for_it()
+    {
+        var (c, _) = await NewUserAsync();
+        var mine = (await (await c.PostAsJsonAsync("/api/accounts", new SmoothBudget.Api.Import.CreateAccountRequest("Cash Jar", AccountType.Checking, null, 120_50), Json))
+            .Content.ReadFromJsonAsync<SmoothBudget.Api.Import.AccountDto>(Json))!;
+        var csv = (await (await c.PostAsJsonAsync("/api/accounts", new SmoothBudget.Api.Import.CreateAccountRequest("Uploaded", AccountType.Savings, "1234"), Json))
+            .Content.ReadFromJsonAsync<SmoothBudget.Api.Import.AccountDto>(Json))!;
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync("/api/accounts", new SmoothBudget.Api.Import.CreateAccountRequest("Card", AccountType.CreditCard, null, 10_00), Json)).StatusCode);
+
+        var list = (await c.GetFromJsonAsync<List<ManagedAccountDto>>("/api/accounts/manage", Json))!;
+        var m = list.Single(a => a.Id == mine.Id);
+        Assert.Equal(("Manual", 120_50L, new DateOnly(2027, 2, 24), (string?)null), (m.Source, m.BalanceCents, m.BalanceAsOf!.Value, m.Attention));
+        Assert.StartsWith("No balance yet", list.Single(a => a.Id == csv.Id).Attention);
+    }
+
+    [Fact]
+    public async Task Disconnecting_a_bank_can_keep_its_accounts_as_closed_history()
+    {
+        var (c, h) = await NewUserAsync();
+        string token;
+        using (var scope = app.Services.CreateScope())
+            token = scope.ServiceProvider.GetRequiredService<SecretBox>().Encrypt("access-sandbox-test");
+        var item = new PlaidItem { Id = Guid.NewGuid(), HouseholdId = h, PlaidItemId = $"item-{Guid.NewGuid():N}", AccessTokenEncrypted = token, InstitutionName = "Test Bank", CreatedUtc = DateTime.UtcNow };
+        var linked = New(h, "Linked Checking", AccountType.Checking, 400_00, 60);
+        (linked.PlaidItemId, linked.PlaidAccountId, linked.Source) = (item.Id, $"acct-{Guid.NewGuid():N}", DataSource.Plaid);
+        var food = new Category { Id = Guid.NewGuid(), HouseholdId = h, Name = "Test Food", Type = CategoryType.Variable, MonthlyLimitCents = 400_00 };
+        await SeedAsync(item, linked, food, Spend(h, linked, food, 25_00, 21));
+        var spent = await SpentAsync(c);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/plaid/items/{item.Id}?accounts=close")).StatusCode);
+        var a = (await c.GetFromJsonAsync<List<ManagedAccountDto>>("/api/accounts/manage", Json))!.Single(x => x.Id == linked.Id);
+        Assert.Equal((new DateOnly(2027, 2, 24), false, (Guid?)null), (a.ClosedOn!.Value, a.BankSynced, a.BankId));
+        Assert.Equal(spent, await SpentAsync(c)); // its history stays
     }
 }

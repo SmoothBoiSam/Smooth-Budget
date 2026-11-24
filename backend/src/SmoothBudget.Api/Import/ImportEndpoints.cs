@@ -8,7 +8,8 @@ namespace SmoothBudget.Api.Import;
 
 /// <param name="BankSynced">True when the account syncs from the bank through Plaid.</param>
 public record AccountDto(Guid Id, string Name, string Type, string? Mask, string Source, bool IncludedInBudget, bool BankSynced = false, DateOnly? ClosedOn = null);
-public record CreateAccountRequest(string Name, AccountType Type, string? Mask);
+/// <param name="BalanceCents">For an account you track yourself (DECISIONS.md 319): its balance today. It's then yours to update.</param>
+public record CreateAccountRequest(string Name, AccountType Type, string? Mask, long? BalanceCents = null);
 public record ImportBatchDto(Guid Id, Guid AccountId, string AccountName, string FileName, string Format, DateTime ImportedUtc,
     int RowCount, int ImportedCount, int DuplicateCount, int ErrorCount);
 
@@ -36,11 +37,19 @@ public static partial class ImportEndpoints
             if (!Enum.IsDefined(req.Type))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["type"] = ["Unknown account type."] });
 
+            if (req.BalanceCents is { } b && (req.Type == AccountType.CreditCard || Math.Abs(b) > Accounts.AccountManagement.MaxCents))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["balanceCents"] =
+                    [req.Type == AccountType.CreditCard ? "Enter what a card owes on Debt." : "Enter the balance in dollars."] });
             var account = new Account
             {
                 Id = Guid.NewGuid(), HouseholdId = ctx.User.HouseholdId(), Name = name, Type = req.Type, Mask = mask,
-                Source = DataSource.Csv, CreatedUtc = clock.GetUtcNow().UtcDateTime,
+                Source = req.BalanceCents is null ? DataSource.Csv : DataSource.Manual, CreatedUtc = clock.GetUtcNow().UtcDateTime,
             };
+            if (req.BalanceCents is { } start)
+            {
+                var zone = await db.Households.Where(h => h.Id == account.HouseholdId).Select(h => h.TimeZoneId).SingleAsync(ct);
+                (account.CurrentBalanceCents, account.BalanceAsOf) = (start, Home.HomeSummaryService.TodayIn(zone, clock));
+            }
             db.Accounts.Add(account);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new AccountDto(account.Id, account.Name, account.Type.ToString(), account.Mask, account.Source.ToString(), account.IncludedInBudget));

@@ -286,8 +286,9 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
 
 export const budgetApi = {
   accounts: () => request<Account[]>('GET', '/accounts'),
-  createAccount: (name: string, type: Account['type'], mask: string | null) =>
-    request<Account>('POST', '/accounts', { name, type, mask }),
+  /** With a balance, it's an account you track yourself (DECISIONS.md 319). */
+  createAccount: (name: string, type: Account['type'], mask: string | null, balanceCents: number | null = null) =>
+    request<Account>('POST', '/accounts', { name, type, mask, balanceCents }),
   categories: () => request<Category[]>('GET', '/budget/categories'),
   /** back = how many budget months before this one (0 = this month). */
   monthTransactions: (back = 0) =>
@@ -530,7 +531,8 @@ export const plaidApi = {
   confirmAccounts: (itemId: string, mappings: AccountMapping[]) =>
     request<SyncResult>('POST', `/plaid/items/${itemId}/accounts`, { mappings }),
   items: () => request<PlaidItem[]>('GET', '/plaid/items'),
-  removeItem: (id: string) => request<void>('DELETE', `/plaid/items/${id}`),
+  /** Its accounts stay and stop syncing, become closed history ('close'), or go with their transactions ('delete'). */
+  removeItem: (id: string, accounts?: 'close' | 'delete') => request<void>('DELETE', `/plaid/items/${id}${accounts ? `?accounts=${accounts}` : ''}`),
   reconnected: (id: string) => request<SyncResult>('POST', `/plaid/items/${id}/reconnected`),
   syncAll: () => request<SyncResult[]>('POST', '/sync'),
   /** Home's "Update bank data" (DECISIONS.md 242): Plaid checks each bank now (paid, per bank), then everything syncs. */
@@ -1449,6 +1451,17 @@ export interface ManagedAccount {
   transactionCount: number
   firstDate: string | null
   lastDate: string | null
+  includedInBudget: boolean
+  lastSyncedUtc: string | null
+  /** Something it needs from you, in a sentence (DECISIONS.md 319). */
+  attention: string | null
+  /** A savings account's share of each month's savings. */
+  savingsPercent: number
+  /** The savings goals kept in it. */
+  goals: string[] | null
+  aprBps: number | null
+  minimumCents: number | null
+  dueDay: number | null
 }
 
 /** What closing or deleting an account would touch. */
@@ -1473,6 +1486,10 @@ export const accountsApi = {
   reopen: (id: string) => request<void>('POST', `/accounts/${id}/reopen`),
   /** Its transactions go with it. */
   remove: (id: string, moveToId: string | null) => request<void>('DELETE', `/accounts/${id}${moveToId ? `?moveToId=${moveToId}` : ''}`),
+  /** Checking and savings can trade places; the transfers touching it are filed again (DECISIONS.md 319). */
+  setType: (id: string, type: ManagedAccount['type']) => request<void>('PUT', `/accounts/${id}/type`, { type }),
+  /** "Count in budget": left out, every month leaves it out, past ones too. */
+  setInBudget: (id: string, included: boolean) => request<void>('PUT', `/accounts/${id}/budget`, { included }),
   /** For an account the bank doesn't sync: its balance as of today. */
   setBalance: (id: string, balanceCents: number) => request<void>('PUT', `/accounts/${id}/balance`, { balanceCents }),
   cash: () => request<Cash>('GET', '/accounts/cash'),

@@ -190,9 +190,14 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
     await load()
   }
 
-  async function remove(item: PlaidItem) {
-    if (!(await ask(`Disconnect ${item.institutionName ?? 'this bank'}? Its accounts and history stay; they just stop syncing.`, { yes: 'Disconnect', danger: true }))) return
-    await run('Disconnecting…', () => plaidApi.removeItem(item.id))
+  // Disconnecting asks what becomes of the bank's accounts (DECISIONS.md 319).
+  const [ending, setEnding] = useState<string | null>(null)
+  async function remove(item: PlaidItem, accounts?: 'close' | 'delete') {
+    const name = item.institutionName ?? 'this bank'
+    if (accounts === 'delete' && !(await ask(`Delete ${name}'s accounts and every transaction on them? Past months lose what they counted. This can’t be undone.`, { yes: 'Delete', danger: true })))
+      return
+    setEnding(null)
+    await run('Disconnecting…', () => plaidApi.removeItem(item.id, accounts))
     await load()
     onChanged()
   }
@@ -261,10 +266,27 @@ export default function BankConnections({ onChanged }: { onChanged: () => void }
                       </button>
                     )}
                     {/* "Refresh categories from bank" moved to Budget → Categories (DECISIONS.md 176). */}
-                    <button type="button" onClick={() => remove(i)} className={`${chip} text-danger!`}>
+                    <button type="button" onClick={() => setEnding(ending === i.id ? null : i.id)} className={`${chip} text-danger!`}>
                       Disconnect
                     </button>
                   </div>
+                  {ending === i.id && (
+                    <div className="mt-3 space-y-2 rounded-2xl neu-inset p-3 text-sm">
+                      <p className="text-ink-soft">Disconnect {i.institutionName ?? 'this bank'}? It stops syncing. Its accounts:</p>
+                      <button type="button" disabled={busy !== null} onClick={() => void remove(i, 'close')} className={`${chip} block w-full text-left`}>
+                        Keep as closed history <span className="text-ink-soft">(past months stay as they are)</span>
+                      </button>
+                      <button type="button" disabled={busy !== null} onClick={() => void remove(i)} className={`${chip} block w-full text-left`}>
+                        Keep tracking them <span className="text-ink-soft">(by upload or by hand)</span>
+                      </button>
+                      <button type="button" disabled={busy !== null} onClick={() => void remove(i, 'delete')} className={`${chip} block w-full text-left text-danger!`}>
+                        Delete them and their transactions
+                      </button>
+                      <button type="button" onClick={() => setEnding(null)} className={`${smallBtn} w-full`}>
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

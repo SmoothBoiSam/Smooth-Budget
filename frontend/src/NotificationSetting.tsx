@@ -127,7 +127,7 @@ export default function NotificationSetting() {
   )
 }
 
-function Switch({ on, disabled, onClick, labelledBy, small }: { on: boolean; disabled?: boolean; onClick: () => void; labelledBy: string; small?: boolean }) {
+export function Switch({ on, disabled, onClick, labelledBy, small }: { on: boolean; disabled?: boolean; onClick: () => void; labelledBy: string; small?: boolean }) {
   return (
     <button
       type="button"
