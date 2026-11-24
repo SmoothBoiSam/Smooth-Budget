@@ -14,7 +14,7 @@ The app has five tabs.
 - **Home:**
   - **Left to Spend** for the budget month, with a ring and a cat that shows at a glance how much is left.
   - **Safe to Spend** when checking might not keep up before the next payday.
-  - The month overview: income in vs expected, bills, spending, debt and savings.
+  - The month overview, in numbers: income in vs expected, bills, spending, debt and savings.
   - The next payday and the next bills.
   - Notices for anything that needs you, like a bank to reconnect or a friend's late payment.
   - Pull to refresh, and **Update bank data**, which asks Plaid to check every bank now, within monthly limits.
@@ -37,7 +37,7 @@ The app has five tabs.
   - **Income:** past and expected income, including bonuses you expect.
   - **Debit:** checking and cash.
   - **Debt:** cards followed from their accounts and loans by hand, APR and minimums from the bank (Plaid Liabilities), and expected interest.
-    - The payoff engine uses Avalanche by default and compares Snowball. It shows a debt-free date, a payoff chart, and an "extra each month" what-if, under **Payment settings**.
+    - The payoff engine uses Avalanche by default and compares Snowball. It shows a debt-free date, a payoff chart under a line at your cards' total credit limit, and an "extra each month" what-if, under **Payment settings**.
   - **Savings:** balances, counting transfers still on their way in. Goals with projected dates, a rainy-day fund, and a 12-month chart. **Payment settings** splits each month's savings between your savings accounts by percent, and the pay period tasks send each its part.
   - **Transactions:** every transaction, with search.
 - **More:**

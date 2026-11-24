@@ -135,7 +135,12 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
 
       {/* One Owed card (DECISIONS.md 289): the total, when you'll be debt-free, progress, then the chart. */}
       {plan && !plan.neverPaysOff && plan.chart.length > 1 ? (
-        <PayoffChart past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))} points={plan.chart} owedCents={s.owedCents}>
+        <PayoffChart
+          past={(s.history ?? []).map((h) => ({ month: h.month, balanceCents: h.owedCents }))}
+          points={plan.chart}
+          owedCents={s.owedCents}
+          limitCents={visible.reduce((sum, d) => sum + (d.isCard ? (d.creditLimitCents ?? 0) : 0), 0)}
+        >
           {owedLines}
         </PayoffChart>
       ) : (
@@ -403,16 +408,19 @@ function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
  * Total balance over time under the plan: one series (the title names it), a 2px line over a light fill,
  * recessive gridlines, and a crosshair tooltip on hover or touch.
  */
-/** What you owed over the last year (solid) running into your plan from here (dashed). */
+/** What you owed over the last year (solid) running into your plan from here (dashed), under your cards' total credit limit (DECISIONS.md 320). */
 function PayoffChart({
   past,
   points: plan,
   owedCents,
+  limitCents,
   children,
 }: {
   past: { month: string; balanceCents: number }[]
   points: { month: string; balanceCents: number }[]
   owedCents: number
+  /** The visible cards' limits added up; 0 when none is known. */
+  limitCents: number
   children: ReactNode
 }) {
   const [hover, setHover] = useState<number | null>(null)
@@ -421,7 +429,7 @@ function PayoffChart({
   const W = 340
   const H = 150
   const pad = { l: 44, r: 8, t: 10, b: 22 }
-  const max = Math.max(...points.map((p) => p.balanceCents), 1)
+  const max = Math.max(...points.map((p) => p.balanceCents), limitCents, 1)
   const top = niceCeil(max)
   const x = (i: number) => pad.l + (i / (points.length - 1)) * (W - pad.l - pad.r)
   const y = (c: number) => pad.t + (1 - c / top) * (H - pad.t - pad.b)
@@ -457,7 +465,7 @@ function PayoffChart({
         viewBox={`0 0 ${W} ${H}`}
         className="mt-2 w-full touch-none select-none"
         role="img"
-        aria-label={`Total owed falls from ${formatCents(points[0].balanceCents)} to $0 by ${formatMonth(points[points.length - 1].month)}.`}
+        aria-label={`Total owed falls from ${formatCents(points[0].balanceCents)} to $0 by ${formatMonth(points[points.length - 1].month)}.${limitCents > 0 ? ` Credit limit ${formatCents(limitCents)}.` : ''}`}
         onPointerMove={onMove}
         onPointerDown={onMove}
         onPointerLeave={() => setHover(null)}
@@ -470,6 +478,14 @@ function PayoffChart({
             </text>
           </g>
         ))}
+        {limitCents > 0 && (
+          <g>
+            <line x1={pad.l} x2={W - pad.r} y1={y(limitCents)} y2={y(limitCents)} className="stroke-danger" strokeWidth={1.5} strokeDasharray="6 4" />
+            <text x={W - pad.r} y={y(limitCents) - 4} textAnchor="end" className="fill-slate-500 text-[10px] tabular-nums">
+              Limit {shortMoney(limitCents)}
+            </text>
+          </g>
+        )}
         <path d={area} className="fill-sky-700" fillOpacity={0.12} />
         {pastLine && <path d={pastLine} className="stroke-slate-500" strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round" />}
         <path d={line} className="stroke-sky-700" strokeWidth={2} strokeDasharray={past.length > 0 ? '5 4' : undefined} fill="none" strokeLinejoin="round" strokeLinecap="round" />

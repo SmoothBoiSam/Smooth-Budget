@@ -297,19 +297,16 @@ const overviewHref = { bills: '#/budget', spending: '#/budget', debt: '#/debt', 
 /**
  * Home's Month overview (DECISIONS.md 286): the month's math in one place. Money in at the top (received of expected),
  * then minus each kind of plan (spent or paid of its limit), minus carried-over overspending and spending not in a
- * category when there is any, equals what isn't planned yet. Each line opens its tab.
+ * category when there is any, equals what isn't planned yet. Each line opens its tab. Numbers only, no bars (DECISIONS.md 320).
  */
 function MonthOverviewLines({ o }: { o: MonthOverview }) {
   const short = o.notPlannedCents < 0
   return (
     <ul aria-label="This month's money" className="text-xs">
-      <OverviewLine label="Income" href="#/income" done={o.incomeReceivedCents} of={o.incomeExpectedCents} bar="bg-good" />
-      {o.lines.map((l) => {
-        const over = l.spentCents > l.limitCents && l.limitCents > 0
-        const filled = l.limitCents > 0 && l.spentCents >= l.limitCents
-        const bar = over && (l.key === 'spending' || l.key === 'bills') ? 'bg-danger' : l.key === 'spending' ? 'bg-accent' : filled ? 'bg-good' : 'bg-gold'
-        return <OverviewLine key={l.key} minus label={l.label} href={overviewHref[l.key]} done={l.spentCents} of={l.limitCents} bar={bar} />
-      })}
+      <OverviewLine label="Income" href="#/income" done={o.incomeReceivedCents} of={o.incomeExpectedCents} />
+      {o.lines.map((l) => (
+        <OverviewLine key={l.key} minus label={l.label} href={overviewHref[l.key]} done={l.spentCents} of={l.limitCents} />
+      ))}
       {o.carriedOverCents > 0 && <OverviewLine minus label="Carried over" href="#/budget" amount={o.carriedOverCents} danger />}
       {o.notInCategoryCents > 0 && <OverviewLine minus label="Not in a category" href="#/tasks/transactions" amount={o.notInCategoryCents} danger />}
       <li className="mt-1 border-t border-ink/10 pt-1">
@@ -325,26 +322,18 @@ function MonthOverviewLines({ o }: { o: MonthOverview }) {
   )
 }
 
-/** One Month overview line: name, a bar of done ÷ of, and "$X of $Y"; or just an amount for a line with no plan. */
-function OverviewLine(p: { label: string; href: string; minus?: boolean; done?: number; of?: number; bar?: string; amount?: number; danger?: boolean }) {
-  const used = p.of && p.of > 0 ? Math.min(1, Math.max(0, (p.done ?? 0) / p.of)) : 0
+/** One Month overview line: name and "$X of $Y", or just an amount for a line with no plan. */
+function OverviewLine(p: { label: string; href: string; minus?: boolean; done?: number; of?: number; amount?: number; danger?: boolean }) {
   return (
     <li>
-      <a href={p.href} className="grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-3 py-1.5">
-        <span className="truncate text-ink-soft">
+      <a href={p.href} className="flex items-baseline justify-between gap-3 py-1.5">
+        <span className="min-w-0 truncate text-ink-soft">
           <span aria-hidden className="inline-block w-3 text-ink-faint">
             {p.minus ? '−' : ''}
           </span>
           {p.label}
         </span>
-        {p.amount === undefined ? (
-          <span aria-hidden className="block h-2 overflow-hidden rounded-full neu-inset">
-            <span className={`block h-full rounded-full ${p.bar}`} style={{ width: `${used * 100}%` }} />
-          </span>
-        ) : (
-          <span />
-        )}
-        <span className={`text-right tabular-nums ${p.danger ? 'font-semibold text-danger' : ''}`}>
+        <span className={`shrink-0 text-right tabular-nums ${p.danger ? 'font-semibold text-danger' : ''}`}>
           {p.amount !== undefined ? (
             formatCents(p.amount)
           ) : (
