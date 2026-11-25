@@ -26,7 +26,7 @@ The app has five tabs.
   - **Review transactions:** file anything the app couldn't categorize. One card covers spending, bills, income and transfers, and can make a merchant rule.
   - **Pay period tasks:** for each paycheck, what to keep in checking for bills, what to pay the cards, and what to move to savings.
     - Tasks only check themselves off, from what your accounts show; there's nothing to tick by hand. Moves to the same account merge into one.
-    - Each task shows how far along it is: how far over or short an account is for its bills, or how much of a move has been sent, with a bar.
+    - Each task shows how far along it is: how far over or short an account is for its bills, or how much of a move has been sent and how much is left, with a bar.
     - A later check in the month sends what the earlier ones left of the month's card payment and savings, not just an even share.
     - They never ask for more than checking can spare right now. The rest waits for a bonus still to come, or for room in checking, and the task says when.
   - **Upload** a new schedule or pay stub.

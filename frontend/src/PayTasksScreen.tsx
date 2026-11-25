@@ -288,6 +288,12 @@ function SendLines({ item, live }: { item: PlanItem; live: boolean }) {
       </p>
       {showTerms && <p className="mt-0.5 text-xs text-ink-soft">{terms.join(' + ')}</p>}
       {item.skipped && <p className="mt-0.5 text-xs text-ink-soft">Skipped: these charges stay on the card.</p>}
+      {/* Part of it gone: how much, in words as well as the bar (DECISIONS.md 322). */}
+      {live && !item.skipped && !item.done && sent > 0 && (
+        <p className="mt-0.5 text-xs font-medium text-accent tabular-nums">
+          {formatCents(sent)} sent · {formatCents(left)} to go
+        </p>
+      )}
       {live && !item.skipped && item.cents > 0 && (
         <div role="img" aria-label={`${formatCents(sent)} of ${formatCents(item.cents)} sent`} className="mt-2 h-2 overflow-hidden rounded-full neu-inset">
           <div className={`h-full rounded-full ${item.done ? 'bg-good' : 'bg-accent'}`} style={{ width: `${(sent / item.cents) * 100}%` }} />
