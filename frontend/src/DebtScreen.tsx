@@ -4,7 +4,6 @@ import { ApiError, budgetEditApi, debtApi, savingsShare, type Debt, type DebtFie
 import { useResume } from './offline'
 import { InterestCard } from './DebtInterest'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
-import { AccountsCard } from './Accounts'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -154,7 +153,6 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
       )}
 
       <InterestCard />
-      <AccountsCard section="debt" />
 
       {plan && (
         <section aria-labelledby="plan-h" className="mt-4 rounded-3xl neu p-4">

@@ -21,7 +21,9 @@ public record CashDto(long TotalCents, IReadOnlyList<Core.Budgeting.BalancePoint
 /// <summary>
 /// The Accounts cards on Debit, Debt and Savings (DECISIONS.md 256): each account of that kind with its balance now. A bank's
 /// current balance leaves pending activity out (DECISIONS.md 255), so that's taken off here; an account the bank doesn't
-/// sync is the balance last given, moved by every transaction since (DECISIONS.md 189), pending ones included.
+/// sync is the balance last given, moved by every transaction since (DECISIONS.md 189), pending ones included. A card the
+/// bank doesn't sync owes what Debt says once you've typed its balance there (DECISIONS.md 253, 323): its uploads alone
+/// can miss what it owed before them.
 /// </summary>
 public static class AccountBalances
 {
@@ -56,9 +58,13 @@ public static class AccountBalances
         var unlinked = accounts.Where(a => a.PlaidAccountId is null).Select(a => a.Id).ToList();
         var activity = await db.Transactions.AsNoTracking().Where(t => unlinked.Contains(t.AccountId))
             .Select(t => new { t.AccountId, t.Date, t.AmountCents }).ToListAsync(ct);
+        var owedOnDebt = await db.DebtAccounts.AsNoTracking()
+            .Where(d => d.AccountId != null && unlinked.Contains(d.AccountId.Value) && d.Account!.Type == AccountType.CreditCard && d.TypedOn != null)
+            .ToDictionaryAsync(d => d.AccountId!.Value, d => d.BalanceCents, ct);
         return accounts.ToDictionary(a => a.Id, a =>
         {
             var pend = pending.GetValueOrDefault(a.Id);
+            if (owedOnDebt.TryGetValue(a.Id, out var owed)) return (-owed, pend);
             var balance = a.PlaidAccountId is not null
                 ? a.CurrentBalanceCents - pend
                 : a.CurrentBalanceCents - activity.Where(t => t.AccountId == a.Id && (a.BalanceAsOf is null || t.Date > a.BalanceAsOf)).Sum(t => t.AmountCents);

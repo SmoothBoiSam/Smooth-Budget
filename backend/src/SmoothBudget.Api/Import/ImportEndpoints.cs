@@ -9,7 +9,8 @@ namespace SmoothBudget.Api.Import;
 /// <param name="BankSynced">True when the account syncs from the bank through Plaid.</param>
 public record AccountDto(Guid Id, string Name, string Type, string? Mask, string Source, bool IncludedInBudget, bool BankSynced = false, DateOnly? ClosedOn = null);
 /// <param name="BalanceCents">For an account you track yourself (DECISIONS.md 319): its balance today. It's then yours to update.</param>
-public record CreateAccountRequest(string Name, AccountType Type, string? Mask, long? BalanceCents = null);
+/// <param name="OwedCents">For a card: what it owes today, as if typed on Debt (DECISIONS.md 324). The add form asks for it.</param>
+public record CreateAccountRequest(string Name, AccountType Type, string? Mask, long? BalanceCents = null, long? OwedCents = null);
 public record ImportBatchDto(Guid Id, Guid AccountId, string AccountName, string FileName, string Format, DateTime ImportedUtc,
     int RowCount, int ImportedCount, int DuplicateCount, int ErrorCount);
 
@@ -39,7 +40,10 @@ public static partial class ImportEndpoints
 
             if (req.BalanceCents is { } b && (req.Type == AccountType.CreditCard || Math.Abs(b) > Accounts.AccountManagement.MaxCents))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["balanceCents"] =
-                    [req.Type == AccountType.CreditCard ? "Enter what a card owes on Debt." : "Enter the balance in dollars."] });
+                    [req.Type == AccountType.CreditCard ? "For a card, enter what it owes instead." : "Enter the balance in dollars."] });
+            if (req.OwedCents is { } o && (req.Type != AccountType.CreditCard || o < 0 || o > Accounts.AccountManagement.MaxCents))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["owedCents"] =
+                    [req.Type != AccountType.CreditCard ? "Only a card owes." : "Enter what it owes in dollars, like 1250.00."] });
             var account = new Account
             {
                 Id = Guid.NewGuid(), HouseholdId = ctx.User.HouseholdId(), Name = name, Type = req.Type, Mask = mask,
@@ -51,6 +55,18 @@ public static partial class ImportEndpoints
                 (account.CurrentBalanceCents, account.BalanceAsOf) = (start, Home.HomeSummaryService.TodayIn(zone, clock));
             }
             db.Accounts.Add(account);
+            // A card starts with what it owes today, as if you'd typed it on Debt: its charges and payments follow from there
+            // (DECISIONS.md 253, 324).
+            if (req.OwedCents is { } owed)
+            {
+                var zone = await db.Households.Where(h => h.Id == account.HouseholdId).Select(h => h.TimeZoneId).SingleAsync(ct);
+                var today = Home.HomeSummaryService.TodayIn(zone, clock);
+                db.DebtAccounts.Add(new DebtAccount
+                {
+                    Id = Guid.NewGuid(), HouseholdId = account.HouseholdId, AccountId = account.Id, Name = name, BalanceCents = owed,
+                    StartingBalanceCents = owed, StartedOn = today, TypedBalanceCents = owed, TypedOn = today, CreatedUtc = account.CreatedUtc,
+                });
+            }
             await db.SaveChangesAsync(ct);
             return Results.Ok(new AccountDto(account.Id, account.Name, account.Type.ToString(), account.Mask, account.Source.ToString(), account.IncludedInBudget));
         });

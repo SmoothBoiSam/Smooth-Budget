@@ -287,8 +287,8 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
 export const budgetApi = {
   accounts: () => request<Account[]>('GET', '/accounts'),
   /** With a balance, it's an account you track yourself (DECISIONS.md 319). */
-  createAccount: (name: string, type: Account['type'], mask: string | null, balanceCents: number | null = null) =>
-    request<Account>('POST', '/accounts', { name, type, mask, balanceCents }),
+  createAccount: (name: string, type: Account['type'], mask: string | null, balanceCents: number | null = null, owedCents: number | null = null) =>
+    request<Account>('POST', '/accounts', { name, type, mask, balanceCents, owedCents }),
   categories: () => request<Category[]>('GET', '/budget/categories'),
   /** back = how many budget months before this one (0 = this month). */
   monthTransactions: (back = 0) =>

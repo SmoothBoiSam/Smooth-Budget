@@ -655,8 +655,8 @@ function BalanceField({ account: a, onSaved }: { account: ManagedAccount; onSave
 }
 
 /**
- * A new account the bank doesn't sync: a name, its kind, optionally its last four digits (never the full number), and for
- * one you track yourself, its balance today.
+ * A new account the bank doesn't sync: a name, its kind, optionally its last four digits (never the full number), for
+ * one you track yourself its balance today, and for a card what it owes today (DECISIONS.md 324), required.
  */
 export function AddAccountForm({ onDone, withBalance = false }: { onDone: (a: Account | null) => void; withBalance?: boolean }) {
   const [name, setName] = useState('')
@@ -664,21 +664,24 @@ export function AddAccountForm({ onDone, withBalance = false }: { onDone: (a: Ac
   const [mask, setMask] = useState('')
   const [balance, setBalance] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const asksBalance = withBalance && type !== 'CreditCard'
+  const card = type === 'CreditCard'
+  const asksBalance = withBalance || card
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     const cents = asksBalance ? centsFrom(balance) : null
-    if (asksBalance && cents === null) return setError('Enter its balance in dollars, like 1250.00.')
+    if (asksBalance && cents === null) return setError(card ? 'Enter what it owes in dollars, like 1250.00 (0 if nothing).' : 'Enter its balance in dollars, like 1250.00.')
+    if (card && cents! < 0) return setError('Enter what it owes as a positive amount.')
     try {
-      onDone(await budgetApi.createAccount(name, type, mask || null, cents))
+      onDone(await budgetApi.createAccount(name, type, mask || null, card ? null : cents, card ? cents : null))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add account.')
     }
   }
 
-  let note: ReactNode = null
-  if (withBalance && type === 'CreditCard') note = <p className="text-xs text-ink-soft">You’ll enter what it owes on Debt.</p>
+  const note: ReactNode = card ? (
+    <p className="text-xs text-ink-soft">From the card’s app or statement. Its charges and payments count from here, and you can change it on Debt.</p>
+  ) : null
   return (
     <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl neu-inset p-3">
       <input
@@ -710,8 +713,8 @@ export function AddAccountForm({ onDone, withBalance = false }: { onDone: (a: Ac
           onChange={(e) => setBalance(e.target.value)}
           required
           inputMode="decimal"
-          placeholder="Balance today, e.g. 1250.00"
-          aria-label="Balance today"
+          placeholder={card ? 'What it owes now, e.g. 1250.00' : 'Balance today, e.g. 1250.00'}
+          aria-label={card ? 'What it owes now' : 'Balance today'}
           className="block w-full rounded-xl neu-inset px-3 py-2"
         />
       )}

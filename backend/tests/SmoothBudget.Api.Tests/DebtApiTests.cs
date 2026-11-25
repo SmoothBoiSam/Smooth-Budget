@@ -240,5 +240,44 @@ public class DebtApiTests(TestApp app) : IClassFixture<TestApp>
         await Put(c, card, 4_900_00, 1900, 150_00);
         card = (await Summary(c)).Debts.Single();
         Assert.Equal((4_900_00L, 4_900_00L, new DateOnly(2026, 11, 23)), (card.BalanceCents, card.TypedBalanceCents!.Value, card.TypedOn!.Value));
+
+        // More → Accounts shows what Debt says it owes, not what its uploads alone add up to (DECISIONS.md 323).
+        var listed = (await c.GetFromJsonAsync<List<Accounts.ManagedAccountDto>>("/api/accounts/manage", Json))!.Single(a => a.Id == cardAccount);
+        Assert.Equal(-4_900_00, listed.BalanceCents);
+        Assert.Equal(-4_900_00, (await c.GetFromJsonAsync<List<Accounts.AccountBalanceDto>>("/api/accounts/balances?type=card", Json))!.Single().BalanceCents);
+    }
+
+    [Fact]
+    public async Task A_new_card_starts_with_what_it_owes_and_follows_its_charges_from_there()
+    {
+        var (c, household) = await NewUserAsync(); // Nov 20
+        // Only a card owes, and never less than nothing.
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/accounts", new { name = "Test Checking", type = "Checking", owedCents = 10_00 }, Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/accounts", new { name = "Sample Card", type = "CreditCard", owedCents = -1 }, Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/accounts", new { name = "Sample Card", type = "CreditCard", balanceCents = -10_00 }, Json)).StatusCode);
+
+        var made = await c.PostAsJsonAsync("/api/accounts", new { name = "Sample Card", type = "CreditCard", mask = "4321", owedCents = 1_250_00 }, Json);
+        Assert.Equal(HttpStatusCode.OK, made.StatusCode);
+        var account = (await made.Content.ReadFromJsonAsync<AccountDto>(Json))!;
+        var card = (await Summary(c)).Debts.Single();
+        Assert.Equal((1_250_00L, 1_250_00L, 1_250_00L, new DateOnly(2026, 11, 20)),
+            (card.BalanceCents, card.StartingBalanceCents, card.TypedBalanceCents!.Value, card.TypedOn!.Value));
+
+        // An upload's older charges are already in what it owes; a later one adds.
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            foreach (var (day, cents) in new[] { (12, 80_00L), (21, 30_00L) })
+                db.Transactions.Add(new Data.Transaction
+                {
+                    Id = Guid.NewGuid(), HouseholdId = household, AccountId = account.Id, Date = new DateOnly(2026, 11, day), AmountCents = cents,
+                    Merchant = "TEST SHOP", Description = "TEST SHOP", Kind = Core.Transactions.TransactionKind.Purchase, CreatedUtc = DateTime.UtcNow,
+                });
+            await db.SaveChangesAsync();
+        }
+        app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 22, 19, 0, 0, TimeSpan.Zero));
+        Assert.Equal(1_280_00, (await Summary(c)).Debts.Single().BalanceCents);
+        var listed = (await c.GetFromJsonAsync<List<Accounts.ManagedAccountDto>>("/api/accounts/manage", Json))!.Single(a => a.Id == account.Id);
+        Assert.Equal(-1_280_00, listed.BalanceCents);
     }
 }
