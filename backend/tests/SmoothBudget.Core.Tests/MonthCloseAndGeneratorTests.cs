@@ -203,24 +203,8 @@ public class BudgetGeneratorTests
         // Income 3,360.86 − 2,324.00 − minimums 95.00 = 941.86 extra.
         var card = p.Categories.Single(c => c.CategoryId == Card);
         Assert.Equal(95_00 + 941_86, card.ProposedCents);
-        Assert.Equal("Your card minimums add up to $95.00, plus $941.86 left over after everything else, as extra to Visa (24.99% APR, the highest).", card.Explanation);
+        Assert.Equal("Your card minimums add up to $95.00, plus $941.86 extra to Visa (24.99% APR, the highest): all of the $941.86 left after bills, spending and minimums.", card.Explanation);
         Assert.Equal(0, p.UnallocatedCents);
-    }
-
-    [Fact]
-    public void An_extra_set_on_the_debt_tab_drives_the_card_payment()
-    {
-        var visa = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);
-        var mc = new SmoothBudget.Core.Debt.DebtInput(Guid.NewGuid(), "Mastercard", 800_00, 1999, 35_00);
-        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [mc, visa], overrides: new BudgetOverrides(DebtExtraCents: 200_00));
-        var card = p.Categories.Single(c => c.CategoryId == Card);
-        Assert.Equal(95_00 + 200_00, card.ProposedCents); // minimums + your extra, not all 941.86 left over
-        Assert.Contains("the extra you set on the Debt tab", card.Explanation);
-        Assert.Equal(741_86, p.UnallocatedCents);
-
-        // More than the month has left: only what's left.
-        var big = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [mc, visa], overrides: new BudgetOverrides(DebtExtraCents: 5_000_00));
-        Assert.Equal(95_00 + 941_86, big.Categories.Single(c => c.CategoryId == Card).ProposedCents);
     }
 
     [Fact]
@@ -248,49 +232,40 @@ public class BudgetGeneratorTests
         Assert.Equal(1_500_00, both.Categories.Single(c => c.CategoryId == Rent).ProposedCents);
     }
 
-    // Milestone 8: what's left goes in your priority order. Everything else: groceries 438 + eating out 136 (trimmed)
+    // DECISIONS.md 321: what's left is shared by one split. Everything else: groceries 438 + eating out 136 (trimmed)
     // + rent 1,650 = 2,224.00; income 3,360.86 − 2,224.00 − Visa minimum 60.00 = 1,076.86 left.
     private static readonly SmoothBudget.Core.Debt.DebtInput Visa = new(Guid.NewGuid(), "Visa", 2_000_00, 2499, 60_00);
-    private static SavingsPlan Plan(long remaining, IReadOnlyList<PriorityStep>? order = null, long? larger = null) =>
-        new(order ?? SavingsPlan.DefaultOrder, "Rainy-day fund", remaining, 1_000_00 - remaining, 1_000_00, larger);
 
     [Fact]
-    public void The_starter_fund_is_funded_first_then_whats_left_goes_to_debt()
+    public void Whats_left_after_the_minimums_is_shared_by_your_split()
     {
-        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa], savings: Plan(750_00));
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa], savings: new SavingsPlan(10));
         var savings = p.Categories.Single(c => c.CategoryId == Savings);
         var card = p.Categories.Single(c => c.CategoryId == Card);
-        Assert.Equal((750_00L, 60_00L + 326_86L), (savings.ProposedCents, card.ProposedCents));
-        Assert.Equal("$750.00 toward your rainy-day fund ($250.00 of $1,000.00 saved), first in your priorities.", savings.Explanation);
-        Assert.Contains("plus $326.86 left over after your rainy-day fund", card.Explanation);
+        // 10% of 1,076.86 is 107.686: savings gets 107.68 and the cards the odd cent.
+        Assert.Equal((107_68L, 60_00L + 969_18L), (savings.ProposedCents, card.ProposedCents));
+        Assert.Equal("10% of the $1,076.86 left after bills, spending and card minimums, as your split says.", savings.Explanation);
+        Assert.Contains("plus $969.18 extra to Visa (24.99% APR, the highest): 90% of the $1,076.86 left", card.Explanation);
         Assert.Equal(0, p.UnallocatedCents);
     }
 
-    [Fact]
-    public void Once_the_starter_fund_is_full_everything_left_goes_to_debt()
+    [Theory]
+    [InlineData(0, 0L, 1_076_86L)]
+    [InlineData(100, 1_076_86L, 0L)]
+    public void All_to_debt_or_all_to_savings_are_splits_too(int percent, long toSavings, long extra)
     {
-        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa], savings: Plan(0));
-        Assert.Equal(0, p.Categories.Single(c => c.CategoryId == Savings).ProposedCents);
-        Assert.Equal(60_00 + 1_076_86, p.Categories.Single(c => c.CategoryId == Card).ProposedCents);
-        Assert.Equal("Your rainy-day fund is full.", p.Categories.Single(c => c.CategoryId == Savings).Explanation);
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa], savings: new SavingsPlan(percent));
+        Assert.Equal((toSavings, 60_00L + extra), (p.Categories.Single(c => c.CategoryId == Savings).ProposedCents, p.Categories.Single(c => c.CategoryId == Card).ProposedCents));
     }
 
     [Fact]
-    public void The_order_is_yours_to_change()
-    {
-        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: true, cardDebts: [Visa],
-            savings: Plan(750_00, [PriorityStep.Debt, PriorityStep.StarterFund, PriorityStep.Savings]));
-        Assert.Equal((0L, 60_00L + 1_076_86L), (p.Categories.Single(c => c.CategoryId == Savings).ProposedCents, p.Categories.Single(c => c.CategoryId == Card).ProposedCents));
-    }
-
-    [Fact]
-    public void Without_card_debt_the_starter_fund_then_larger_savings_share_whats_left()
+    public void Without_card_debt_everything_left_goes_to_savings()
     {
         // No card debt: eating out isn't trimmed (151) and the card line keeps its median (350), so
-        // 3,360.86 − (438 + 151 + 1,650 + 350) = 771.86 left: 300 to the starter fund, 200 to larger goals.
-        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: false, savings: Plan(300_00, larger: 200_00));
-        Assert.Equal(300_00 + 200_00, p.Categories.Single(c => c.CategoryId == Savings).ProposedCents);
-        Assert.Equal(271_86, p.UnallocatedCents); // beyond what you set for larger goals: shown, not hidden
+        // 3,360.86 − (438 + 151 + 1,650 + 350) = 771.86 left, all of it to savings whatever the split.
+        var p = BudgetGenerator.Propose(ThreeMonths, Cats, History(), hasCardDebt: false, savings: new SavingsPlan(10));
+        Assert.Equal(771_86, p.Categories.Single(c => c.CategoryId == Savings).ProposedCents);
+        Assert.Equal(0, p.UnallocatedCents);
     }
 
     [Fact]

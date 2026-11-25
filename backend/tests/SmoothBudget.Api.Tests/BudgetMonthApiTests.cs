@@ -392,7 +392,10 @@ public class BudgetMonthApiTests(TestApp app) : IClassFixture<TestApp>
         var b = await Budget(client);
         Assert.Equal((g.IncomeCents, g.PartnerCents), (b.IncomeExpectedCents, b.PartnerExpectedCents));
         Assert.Equal(eating.ProposedCents, Cat(b, "Eating out").LimitCents);
-        Assert.Equal(g.AllocatedCents, b.PlannedCents);
+        // The demo's split sends everything left to the cards (DECISIONS.md 321), so the generator plans no savings, but $100
+        // already went to savings this month and the month counts what was paid.
+        Assert.Equal(0, g.Categories.Single(c => c.Type == CategoryType.SavingsTransfer).ProposedCents);
+        Assert.Equal(g.AllocatedCents + 100_00, b.PlannedCents);
     }
 
     [Fact]

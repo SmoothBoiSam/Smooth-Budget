@@ -23,7 +23,7 @@ public record DebtDto(
 
 public record ChartPoint(DateOnly Month, long BalanceCents);
 
-/// <param name="ExtraSource">"budget" (what your budget plans for card payments, minus the minimums) or "you" (set on the Debt tab).</param>
+/// <param name="ExtraSource">"budget" (what your budget plans for card payments, minus the minimums: your split's debt share, DECISIONS.md 321) or "you" (a what-if).</param>
 public record DebtPlanDto(
     string Strategy, long MinimumsCents, long ExtraCents, string ExtraSource, long MonthlyPaymentCents, int Months, DateOnly? DebtFreeBy,
     bool NeverPaysOff, long TotalInterestCents, string? FirstTarget, IReadOnlyList<ChartPoint> Chart);
@@ -42,7 +42,7 @@ public record DebtSummaryDto(
 public record DebtHistoryPoint(DateOnly Month, long OwedCents, long PaidCents);
 
 public record DebtRequest(string Name, long? BalanceCents, int? AprBps, long? MinimumCents, int? DueDay, long? CreditLimitCents, long? StartingBalanceCents, bool IsHidden = false);
-public record DebtSettingsRequest(DebtStrategy Strategy, long? ExtraCents);
+public record DebtSettingsRequest(DebtStrategy Strategy);
 public record FromBankResult(int Updated, string? Message);
 
 /// <summary>
@@ -122,7 +122,6 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
         var minimums = inputs.Sum(i => Math.Min(i.MinimumCents, i.BalanceCents));
 
         var (extra, source) = extraOverride is { } e ? (e, "you")
-            : h.ExtraDebtPaymentCents is { } saved ? (saved, "you")
             : (Math.Max(0, await PlannedCardPaymentsAsync(householdId, ct) - minimums - await ShortAsync(h, ct)), "budget");
         extra = Math.Max(0, extra);
 

@@ -19,8 +19,7 @@ public sealed record CurrentBill(Guid CategoryId, string Name, long MonthlyCents
 /// What the automatic budget feeds the generator (DECISIONS.md 135): this month's income from the Payday forecast instead of
 /// a median, and limits you set yourself, which it never changes.
 /// </summary>
-/// <param name="DebtExtraCents">The extra each month you set on the Debt tab: the card payment is the minimums plus this (as far as the month's leftover goes), instead of all the leftover.</param>
-public sealed record BudgetOverrides(long? IncomeCents = null, string? IncomeExplanation = null, IReadOnlyDictionary<Guid, long>? LockedLimits = null, long? DebtExtraCents = null);
+public sealed record BudgetOverrides(long? IncomeCents = null, string? IncomeExplanation = null, IReadOnlyDictionary<Guid, long>? LockedLimits = null);
 
 public sealed record BudgetProposal(
     int MonthsUsed,
@@ -167,9 +166,9 @@ public static class BudgetGenerator
         }).ToList();
 
         // Milestone 5 (DECISIONS.md 89): with your cards' minimums known, the card-payment category is the sum of the
-        // minimums plus whatever is left after everything else, sent to the highest-APR card.
-        // Milestone 8 (DECISIONS.md 103): with savings goals, what's left goes in your priority order (default: starter fund,
-        // then high-APR debt, then larger savings), and the savings line comes from the goals instead of a median.
+        // minimums plus extra from what's left after everything else, sent to the highest-APR card.
+        // DECISIONS.md 321: what's left is shared by one split, your savings percent to the savings line and the rest to the
+        // cards. No card debt: all of it to savings; no savings line: all of it to the cards.
         var owed = (cardDebts ?? []).Where(d => d.BalanceCents > 0).ToList();
         var cardCategory = proposals.FirstOrDefault(p => p.Type == CategoryType.DebtPayment && !locked.ContainsKey(p.CategoryId));
         var savingsCategory = savings is not null ? proposals.FirstOrDefault(p => p.Type == CategoryType.SavingsTransfer && !locked.ContainsKey(p.CategoryId)) : null;
@@ -189,26 +188,9 @@ public static class BudgetGenerator
             var minimums = allMinimums - interestInMinimums;
             var others = proposals.Where(p => p != savingsCategory && (!debtStep || p != cardCategory)).Sum(p => p.ProposedCents);
             var left = Math.Max(0, income + partner - others - minimums);
-            long toStarter = 0, toDebt = 0, toLarger = 0;
-            foreach (var step in savings?.Order ?? SavingsPlan.DefaultOrder)
-            {
-                switch (step)
-                {
-                    case PriorityStep.StarterFund when savings is not null && savingsCategory is not null:
-                        toStarter = Math.Min(left, savings.StarterRemainingCents);
-                        left -= toStarter;
-                        break;
-                    case PriorityStep.Debt when debtStep:
-                        // Your extra from the Debt tab (as far as the leftover goes), or else all of it, to the highest APR.
-                        toDebt = overrides?.DebtExtraCents is { } extra ? Math.Min(left, Math.Max(0, extra)) : left;
-                        left -= toDebt;
-                        break;
-                    case PriorityStep.Savings when savings is not null && savingsCategory is not null:
-                        toLarger = savings.LargerMonthlyCents is { } cap ? Math.Min(left, cap) : left;
-                        left -= toLarger;
-                        break;
-                }
-            }
+            var share = savingsCategory is null ? 0 : !debtStep ? 100 : Math.Clamp(savings!.SavingsPercent, 0, 100);
+            var toSavings = left * share / 100; // rounded down; the odd cents go to the cards
+            var toDebt = debtStep ? left - toSavings : 0;
 
             if (debtStep)
             {
@@ -216,24 +198,19 @@ public static class BudgetGenerator
                 var why = (interestInMinimums > 0
                               ? $"Your card minimums add up to {Money(allMinimums)}. {Money(interestInMinimums)} of that is interest, already on the {interestLine!.Name} line, so {Money(minimums)} here"
                               : $"Your card minimums add up to {Money(minimums)}")
-                          + (toDebt > 0 && overrides?.DebtExtraCents is { } setExtra ? $", plus {Money(toDebt)} extra to {target.Name}" + (toDebt < setExtra ? $" (you set {Money(setExtra)} on the Debt tab; that's what's left this month)." : " (the extra you set on the Debt tab).")
-                             : toDebt > 0 ? $", plus {Money(toDebt)} left over {(toStarter > 0 ? $"after your {savings!.StarterName.ToLowerInvariant()}" : "after everything else")}, as extra to {target.Name} ({target.AprBps / 100m:0.##}% APR, the highest)."
-                             : toStarter > 0 ? $". What's left goes to your {savings!.StarterName.ToLowerInvariant()} first." : ". Nothing is left over for extra this month.");
+                          + (toDebt > 0
+                              ? $", plus {Money(toDebt)} extra to {target.Name} ({target.AprBps / 100m:0.##}% APR, the highest): "
+                                + (share > 0 ? $"{100 - share}% of the {Money(left)} left after bills, spending and minimums, as your split says." : $"all of the {Money(left)} left after bills, spending and minimums.")
+                              : left > 0 ? ". Your split sends what's left after bills, spending and minimums to savings." : ". Nothing is left over for extra this month.");
                 proposals[proposals.IndexOf(cardCategory!)] = cardCategory! with { ProposedCents = minimums + toDebt, Explanation = why };
             }
             if (savingsCategory is not null)
             {
-                var parts = new List<string>();
-                if (toStarter > 0)
-                    parts.Add($"{Money(toStarter)} toward your {savings!.StarterName.ToLowerInvariant()} ({Money(savings.StarterSavedCents)} of {Money(savings.StarterTargetCents)} saved), first in your priorities");
-                else if (savings!.StarterRemainingCents == 0 && savings.StarterTargetCents > 0)
-                    parts.Add($"Your {savings.StarterName.ToLowerInvariant()} is full");
-                if (toLarger > 0)
-                    parts.Add($"{Money(toLarger)} toward your other goals");
-                var why = parts.Count == 0
-                    ? "Nothing is left for savings this month after your priorities come first."
-                    : string.Join("; ", parts) + ".";
-                proposals[proposals.IndexOf(savingsCategory)] = savingsCategory with { ProposedCents = toStarter + toLarger, Explanation = why };
+                var why = left == 0 ? "Nothing is left for savings this month after bills, spending" + (debtStep ? " and card minimums." : ".")
+                    : !debtStep ? $"All of the {Money(left)} left after bills and spending: there's no card debt to pay down."
+                    : toSavings > 0 ? $"{share}% of the {Money(left)} left after bills, spending and card minimums, as your split says."
+                    : "Your split sends what's left after bills, spending and card minimums to your cards.";
+                proposals[proposals.IndexOf(savingsCategory)] = savingsCategory with { ProposedCents = toSavings, Explanation = why };
             }
         }
 

@@ -21,7 +21,7 @@ The app has five tabs.
 - **Budget:**
   - Spending categories, bills (one line each), debt payments and savings, each with spent vs limit and a "Maxed" state.
   - The **automatic budget** proposes limits from your history and your expected pay. It squeezes the least important spending first when a month brings in less. Limits you set yourself stay.
-  - Budget settings: income, where leftover money goes when a month closes (debt, savings or a split), archived and unused categories, and **Refresh categories from bank**. The demo leaves that last one out.
+  - Budget settings: **Extra money**, one savings/debt split for what's left each month after bills, spending and card minimums (and for anything unspent when a month closes); income; archived and unused categories; and **Refresh categories from bank**. The demo leaves that last one out.
 - **Tasks:**
   - **Review transactions:** file anything the app couldn't categorize. One card covers spending, bills, income and transfers, and can make a merchant rule.
   - **Pay period tasks:** for each paycheck, what to keep in checking for bills, what to pay the cards, and what to move to savings.
@@ -37,8 +37,8 @@ The app has five tabs.
   - **Income:** past and expected income, including bonuses you expect.
   - **Debit:** checking and cash.
   - **Debt:** cards followed from their accounts and loans by hand, APR and minimums from the bank (Plaid Liabilities), and expected interest.
-    - The payoff engine uses Avalanche by default and compares Snowball. It shows a debt-free date, a payoff chart under a line at your cards' total credit limit, and an "extra each month" what-if, under **Payment settings**.
-  - **Savings:** balances, counting transfers still on their way in. Goals with projected dates, a rainy-day fund, and a 12-month chart. **Payment settings** splits each month's savings between your savings accounts by percent, and the pay period tasks send each its part.
+    - The payoff engine uses Avalanche by default and compares Snowball. It shows a debt-free date and a payoff chart under a line at your cards' total credit limit. **Payment settings** picks Avalanche or Snowball and shows the extra each month, the debt side of the split.
+  - **Savings:** balances, counting transfers still on their way in. Goals with projected dates from their account's share of the month's savings, a rainy-day fund, and a 12-month chart. **Payment settings** shows the savings side of the split and divides it between your savings accounts by percent, and the pay period tasks send each its part.
   - **Transactions:** every transaction, with search.
 - **More:**
   - **Accounts:** every account by kind, with where its numbers come from (its bank, uploads, or you), its balance, and anything it needs from you. Add one: connect a bank through Plaid, add one you upload CSVs for (Chase checking, Chase credit, Apple Card), or track one yourself with a balance you update. Bank connections and uploaded files are here too.

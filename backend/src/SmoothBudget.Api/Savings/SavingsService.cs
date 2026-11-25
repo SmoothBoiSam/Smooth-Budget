@@ -11,7 +11,7 @@ namespace SmoothBudget.Api.Savings;
 public record SavingsAccountDto(Guid Id, string Name, string? Mask, long BalanceCents, bool BalanceFromBank, long PaceCents, int SharePercent = 0);
 
 public record SavingsGoalDto(
-    Guid Id, string Name, long TargetCents, Guid? AccountId, string? AccountName, long? ManualSavedCents, long? MonthlyCentsSet, bool IsStarter,
+    Guid Id, string Name, long TargetCents, Guid? AccountId, string? AccountName, long? ManualSavedCents, bool IsStarter,
     long SavedCents, long RemainingCents, int Percent, bool Reached, long MonthlyCents, string MonthlySource, int? MonthsToGo, DateOnly? ProjectedDate);
 
 /// <param name="Transfers">Money moved into savings, newest first (DECISIONS.md 142): tracked from your accounts, nothing to enter.</param>
@@ -19,7 +19,7 @@ public record SavingsGoalDto(
 /// <param name="PlannedCents">What this month's budget plans for savings.</param>
 public record SavingsSummaryDto(
     long TotalSavedCents, IReadOnlyList<SavingsAccountDto> Accounts, IReadOnlyList<SavingsGoalDto> Goals,
-    IReadOnlyList<string> Priority, IReadOnlyList<BalancePoint> History,
+    IReadOnlyList<BalancePoint> History,
     IReadOnlyList<SavingsTransferDto>? Transfers = null, long ThisMonthCents = 0, long PlannedCents = 0);
 
 public record SavingsTransferDto(DateOnly Date, long Cents, string Account, string Description);
@@ -27,15 +27,14 @@ public record SavingsTransferDto(DateOnly Date, long Cents, string Account, stri
 /// <summary>One past savings transaction (DECISIONS.md 239): Cents positive into savings, negative out of it.</summary>
 public record SavingsHistoryItemDto(Guid Id, DateOnly Date, long Cents, string Account, string Description, string? Goal);
 
-public record GoalRequest(string Name, long TargetCents, Guid? AccountId, long? ManualSavedCents, long? MonthlyCents);
-public record PriorityRequest(List<PriorityStep> Order);
+public record GoalRequest(string Name, long TargetCents, Guid? AccountId, long? ManualSavedCents);
 public record BalanceRequest(long BalanceCents);
 public record SplitShare(Guid AccountId, int Percent);
 public record SplitRequest(List<SplitShare>? Shares);
 
 /// <summary>
-/// The Savings tab (SPEC 4.5): savings accounts, goals with progress and a projected date from account balances, the
-/// priority order for money left over, and a 12-month balance chart. The math is in <see cref="SavingsGoals"/>.
+/// The Savings tab (SPEC 4.5): savings accounts, goals with progress and a projected date from account balances and
+/// this month's planned savings, and a 12-month balance chart. The math is in <see cref="SavingsGoals"/>.
 /// </summary>
 public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProvider clock)
 {
@@ -78,7 +77,6 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
 
         var goals = await db.SavingsGoals.AsNoTracking().Include(g => g.Account)
             .Where(g => g.HouseholdId == householdId).OrderBy(g => g.SortOrder).ThenBy(g => g.CreatedUtc).ToListAsync(ct);
-        var statuses = SavingsGoals.Status(goals.Select(Input).ToList(), balances, pace, today);
         var shares = SavingsSplit.Shares(accounts);
 
         // The chart: total savings at the end of each of the last 12 budget months, and today.
@@ -108,6 +106,11 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         var planned = (await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId && c.Type == CategoryType.SavingsTransfer && !c.IsHidden)
             .Select(c => new { c.Id, c.MonthlyLimitCents }).ToListAsync(ct)).Sum(c => monthOnly.TryGetValue(c.Id, out var o) ? o : c.MonthlyLimitCents);
 
+        // A goal's monthly amount is its account's share of this month's planned savings (DECISIONS.md 321); with no savings
+        // account, the goals tracked by hand get it.
+        var planByAccount = shares.ToDictionary(s => s.Account.Id, s => planned * s.Percent / 100);
+        var statuses = SavingsGoals.Status(goals.Select(Input).ToList(), balances, pace, today, planByAccount, accounts.Count == 0 ? planned : 0);
+
         return new SavingsSummaryDto(
             accounts.Sum(a => Math.Max(0, balances[a.Id])) + goals.Where(g => g.AccountId is null).Sum(g => g.ManualSavedCents ?? 0),
             accounts.Select(a => new SavingsAccountDto(a.Id, AccountNames.Short(a), a.Nickname is null ? a.Mask : null, balances[a.Id], a.PlaidAccountId is not null, pace[a.Id],
@@ -115,24 +118,17 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
             goals.Select(g =>
             {
                 var s = statuses.Single(x => x.Id == g.Id);
-                return new SavingsGoalDto(g.Id, g.Name, g.TargetCents, g.AccountId, g.Account is { } ga ? AccountNames.Short(ga) : null, g.ManualSavedCents, g.MonthlyCents, g.IsStarter,
+                return new SavingsGoalDto(g.Id, g.Name, g.TargetCents, g.AccountId, g.Account is { } ga ? AccountNames.Short(ga) : null, g.ManualSavedCents, g.IsStarter,
                     s.SavedCents, s.RemainingCents, s.Percent, s.Reached, s.MonthlyCents, s.MonthlySource, s.MonthsToGo, s.ProjectedDate);
             }).ToList(),
-            Order(household.SavingsPriority).Select(x => x.ToString()).ToList(),
             history, moves.Take(12).ToList(), thisMonth, planned);
     }
 
-    /// <summary>The input for the budget generator: the priority order and what the starter fund still needs (milestone 8).</summary>
-    public async Task<SavingsPlan?> PlanAsync(Guid householdId, CancellationToken ct)
+    /// <summary>The input for the budget generator: the one savings/debt split from Budget settings (DECISIONS.md 321).</summary>
+    public async Task<SavingsPlan> PlanAsync(Guid householdId, CancellationToken ct)
     {
-        var s = await SummaryAsync(householdId, ct);
-        if (s.Goals.Count == 0) return null;
-        var starter = s.Goals.FirstOrDefault(g => g.IsStarter);
-        var larger = s.Goals.Where(g => !g.IsStarter && !g.Reached && g.MonthlyCentsSet is not null).Sum(g => g.MonthlyCentsSet!.Value);
-        var anyLargerWithoutAmount = s.Goals.Any(g => !g.IsStarter && !g.Reached && g.MonthlyCentsSet is null);
-        return new SavingsPlan(s.Priority.Select(Enum.Parse<PriorityStep>).ToList(), starter?.Name ?? "Rainy-day fund",
-            starter?.RemainingCents ?? 0, starter?.SavedCents ?? 0, starter?.TargetCents ?? 0,
-            anyLargerWithoutAmount ? null : larger);
+        var h = await db.Households.AsNoTracking().Where(x => x.Id == householdId).Select(x => new { x.SweepTarget, x.SweepSavingsPercent }).SingleAsync(ct);
+        return new SavingsPlan(new SweepPreference(h.SweepTarget, h.SweepSavingsPercent).SavingsShare);
     }
 
     /// <summary>The first goal is the rainy-day fund of about $1,000 (SPEC 4.5), on the first savings account if there is one.</summary>
@@ -150,18 +146,11 @@ public class SavingsService(AppDbContext db, BudgetMonthService months, TimeProv
         await db.SaveChangesAsync(ct);
     }
 
-    public static IReadOnlyList<PriorityStep> Order(string stored)
-    {
-        var parsed = stored.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(s => Enum.TryParse<PriorityStep>(s, out var p) ? p : (PriorityStep?)null).OfType<PriorityStep>().Distinct().ToList();
-        return parsed.Count == 3 ? parsed : SavingsPlan.DefaultOrder;
-    }
-
     private static GoalInput Input(SavingsGoal g) =>
-        new(g.Id, g.Name, g.TargetCents, g.AccountId, g.ManualSavedCents, g.MonthlyCents, g.IsStarter, g.SortOrder);
+        new(g.Id, g.Name, g.TargetCents, g.AccountId, g.ManualSavedCents, g.IsStarter, g.SortOrder);
 }
 
-/// <summary>SPEC section 9: <c>GET/PUT /savings/goals</c>, plus the priority order, the split between accounts and a CSV-only account's balance.</summary>
+/// <summary>SPEC section 9: <c>GET/PUT /savings/goals</c>, plus the split between accounts and a CSV-only account's balance.</summary>
 public static class SavingsEndpoints
 {
     public const long MaxCents = 100_000_000_00;
@@ -207,7 +196,7 @@ public static class SavingsEndpoints
             var goal = new SavingsGoal
             {
                 Id = Guid.NewGuid(), HouseholdId = householdId, Name = req.Name.Trim(), TargetCents = req.TargetCents, AccountId = req.AccountId,
-                ManualSavedCents = req.AccountId is null ? req.ManualSavedCents ?? 0 : null, MonthlyCents = req.MonthlyCents,
+                ManualSavedCents = req.AccountId is null ? req.ManualSavedCents ?? 0 : null,
                 SortOrder = order + 1, CreatedUtc = clock.GetUtcNow().UtcDateTime,
             };
             db.SavingsGoals.Add(goal);
@@ -221,7 +210,7 @@ public static class SavingsEndpoints
             var goal = await db.SavingsGoals.SingleOrDefaultAsync(x => x.Id == id && x.HouseholdId == householdId, ct);
             if (goal is null) return Results.NotFound();
             if (await ValidateAsync(req, householdId, db, ct) is { } problem) return problem;
-            (goal.Name, goal.TargetCents, goal.AccountId, goal.MonthlyCents) = (req.Name.Trim(), req.TargetCents, req.AccountId, req.MonthlyCents);
+            (goal.Name, goal.TargetCents, goal.AccountId, goal.MonthlyCents) = (req.Name.Trim(), req.TargetCents, req.AccountId, null);
             goal.ManualSavedCents = req.AccountId is null ? req.ManualSavedCents ?? 0 : null;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
@@ -235,16 +224,6 @@ public static class SavingsEndpoints
             if (goal.IsStarter)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["id"] = ["The rainy-day fund is your starter goal; change its target instead."] });
             db.SavingsGoals.Remove(goal);
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
-        });
-
-        g.MapPut("/priority", async (PriorityRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
-        {
-            if (req.Order.Count != 3 || req.Order.Distinct().Count() != 3 || req.Order.Any(p => !Enum.IsDefined(p)))
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["order"] = ["List the starter fund, debt and savings once each."] });
-            var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
-            h.SavingsPriority = string.Join(",", req.Order);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
@@ -290,7 +269,6 @@ public static class SavingsEndpoints
         if (string.IsNullOrWhiteSpace(r.Name) || r.Name.Trim().Length > 120) errors["name"] = ["Give it a name (up to 120 characters)."];
         if (r.TargetCents is <= 0 or > MaxCents) errors["targetCents"] = ["Enter the target in dollars."];
         if (r.ManualSavedCents is < 0 or > MaxCents) errors["manualSavedCents"] = ["Enter what you've saved in dollars."];
-        if (r.MonthlyCents is < 0 or > MaxCents) errors["monthlyCents"] = ["Enter the monthly amount in dollars."];
         if (r.AccountId is { } a && !await db.Accounts.AnyAsync(x => x.Id == a && x.HouseholdId == householdId && x.Type == AccountType.Savings, ct))
             errors["accountId"] = ["Pick one of your savings accounts."];
         return errors.Count == 0 ? null : Results.ValidationProblem(errors);

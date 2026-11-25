@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { ask } from './confirm'
-import { ApiError, debtApi, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
+import { ApiError, budgetEditApi, debtApi, savingsShare, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
 import { useResume } from './offline'
 import { InterestCard } from './DebtInterest'
-import { CardLink, ErrorNotice, Loading, Page, PageHeader, Pill, smallBtn } from './ui'
+import { CardLink, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
 import { AccountsCard } from './Accounts'
 import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
 
@@ -15,19 +15,16 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /**
  * The Debt tab (SPEC 4.4): what you owe, the debt-free date under your plan, the payoff chart, Avalanche vs
- * Snowball, an "extra each month" what-if slider, progress, and each card or loan. The server does the math;
- * the slider asks it again (debounced) for every value.
+ * Snowball, the extra each month (the debt side of the one split in Budget settings, DECISIONS.md 321), progress, and
+ * each card or loan. The server does the math.
  */
 export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [saved, setSaved] = useState<DebtSummary | null>(null)
-  const [preview, setPreview] = useState<DebtSummary | null>(null)
-  const [extra, setExtra] = useState<number | null>(null) // the slider; null = untouched
-  const [strategy, setStrategy] = useState<DebtStrategy | null>(null)
+  const [split, setSplit] = useState<number | null>(null) // savings side of the split
   const [editing, setEditing] = useState<Debt | null | undefined>(undefined) // null = adding
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const timer = useRef<number | undefined>(undefined)
 
   const fail = useCallback(
     (e: unknown) => {
@@ -41,10 +38,8 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
     try {
       const s = await debtApi.summary()
       setSaved(s)
-      setPreview(null)
-      setExtra(null)
-      setStrategy(null)
       setError(null)
+      budgetEditApi.settings().then((b) => setSplit(savingsShare(b)), () => undefined)
     } catch (e) {
       fail(e)
     }
@@ -55,16 +50,6 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
   }, [load])
   useResume(load)
 
-  /** What-if: ask the server for the plan with this extra and strategy, a moment after the slider stops. */
-  function whatIf(nextExtra: number, nextStrategy: DebtStrategy) {
-    setExtra(nextExtra)
-    setStrategy(nextStrategy)
-    window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => {
-      debtApi.summary({ extraCents: nextExtra, strategy: nextStrategy }).then(setPreview).catch(fail)
-    }, 200)
-  }
-
   if (!saved) {
     return (
       <Page>
@@ -74,23 +59,20 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
     )
   }
 
-  const s = preview ?? saved
+  const s = saved
   const plan = s.plan
-  const savedPlan = saved.plan
-  const currentExtra = extra ?? savedPlan?.extraCents ?? 0
-  const currentStrategy = strategy ?? savedPlan?.strategy ?? 'Avalanche'
+  const currentStrategy = plan?.strategy ?? 'Avalanche'
   const cmp = s.comparison
   const sameEitherWay = !!cmp && !cmp.neverPaysOff && cmp.interestDifferenceCents === 0 && cmp.monthsDifference === 0
-  const changed = savedPlan !== null && (currentExtra !== savedPlan.extraCents || currentStrategy !== savedPlan.strategy)
-  const sliderMax = Math.max(1_000_00, Math.ceil(((savedPlan?.extraCents ?? 0) * 2) / 100_00) * 100_00)
   const visible = s.debts.filter((d) => !d.isHidden)
   const hidden = s.debts.filter((d) => d.isHidden)
 
-  async function savePlan(extraCents: number | null) {
+  async function saveStrategy(next: DebtStrategy) {
+    if (next === currentStrategy) return
     setBusy(true)
     try {
-      await debtApi.saveSettings(currentStrategy, extraCents)
-      setNotice(extraCents === null ? 'Extra is now whatever your budget has left over each month.' : 'Saved. Your budget’s card payment now follows this plan.')
+      await debtApi.saveSettings(next)
+      setNotice(next === 'Avalanche' ? 'Extra goes to the highest APR first.' : 'Extra goes to the smallest balance first.')
       await load()
     } catch (e) {
       fail(e)
@@ -188,7 +170,8 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
                 type="button"
                 role="radio"
                 aria-checked={currentStrategy === st}
-                onClick={() => whatIf(currentExtra, st)}
+                disabled={busy}
+                onClick={() => void saveStrategy(st)}
                 className={`rounded-xl px-3 py-2 text-left ${currentStrategy === st ? 'bg-accent shadow-neu-sm text-accent-ink' : 'neu'}`}
               >
                 <span className="block text-sm font-semibold">{st}</span>
@@ -202,52 +185,19 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
           {/* One card: no order to compare, so nothing to say (DECISIONS.md 315). */}
           {s.comparison && visible.filter((d) => d.balanceCents > 0).length > 1 && <Comparison plan={plan} cmp={s.comparison} />}
 
-          <label className="mt-5 block">
-            <span className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="flex items-baseline gap-2">
-                <span className="font-medium">Extra each month</span>
-                {/* Automatic: what the budget has left over; Manual: the amount you saved (DECISIONS.md 290). */}
-                {savedPlan && (
-                  <Pill tone={changed ? 'todo' : savedPlan.extraSource === 'you' ? undefined : 'good'}>
-                    {changed ? 'Not saved' : savedPlan.extraSource === 'you' ? 'Manual' : 'Automatic'}
-                  </Pill>
-                )}
-              </span>
-              <span className="font-semibold tabular-nums">{formatCents(currentExtra)}</span>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={sliderMax}
-              step={10_00}
-              value={currentExtra}
-              onChange={(e) => whatIf(Number(e.target.value), currentStrategy)}
-              aria-valuetext={`${formatCents(currentExtra)} extra a month`}
-              className="mt-2 w-full accent-accent"
-            />
-          </label>
-          <p className="mt-1 text-xs text-ink-soft">
-            Minimums {formatCents(plan.minimumsCents)} + extra {formatCents(currentExtra)} = <span className="font-medium">{formatCents(plan.monthlyPaymentCents)} a month</span>.
-            {plan.firstTarget && ` Extra goes to ${plan.firstTarget} first.`}
-            {!changed && savedPlan?.extraSource === 'budget' && ' Now: whatever your budget has left over.'}
-            {!changed && savedPlan?.extraSource === 'you' && ' Your budget plans this each month.'}
+          {/* The extra is the debt side of the one split (DECISIONS.md 321), not a setting of its own. */}
+          <p className="mt-5 flex items-baseline justify-between gap-3 text-sm">
+            <span className="font-medium">Extra each month</span>
+            <span className="font-semibold tabular-nums">{formatCents(plan.extraCents)}</span>
           </p>
-          {changed ? (
-            <div className="mt-3 flex gap-3">
-              <button type="button" onClick={() => void load()} className="flex-1 rounded-2xl neu py-3 text-sm font-semibold text-ink-soft">
-                Reset
-              </button>
-              <button type="button" disabled={busy} onClick={() => void savePlan(currentExtra)} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 text-sm font-semibold text-primary-ink disabled:opacity-50">
-                Save as my plan
-              </button>
-            </div>
-          ) : (
-            savedPlan?.extraSource === 'you' && (
-              <button type="button" disabled={busy} onClick={() => void savePlan(null)} className={`${smallBtn} mt-2 text-ink`}>
-                Use whatever’s left over each month instead
-              </button>
-            )
-          )}
+          <p className="mt-1 text-xs text-ink-soft">
+            {split !== null && <>Your split sends debt {100 - split}% of what’s left after bills, spending and card minimums. </>}
+            Minimums {formatCents(plan.minimumsCents)} + extra {formatCents(plan.extraCents)} = <span className="font-medium">{formatCents(plan.monthlyPaymentCents)} a month</span>.
+            {plan.firstTarget && plan.extraCents > 0 && ` Extra goes to ${plan.firstTarget} first.`}{' '}
+            <a href="#/budget/plan" className="font-medium text-accent">
+              Change the split ›
+            </a>
+          </p>
         </section>
       )}
 

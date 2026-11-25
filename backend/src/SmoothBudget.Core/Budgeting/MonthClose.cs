@@ -69,6 +69,9 @@ public enum SweepTarget { Debt = 0, Savings = 1, Split = 2 }
 public sealed record SweepPreference(SweepTarget Target, int SavingsPercent = 0)
 {
     public static readonly SweepPreference Default = new(SweepTarget.Debt);
+
+    /// <summary>The share that goes to savings, 0 to 100: the one split for this month's plan and a closed month's leftover (DECISIONS.md 321).</summary>
+    public int SavingsShare => Target switch { SweepTarget.Savings => 100, SweepTarget.Split => Math.Clamp(SavingsPercent, 0, 100), _ => 0 };
 }
 
 public enum SweepKind { Debt = 0, Savings = 1 }

@@ -66,9 +66,10 @@ public class SavingsApiTests(TestApp app) : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task Goals_by_hand_a_csv_savings_balance_and_the_priority_order()
+    public async Task Goals_by_hand_a_csv_savings_balance_and_the_plans_share()
     {
         var c = await NewUserAsync();
+        await c.PostAsJsonAsync("/api/budget/categories", new SmoothBudget.Api.Budget.CategoryRequest("Savings", CategoryType.SavingsTransfer, 200_00), Json);
         var acct = (await (await c.PostAsJsonAsync("/api/accounts", new { name = "Test Savings", type = "Savings", mask = "5555" }, Json))
             .Content.ReadFromJsonAsync<AccountDto>(Json))!.Id;
         Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/savings/accounts/{acct}/balance", new BalanceRequest(1_300_00), Json)).StatusCode);
@@ -78,23 +79,19 @@ public class SavingsApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.Equal((acct, 1_000_00L, true), (rainy.AccountId!.Value, rainy.SavedCents, rainy.Reached)); // linked to the savings account
 
         // A second goal on the same account gets what's beyond the rainy-day fund; one by hand uses what you enter.
-        await c.PostAsJsonAsync("/api/savings/goals", new GoalRequest("Trip", 2_000_00, acct, null, 250_00), Json);
-        await c.PostAsJsonAsync("/api/savings/goals", new GoalRequest("Car", 5_000_00, null, 1_200_00, null), Json);
+        await c.PostAsJsonAsync("/api/savings/goals", new GoalRequest("Trip", 2_000_00, acct, null), Json);
+        await c.PostAsJsonAsync("/api/savings/goals", new GoalRequest("Car", 5_000_00, null, 1_200_00), Json);
         s = await Summary(c);
+        // The month plans $200 for savings, all of it to the one account: the trip, its first unfinished goal, gets it.
         var trip = s.Goals.Single(g => g.Name == "Trip");
-        Assert.Equal((300_00L, 250_00L, "you", 7), (trip.SavedCents, trip.MonthlyCents, trip.MonthlySource, trip.MonthsToGo!.Value)); // 1,700 / 250 = 6.8 → 7
+        Assert.Equal((300_00L, 200_00L, "plan", 9), (trip.SavedCents, trip.MonthlyCents, trip.MonthlySource, trip.MonthsToGo!.Value)); // 1,700 / 200 = 8.5 → 9
         var car = s.Goals.Single(g => g.Name == "Car");
         Assert.Equal((1_200_00L, "none"), (car.SavedCents, car.MonthlySource));
         Assert.Equal(1_300_00 + 1_200_00, s.TotalSavedCents);
 
-        Assert.Equal(["StarterFund", "Debt", "Savings"], s.Priority);
-        await c.PutAsJsonAsync("/api/savings/priority", new PriorityRequest([PriorityStep.Debt, PriorityStep.StarterFund, PriorityStep.Savings]), Json);
-        Assert.Equal(["Debt", "StarterFund", "Savings"], (await Summary(c)).Priority);
-
         Assert.Equal(HttpStatusCode.BadRequest, (await c.DeleteAsync($"/api/savings/goals/{rainy.Id}")).StatusCode); // the starter goal stays
         Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/savings/goals/{car.Id}")).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/savings/priority", new PriorityRequest([PriorityStep.Debt, PriorityStep.Debt, PriorityStep.Savings]), Json)).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/savings/goals", new GoalRequest("X", 0, null, null, null), Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/savings/goals", new GoalRequest("X", 0, null, null), Json)).StatusCode);
     }
 
     [Fact]

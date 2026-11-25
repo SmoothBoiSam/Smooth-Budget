@@ -100,7 +100,6 @@ public class DemoSeeder(AppDbContext db, UserManager<AppUser> users, TimeProvide
         };
         db.DebtAccounts.AddRange(Debt(visa, 2499, 115_00, 3, 7_500_00, 4_600_00), Debt(mastercard, 1999, 45_00, 18, 3_000_00, 1_900_00));
         household.DebtStrategy = SmoothBudget.Core.Debt.DebtStrategy.Avalanche;
-        household.ExtraDebtPaymentCents = null;
 
         var categories = DefaultCategories(householdId);
         db.Categories.AddRange(categories);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ApiError, savingsApi, type GoalFields, type SavingsGoal, type SavingsSummary } from './api'
+import { ApiError, budgetEditApi, savingsApi, savingsShare, type GoalFields, type SavingsGoal, type SavingsSummary } from './api'
 import { useResume } from './offline'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader } from './ui'
 import { AccountsCard } from './Accounts'
@@ -10,14 +10,15 @@ const formatMonth = (iso: string) => monthFmt.format(new Date(iso + 'T00:00:00Z'
 
 /**
  * The Savings tab (SPEC 4.5): what you've saved with a chart of it over the last year, each goal with progress from its
- * account's balance and a projected date at your monthly rate, and where each month's savings goes. Where money left over
- * goes is in Budget's settings.
+ * account's balance and a projected date at its share of the month's savings, and where each month's savings goes. How
+ * much goes to savings at all is the one split in Budget's settings (DECISIONS.md 321).
  */
 export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [s, setS] = useState<SavingsSummary | null>(null)
   const [editing, setEditing] = useState<SavingsGoal | null | undefined>(undefined) // null = adding
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [split, setSplit] = useState<number | null>(null)
 
   const fail = useCallback(
     (e: unknown) => {
@@ -31,6 +32,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
     try {
       setS(await savingsApi.summary())
       setError(null)
+      budgetEditApi.settings().then((b) => setSplit(savingsShare(b)), () => undefined)
     } catch (e) {
       fail(e)
     }
@@ -71,6 +73,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
             <PaymentSettings
               key={s.accounts.map((a) => a.id + ':' + a.sharePercent).join()}
               s={s}
+              split={split}
               onSave={(shares) => act(() => savingsApi.setSplit(shares), 'Saved. Your pay tasks send each account its part.')}
             />
           )}
@@ -111,7 +114,7 @@ export default function SavingsScreen({ onSignedOut }: { onSignedOut: () => void
  * Payment settings (DECISIONS.md 314): where each month's savings goes, a whole percent for each savings account. Your pay
  * tasks send each account its part. With two accounts, changing one sets the other to the rest.
  */
-function PaymentSettings({ s, onSave }: { s: SavingsSummary; onSave: (shares: { accountId: string; percent: number }[]) => void }) {
+function PaymentSettings({ s, split, onSave }: { s: SavingsSummary; split: number | null; onSave: (shares: { accountId: string; percent: number }[]) => void }) {
   const [pct, setPct] = useState<Record<string, string>>(() => Object.fromEntries(s.accounts.map((a) => [a.id, String(a.sharePercent)])))
   const value = (id: string) => {
     const n = Number(pct[id])
@@ -138,7 +141,15 @@ function PaymentSettings({ s, onSave }: { s: SavingsSummary; onSave: (shares: { 
       <h2 id="split-h" className="text-sm font-semibold">
         Payment settings
       </h2>
-      <p className="mt-0.5 text-xs text-ink-soft">Where each month’s savings goes. Your pay tasks send each account its part.</p>
+      <p className="mt-0.5 text-xs text-ink-soft">
+        {split !== null && <>Your split sends savings {split}% of what’s left after bills, spending and card minimums. </>}
+        This month: <span className="font-semibold text-ink">{formatCents(s.plannedCents)}</span>
+        {s.plannedCents > 0 && s.thisMonthCents >= s.plannedCents && ', what you’ve already moved'}.{' '}
+        <a href="#/budget/plan" className="font-medium text-accent">
+          Change the split ›
+        </a>
+      </p>
+      <p className="mt-1 text-xs text-ink-soft">Your pay tasks send each account its part.</p>
       <ul className="mt-3 divide-y divide-ink/[0.07]">
         {s.accounts.map((a) => {
           const p = value(a.id) ?? 0
@@ -224,7 +235,7 @@ function GoalCard({ g, onOpen }: { g: SavingsGoal; onOpen: () => void }) {
             {g.monthlySource === 'pace' ? ' (your pace lately)' : ''}
           </>
         ) : (
-          <span className="text-gold-ink">Add a monthly amount to see when you’ll get there</span>
+          <span className="text-gold-ink">No savings planned for it this month, so no date yet</span>
         )}
         {g.accountName ? ` · in ${g.accountName}` : ' · tracked by hand'}
       </p>
@@ -347,19 +358,16 @@ function GoalSheet({
   const [target, setTarget] = useState(goal ? centsToInput(goal.targetCents) : '')
   const [accountId, setAccountId] = useState<string>(goal ? (goal.accountId ?? '') : (accounts[0]?.id ?? ''))
   const [saved, setSaved] = useState(goal?.manualSavedCents != null ? centsToInput(goal.manualSavedCents) : '')
-  const [monthly, setMonthly] = useState(goal?.monthlyCentsSet != null ? centsToInput(goal.monthlyCentsSet) : '')
   const [err, setErr] = useState<string | null>(null)
 
   function submit(e: FormEvent) {
     e.preventDefault()
     const t = parseDollars(target)
-    const m = monthly.trim() === '' ? null : parseDollars(monthly)
     const sv = accountId ? null : saved.trim() === '' ? 0 : parseDollars(saved)
     if (!name.trim()) return setErr('Give it a name.')
     if (t === null || t <= 0) return setErr('Enter the target, like 1000.')
-    if (monthly.trim() !== '' && m === null) return setErr('Enter the monthly amount in dollars, or leave it empty to use your pace.')
     if (!accountId && sv === null) return setErr('Enter what you’ve saved so far in dollars.')
-    onSave({ name: name.trim(), targetCents: t, accountId: accountId || null, manualSavedCents: sv, monthlyCents: m })
+    onSave({ name: name.trim(), targetCents: t, accountId: accountId || null, manualSavedCents: sv })
   }
 
   return (
@@ -375,7 +383,7 @@ function GoalSheet({
         <h2 id="goal-h" className="text-lg font-semibold">
           {goal ? goal.name : 'Add a goal'}
         </h2>
-        {goal?.isStarter && <p className="text-xs text-ink-soft">Your starter emergency fund. It comes first unless you reorder.</p>}
+        {goal?.isStarter && <p className="text-xs text-ink-soft">Your starter emergency fund.</p>}
         <label className="mt-4 block">
           <span className="text-sm font-medium text-ink-soft">Name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Trip" className={inputCls} />
@@ -401,11 +409,9 @@ function GoalSheet({
             <Money value={saved} onChange={setSaved} label="Saved so far" />
           </label>
         )}
-        <label className="mt-4 block">
-          <span className="text-sm font-medium text-ink-soft">Each month (optional)</span>
-          <Money value={monthly} onChange={setMonthly} label="Monthly amount" />
-          <span className="mt-1 block text-xs text-ink-soft">Leave empty to use your actual pace into its account.</span>
-        </label>
+        <p className="mt-4 text-xs text-ink-soft">
+          Each month it gets its account’s part of your savings, after the goals before it in that account are reached.
+        </p>
         {err && (
           <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
             {err}

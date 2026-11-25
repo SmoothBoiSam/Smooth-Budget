@@ -26,7 +26,7 @@ public class Household
     /// <summary>IANA time zone used to decide what "today" is. The owner is Denver-based.</summary>
     public string TimeZoneId { get; set; } = "America/Denver";
 
-    /// <summary>Where a month's leftover money goes (SPEC section 3): debt by default, savings, or a split.</summary>
+    /// <summary>The one savings/debt split (DECISIONS.md 321): what's left each month after bills, spending and card minimums, and a closed month's leftover. Debt by default.</summary>
     public SweepTarget SweepTarget { get; set; } = SweepTarget.Debt;
 
     /// <summary>For <see cref="SweepTarget.Split"/>: the share that goes to savings, 0 to 100.</summary>
@@ -48,9 +48,9 @@ public class Household
     public DateOnly? PartnerLabelsStartAfter { get; set; }
     /// <summary>How extra debt payments are aimed: Avalanche (highest APR first, the default) or Snowball.</summary>
     public SmoothBudget.Core.Debt.DebtStrategy DebtStrategy { get; set; }
-    /// <summary>Extra paid toward debt each month beyond the minimums. Null = whatever the budget plans for card payments.</summary>
+    /// <summary>No longer used (DECISIONS.md 321): the extra is the split's debt share. Kept so old rows load.</summary>
     public long? ExtraDebtPaymentCents { get; set; }
-    /// <summary>Where money left over in the budget goes, in order (SPEC 4.5): "StarterFund,Debt,Savings" by default.</summary>
+    /// <summary>No longer used (DECISIONS.md 321): the savings/debt split replaced the order. Kept so old rows load.</summary>
     public string SavingsPriority { get; set; } = "StarterFund,Debt,Savings";
     /// <summary>The budget updates itself whenever anything it depends on changes (DECISIONS.md 135).</summary>
     public bool AutoBudget { get; set; } = true;
@@ -474,7 +474,7 @@ public class SavingsGoal
     public Account? Account { get; set; }
     /// <summary>Saved so far, for a goal tracked by hand.</summary>
     public long? ManualSavedCents { get; set; }
-    /// <summary>What you plan to put in each month. Null: your actual pace into its account.</summary>
+    /// <summary>No longer used (DECISIONS.md 321): a goal's monthly amount comes from the split. Kept so old rows load.</summary>
     public long? MonthlyCents { get; set; }
     /// <summary>The starter emergency fund (the rainy-day fund): first in the default priority.</summary>
     public bool IsStarter { get; set; }

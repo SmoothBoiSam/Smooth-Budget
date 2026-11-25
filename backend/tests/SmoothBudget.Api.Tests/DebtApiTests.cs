@@ -101,9 +101,10 @@ public class DebtApiTests(TestApp app) : IClassFixture<TestApp>
         Assert.True(s.Comparison.InterestDifferenceCents > 0); // snowball costs more here
         Assert.Equal(1_500_00, s.OwedCents);
 
-        await c.PutAsJsonAsync("/api/debt/settings", new DebtSettingsRequest(DebtStrategy.Snowball, 100_00), Json);
+        // The strategy is saved; the extra is the split's debt share, not a setting (DECISIONS.md 321).
+        await c.PutAsJsonAsync("/api/debt/settings", new DebtSettingsRequest(DebtStrategy.Snowball), Json);
         s = await Summary(c);
-        Assert.Equal(("Snowball", "Store card", "you", 100_00L), (s.Plan!.Strategy, s.Plan.FirstTarget, s.Plan.ExtraSource, s.Plan.ExtraCents));
+        Assert.Equal(("Snowball", "Store card", "budget"), (s.Plan!.Strategy, s.Plan.FirstTarget, s.Plan.ExtraSource));
     }
 
     [Fact]

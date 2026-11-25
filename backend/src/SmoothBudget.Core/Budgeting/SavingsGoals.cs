@@ -2,12 +2,11 @@ namespace SmoothBudget.Core.Budgeting;
 
 /// <param name="AccountId">The savings account whose balance is this goal's progress (null: tracked by hand).</param>
 /// <param name="ManualSavedCents">Saved so far, for a goal tracked by hand.</param>
-/// <param name="MonthlyCents">What you plan to put in each month; null = your actual pace into its account.</param>
-/// <param name="IsStarter">The starter emergency fund (the rainy-day fund), first in the default priority.</param>
+/// <param name="IsStarter">The starter emergency fund (the rainy-day fund), the goal you can't remove.</param>
 public sealed record GoalInput(
-    Guid Id, string Name, long TargetCents, Guid? AccountId, long? ManualSavedCents, long? MonthlyCents, bool IsStarter, int Order);
+    Guid Id, string Name, long TargetCents, Guid? AccountId, long? ManualSavedCents, bool IsStarter, int Order);
 
-/// <param name="MonthlySource">"you" (set by you), "pace" (your recent deposits), or "none".</param>
+/// <param name="MonthlySource">"plan" (its account's share of this month's savings), "pace" (your recent deposits), or "none".</param>
 /// <param name="MonthsToGo">Months until reached at that rate; null when there's no monthly amount (or it's reached).</param>
 public sealed record GoalStatus(
     Guid Id, string Name, long TargetCents, long SavedCents, long RemainingCents, int Percent, bool Reached,
@@ -18,18 +17,21 @@ public sealed record BalancePoint(DateOnly Date, long BalanceCents);
 
 /// <summary>
 /// Savings goals (SPEC 4.5). Progress comes from account balances: goals linked to the same account are filled in
-/// priority order (the first takes up to its target, the next the rest, and so on); a goal tracked by hand uses what
-/// you entered. The projected date is the remaining amount at the monthly rate: the amount you set, or else your actual
-/// pace (the median of the last complete months' net deposits into the account), which goes to the first unfinished
-/// goal on that account. Months are rounded up.
+/// order (the first takes up to its target, the next the rest, and so on); a goal tracked by hand uses what you entered.
+/// The projected date is the remaining amount at the monthly rate, which goes to the first unfinished goal on each
+/// account (DECISIONS.md 321): the account's share of this month's planned savings, or, with none planned, your actual
+/// pace (the median of the last complete months' net deposits into the account). Goals tracked by hand share
+/// <c>planByHandCents</c> the same way (the month's savings when you have no savings account). Months are rounded up.
 /// </summary>
 public static class SavingsGoals
 {
     public static IReadOnlyList<GoalStatus> Status(
-        IReadOnlyList<GoalInput> goals, IReadOnlyDictionary<Guid, long> balances, IReadOnlyDictionary<Guid, long> paceByAccount, DateOnly today)
+        IReadOnlyList<GoalInput> goals, IReadOnlyDictionary<Guid, long> balances, IReadOnlyDictionary<Guid, long> paceByAccount, DateOnly today,
+        IReadOnlyDictionary<Guid, long>? planByAccount = null, long planByHandCents = 0)
     {
         var left = balances.ToDictionary(kv => kv.Key, kv => Math.Max(0, kv.Value));
         var paceUsed = new HashSet<Guid>();
+        var handUsed = false;
         var result = new List<GoalStatus>();
         foreach (var g in goals.OrderBy(g => g.Order).ThenBy(g => g.Name, StringComparer.Ordinal))
         {
@@ -47,12 +49,18 @@ public static class SavingsGoals
             var reached = remaining == 0;
             long monthly = 0;
             var source = "none";
-            if (g.MonthlyCents is { } mine && mine > 0)
-                (monthly, source) = (mine, "you");
-            else if (!reached && g.AccountId is { } a && !paceUsed.Contains(a) && paceByAccount.GetValueOrDefault(a) > 0)
+            if (!reached && g.AccountId is { } a && !paceUsed.Contains(a))
             {
-                (monthly, source) = (paceByAccount[a], "pace");
+                if (planByAccount?.GetValueOrDefault(a) is > 0 and var plan)
+                    (monthly, source) = (plan, "plan");
+                else if (paceByAccount.GetValueOrDefault(a) > 0)
+                    (monthly, source) = (paceByAccount[a], "pace");
                 paceUsed.Add(a);
+            }
+            else if (!reached && g.AccountId is null && !handUsed)
+            {
+                if (planByHandCents > 0) (monthly, source) = (planByHandCents, "plan");
+                handUsed = true;
             }
             int? months = reached || monthly <= 0 ? null : (int)Math.Ceiling(remaining / (double)monthly);
             var percent = g.TargetCents <= 0 ? 100 : (int)Math.Min(100, saved * 100 / g.TargetCents);
@@ -81,16 +89,8 @@ public static class SavingsGoals
         ends.Select(d => new BalancePoint(d, currentCents + transactions.Where(t => t.Date > d).Sum(t => t.AmountCents))).ToList();
 }
 
-/// <summary>One step of the order leftover money goes in (SPEC 4.5, configurable).</summary>
-public enum PriorityStep { StarterFund, Debt, Savings }
-
-/// <param name="Order">Where leftover money goes, in order. Default: starter fund, then high-APR debt, then larger savings.</param>
-/// <param name="StarterName">The starter fund's name (the rainy-day fund), for explanations.</param>
-/// <param name="StarterRemainingCents">What the starter fund still needs (0 once reached).</param>
-/// <param name="LargerMonthlyCents">What you've set to put toward your other goals each month (null: whatever's left).</param>
-public sealed record SavingsPlan(
-    IReadOnlyList<PriorityStep> Order, string StarterName, long StarterRemainingCents, long StarterSavedCents, long StarterTargetCents,
-    long? LargerMonthlyCents)
-{
-    public static readonly IReadOnlyList<PriorityStep> DefaultOrder = [PriorityStep.StarterFund, PriorityStep.Debt, PriorityStep.Savings];
-}
+/// <summary>
+/// How the month's money left after bills, spending and card minimums is shared (DECISIONS.md 321): this percent to the
+/// savings line, the rest to the cards as extra. The same split sends a closed month's leftover.
+/// </summary>
+public sealed record SavingsPlan(int SavingsPercent);

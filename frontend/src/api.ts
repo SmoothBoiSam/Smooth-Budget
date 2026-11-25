@@ -672,6 +672,11 @@ export const budgetEditApi = {
     request<void>('PUT', '/settings/budget', { sweepTarget, sweepSavingsPercent, autoBudget: autoBudget ?? null }),
 }
 
+/** The savings side of the one savings/debt split, 0 to 100 (DECISIONS.md 321). */
+export function savingsShare(s: { sweepTarget: SweepTarget; sweepSavingsPercent: number }) {
+  return s.sweepTarget === 'Debt' ? 0 : s.sweepTarget === 'Savings' ? 100 : Math.min(100, Math.max(0, s.sweepSavingsPercent))
+}
+
 export interface AutoCategorizeResult {
   filed: number
   guesses: number
@@ -855,7 +860,8 @@ export const debtApi = {
   add: (d: DebtFields) => request<{ id: string }>('POST', '/debt', d),
   update: (id: string, d: DebtFields) => request<void>('PUT', `/debt/${id}`, d),
   remove: (id: string) => request<void>('DELETE', `/debt/${id}`),
-  saveSettings: (strategy: DebtStrategy, extraCents: number | null) => request<void>('PUT', '/debt/settings', { strategy, extraCents }),
+  /** Avalanche or Snowball; the extra each month is the split's debt share (DECISIONS.md 321). */
+  saveSettings: (strategy: DebtStrategy) => request<void>('PUT', '/debt/settings', { strategy }),
   fromBank: () => request<{ updated: number; message: string | null }>('POST', '/debt/from-bank'),
 }
 
@@ -1075,8 +1081,6 @@ export interface EarlyDeposit {
   amountCents: number
 }
 
-export type PriorityStep = 'StarterFund' | 'Debt' | 'Savings'
-
 export interface SavingsGoal {
   id: string
   name: string
@@ -1084,15 +1088,14 @@ export interface SavingsGoal {
   accountId: string | null
   accountName: string | null
   manualSavedCents: number | null
-  /** The monthly amount you set (null: your pace into its account). */
-  monthlyCentsSet: number | null
   isStarter: boolean
   savedCents: number
   remainingCents: number
   percent: number
   reached: boolean
   monthlyCents: number
-  monthlySource: 'you' | 'pace' | 'none'
+  /** 'plan': its account's share of this month's planned savings (DECISIONS.md 321); 'pace': your deposits lately. */
+  monthlySource: 'plan' | 'pace' | 'none'
   monthsToGo: number | null
   projectedDate: string | null
 }
@@ -1102,7 +1105,6 @@ export interface SavingsSummary {
   /** sharePercent: its part of each month's savings (Payment settings); they add up to 100. */
   accounts: { id: string; name: string; mask: string | null; balanceCents: number; balanceFromBank: boolean; paceCents: number; sharePercent: number }[]
   goals: SavingsGoal[]
-  priority: PriorityStep[]
   history: { date: string; balanceCents: number }[]
   /** Money moved into savings, newest first, tracked from your accounts. */
   transfers: { date: string; cents: number; account: string; description: string }[] | null
@@ -1115,7 +1117,6 @@ export interface GoalFields {
   targetCents: number
   accountId: string | null
   manualSavedCents: number | null
-  monthlyCents: number | null
 }
 
 export const savingsApi = {

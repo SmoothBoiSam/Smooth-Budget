@@ -408,10 +408,7 @@ public class BudgetGeneratorService(AppDbContext db, BudgetMonthService months, 
         var bills = await recurring.CurrentBillsAsync(householdId, ct); // milestone 6: bills at their current price
         var amounts = await db.PartnerArrangements.Where(a => a.HouseholdId == householdId).Select(a => a.AmountCents).ToListAsync(ct);
         long? contributions = amounts.Count > 0 ? amounts.Sum() : null; // none set up: the median of what she sent
-        var plan = await savings.PlanAsync(householdId, ct); // milestone 8: leftover in your priority order
-        // The Debt tab's extra each month drives the card payment (the budget follows your debt plan, not the other way round).
-        var debtExtra = await db.Households.Where(h => h.Id == householdId).Select(h => h.ExtraDebtPaymentCents).SingleAsync(ct);
-        overrides = (overrides ?? new BudgetOverrides()) with { DebtExtraCents = debtExtra };
+        var plan = await savings.PlanAsync(householdId, ct); // what's left, shared by your savings/debt split (DECISIONS.md 321)
         var p = BudgetGenerator.Propose(history, categories, transactions, hasCardDebt, cardDebts, bills, contributions, plan, overrides);
         var partnerName = await Shared.SharedService.TrackedNamesAsync(db, householdId, ct);
         return (p, new GeneratorDto(p.MonthsUsed, history.OrderBy(m => m.Start).Select(m => new BudgetMonthDtoLite(m.Start, m.End)).ToList(),

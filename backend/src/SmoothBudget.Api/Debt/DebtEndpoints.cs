@@ -155,11 +155,12 @@ public static class DebtEndpoints
 
         g.MapPut("/settings", async (DebtSettingsRequest req, HttpContext ctx, AppDbContext db, CancellationToken ct) =>
         {
-            if (!Enum.IsDefined(req.Strategy) || req.ExtraCents is < 0 or > MaxCents)
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["extraCents"] = ["Use 0 or more."] });
+            if (!Enum.IsDefined(req.Strategy))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["strategy"] = ["Pick Avalanche or Snowball."] });
             var h = await db.Households.SingleAsync(x => x.Id == ctx.User.HouseholdId(), ct);
             h.DebtStrategy = req.Strategy;
-            h.ExtraDebtPaymentCents = req.ExtraCents;
+            // The extra each month is the split's debt share now (DECISIONS.md 321), not a setting of its own.
+            h.ExtraDebtPaymentCents = null;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });

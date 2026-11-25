@@ -190,6 +190,8 @@ export default function BudgetScreen({ demo = false, onChanged, onSignedOut }: {
 
       {/* Budget settings (DECISIONS.md 168): one card for this month, then the planner. With the automatic budget off,
           the planner's own income fields do that job. */}
+      {/* The one savings/debt split first: Debt and Savings link here (DECISIONS.md 321). */}
+      {view.kind === 'plan' && <SweepSetting />}
       {view.kind === 'plan' && (
         <BudgetPlanner
           top={() =>
@@ -210,7 +212,6 @@ export default function BudgetScreen({ demo = false, onChanged, onSignedOut }: {
       )}
       {view.kind === 'plan' && (
         <div className="mt-6">
-          <SweepSetting />
           {/* Not in the demo (DECISIONS.md 309): its categories are already the bank's. */}
           {!demo && <ResetCategories onDone={saved} />}
         </div>

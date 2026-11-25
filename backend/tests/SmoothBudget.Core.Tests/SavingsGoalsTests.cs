@@ -7,8 +7,8 @@ public class SavingsGoalsTests
 {
     private static readonly Guid Savings = Guid.NewGuid();
     private static readonly DateOnly Today = new(2026, 11, 7);
-    private static readonly GoalInput RainyDay = new(Guid.NewGuid(), "Rainy-day fund", 1_000_00, Savings, null, null, true, 0);
-    private static readonly GoalInput Trip = new(Guid.NewGuid(), "Trip", 2_000_00, Savings, null, null, false, 1);
+    private static readonly GoalInput RainyDay = new(Guid.NewGuid(), "Rainy-day fund", 1_000_00, Savings, null, true, 0);
+    private static readonly GoalInput Trip = new(Guid.NewGuid(), "Trip", 2_000_00, Savings, null, false, 1);
 
     [Fact]
     public void Progress_comes_from_the_balance_and_the_date_from_your_pace()
@@ -38,13 +38,19 @@ public class SavingsGoalsTests
     }
 
     [Fact]
-    public void A_monthly_amount_you_set_wins_and_a_goal_by_hand_uses_what_you_entered()
+    public void The_accounts_share_of_planned_savings_wins_over_the_pace_and_goals_by_hand_share_theirs()
     {
-        var mine = RainyDay with { MonthlyCents = 250_00 };
-        var byHand = new GoalInput(Guid.NewGuid(), "Car", 5_000_00, null, 1_200_00, 400_00, false, 2);
-        var s = SavingsGoals.Status([mine, byHand], new Dictionary<Guid, long> { [Savings] = 500_00 }, new Dictionary<Guid, long> { [Savings] = 100_00 }, Today);
-        Assert.Equal((250_00L, "you", 2), (s[0].MonthlyCents, s[0].MonthlySource, s[0].MonthsToGo!.Value));
-        Assert.Equal((1_200_00L, 24, 10), (s[1].SavedCents, s[1].Percent, s[1].MonthsToGo!.Value)); // 3,800 / 400 = 9.5 → 10
+        // DECISIONS.md 321: the plan for the month, not an amount set on the goal.
+        var byHand = new GoalInput(Guid.NewGuid(), "Car", 5_000_00, null, 1_200_00, false, 2);
+        var s = SavingsGoals.Status([RainyDay, byHand], new Dictionary<Guid, long> { [Savings] = 500_00 }, new Dictionary<Guid, long> { [Savings] = 100_00 }, Today,
+            new Dictionary<Guid, long> { [Savings] = 250_00 }, planByHandCents: 400_00);
+        Assert.Equal((250_00L, "plan", 2), (s[0].MonthlyCents, s[0].MonthlySource, s[0].MonthsToGo!.Value));
+        Assert.Equal((1_200_00L, 24, "plan", 10), (s[1].SavedCents, s[1].Percent, s[1].MonthlySource, s[1].MonthsToGo!.Value)); // 3,800 / 400 = 9.5 → 10
+
+        // Nothing planned this month: back to the pace.
+        var none = SavingsGoals.Status([RainyDay], new Dictionary<Guid, long> { [Savings] = 500_00 }, new Dictionary<Guid, long> { [Savings] = 100_00 }, Today,
+            new Dictionary<Guid, long> { [Savings] = 0 })[0];
+        Assert.Equal((100_00L, "pace"), (none.MonthlyCents, none.MonthlySource));
     }
 
     [Fact]
