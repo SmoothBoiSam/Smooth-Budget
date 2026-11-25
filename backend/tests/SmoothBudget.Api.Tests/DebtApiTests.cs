@@ -262,6 +262,11 @@ public class DebtApiTests(TestApp app) : IClassFixture<TestApp>
         var card = (await Summary(c)).Debts.Single();
         Assert.Equal((1_250_00L, 1_250_00L, 1_250_00L, new DateOnly(2026, 11, 20)),
             (card.BalanceCents, card.StartingBalanceCents, card.TypedBalanceCents!.Value, card.TypedOn!.Value));
+        // It's edited on its account's page (DECISIONS.md 326), where it's named too: saving its details keeps the name.
+        Assert.Equal(account.Id, card.AccountId);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/debt/{card.Id}", new DebtRequest("Other name", 1_250_00, 1999, 40_00, 5, null, null), Json)).StatusCode);
+        card = (await Summary(c)).Debts.Single();
+        Assert.Equal(("Sample Card", 1999, 40_00L), (card.Name, card.AprBps!.Value, card.MinimumCents!.Value));
 
         // An upload's older charges are already in what it owes; a later one adds.
         using (var scope = app.Services.CreateScope())

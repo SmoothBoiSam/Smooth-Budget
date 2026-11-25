@@ -19,7 +19,9 @@ public record DebtDto(
     // Interest charged on it this year, and the latest charge (DECISIONS.md 232).
     long InterestChargedThisYearCents = 0, long? LastInterestCents = null, DateOnly? LastInterestDate = null,
     // A card that isn't bank-linked (DECISIONS.md 253): the balance you typed and when; what's owed follows from there.
-    long? TypedBalanceCents = null, DateOnly? TypedOn = null);
+    long? TypedBalanceCents = null, DateOnly? TypedOn = null,
+    // The card's account, whose page in More → Accounts is where it's edited (DECISIONS.md 326). Null for a loan.
+    Guid? AccountId = null);
 
 public record ChartPoint(DateOnly Month, long BalanceCents);
 
@@ -157,7 +159,8 @@ public class DebtService(AppDbContext db, BudgetMonthService months, PlaidClient
                     outcome is null ? null : plan!.NeverPaysOff && outcome.PaidOffInMonth is null ? null : MonthOf(outcome.PaidOffInMonth),
                     outcome?.InterestCents ?? 0, d.Account?.PlaidAccountId is not null,
                     interestByDebt.TryGetValue(d.Id, out var i) ? Math.Max(0, i.Year) : 0, i.Last?.AmountCents, i.Last?.Date,
-                    d.Account is { PlaidAccountId: null } ? d.TypedBalanceCents : null, d.Account is { PlaidAccountId: null } ? d.TypedOn : null);
+                    d.Account is { PlaidAccountId: null } ? d.TypedBalanceCents : null, d.Account is { PlaidAccountId: null } ? d.TypedOn : null,
+                    d.AccountId);
             }).ToList();
 
         DebtPlanDto? planDto = plan is null ? null : new DebtPlanDto(

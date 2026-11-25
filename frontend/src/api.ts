@@ -779,6 +779,8 @@ export interface Debt {
   interestChargedThisYearCents: number
   lastInterestCents: number | null
   lastInterestDate: string | null
+  /** The card's account, whose page in More → Accounts is where it's edited (DECISIONS.md 326). Null for a loan. */
+  accountId: string | null
 }
 
 export interface DebtPlan {

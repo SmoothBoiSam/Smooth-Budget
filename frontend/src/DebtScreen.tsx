@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { ask } from './confirm'
-import { ApiError, budgetEditApi, debtApi, savingsShare, type Debt, type DebtFields, type DebtStrategy, type DebtSummary } from './api'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { ApiError, budgetEditApi, debtApi, savingsShare, type Debt, type DebtStrategy, type DebtSummary } from './api'
 import { useResume } from './offline'
 import { InterestCard } from './DebtInterest'
 import { CardLink, ErrorNotice, Loading, Page, PageHeader, smallBtn } from './ui'
-import { centsToInput, formatCents, formatDay, ordinal, parseDollars } from './format'
+import { formatCents, formatDay } from './format'
 
 const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 /** "2030-10-01" -> "Oct 2030". */
@@ -20,7 +19,6 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const [saved, setSaved] = useState<DebtSummary | null>(null)
   const [split, setSplit] = useState<number | null>(null) // savings side of the split
-  const [editing, setEditing] = useState<Debt | null | undefined>(undefined) // null = adding
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -199,53 +197,37 @@ export default function DebtScreen({ onSignedOut }: { onSignedOut: () => void })
         </section>
       )}
 
-      <section aria-labelledby="debts-h" className="mt-6">
-        <h2 id="debts-h" className="px-1 text-sm font-semibold text-ink-soft">
-          Cards and loans
+      <section aria-labelledby="debts-h" className="mt-4 rounded-3xl neu p-5">
+        <h2 id="debts-h" className="text-sm font-semibold">
+          Accounts
         </h2>
         {visible.length === 0 ? (
-          <p className="mt-2 rounded-2xl neu px-4 py-3 text-sm text-ink-soft">
-            No debts yet. Credit cards show up here once they’re connected or imported.
-          </p>
+          <p className="mt-2 text-xs text-ink-soft">No debts yet. Credit cards show up here once they’re connected or imported.</p>
         ) : (
-          <ul className="mt-2 divide-y divide-ink/[0.07] overflow-hidden rounded-2xl neu">
+          <ul className="mt-2 divide-y divide-ink/[0.07]">
             {visible.map((d) => (
               <li key={d.id}>
-                <DebtRow d={d} onOpen={() => setEditing(d)} />
+                <DebtRow d={d} />
               </li>
             ))}
           </ul>
         )}
-        <button type="button" onClick={() => setEditing(null)} className="mt-3 w-full rounded-2xl neu py-3 text-sm font-medium">
-          + Add a loan or other debt
-        </button>
         {hidden.length > 0 && (
           <p className="mt-3 text-xs text-ink-soft">
             Hidden from the plan:{' '}
             {hidden.map((d, i) => (
               <span key={d.id}>
                 {i > 0 && ', '}
-                <button type="button" onClick={() => setEditing(d)} className={`${smallBtn} py-1! text-accent`}>
+                <a href={pageOf(d)} className={`${smallBtn} py-1! text-accent`}>
                   {d.name}
-                </button>
+                </a>
               </span>
             ))}
           </p>
         )}
+        {/* Cards and loans are added and edited in More → Accounts (DECISIONS.md 326). */}
+        <CardLink href="#/more/accounts">Add or change cards and loans</CardLink>
       </section>
-
-      {editing !== undefined && (
-        <DebtSheet
-          debt={editing}
-          onClose={() => setEditing(undefined)}
-          onSaved={async (message) => {
-            setEditing(undefined)
-            setNotice(message)
-            await load()
-          }}
-          onError={fail}
-        />
-      )}
     </Page>
   )
 }
@@ -309,9 +291,12 @@ function Comparison({ plan, cmp }: { plan: NonNullable<DebtSummary['plan']>; cmp
   )
 }
 
-function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
+/** A card's account page, or a loan's, in More → Accounts; back comes here (DECISIONS.md 326). */
+const pageOf = (d: Debt) => (d.accountId ? `#/more/accounts/${d.accountId}?back=debt` : `#/more/accounts/loan/${d.id}?back=debt`)
+
+function DebtRow({ d }: { d: Debt }) {
   return (
-    <button type="button" onClick={onOpen} className="block w-full px-4 py-3 text-left">
+    <a href={pageOf(d)} className="block w-full py-2.5 text-left">
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate text-sm font-medium">
           {d.name}
@@ -348,7 +333,7 @@ function DebtRow({ d, onOpen }: { d: Debt; onOpen: () => void }) {
           Interest: {formatCents(d.lastInterestCents)} on {formatDay(d.lastInterestDate)} · {formatCents(d.interestChargedThisYearCents)} this year
         </p>
       )}
-    </button>
+    </a>
   )
 }
 
@@ -472,198 +457,4 @@ function niceCeil(cents: number) {
 function shortMoney(cents: number) {
   const d = cents / 100
   return d >= 1000 ? `$${(d / 1000).toFixed(d % 1000 === 0 ? 0 : 1)}k` : `$${Math.round(d)}`
-}
-
-/** Edit a card or loan: APR, minimum, due day, limit, and (for loans and CSV-only cards) the balance. */
-function DebtSheet({
-  debt,
-  onClose,
-  onSaved,
-  onError,
-}: {
-  debt: Debt | null
-  onClose: () => void
-  onSaved: (message: string) => Promise<void>
-  onError: (e: unknown) => void
-}) {
-  const isNew = debt === null
-  const [name, setName] = useState(debt?.name ?? '')
-  const [balance, setBalance] = useState(debt ? centsToInput(debt.balanceCents) : '')
-  const [apr, setApr] = useState(debt?.aprBps != null ? String(debt.aprBps / 100) : '')
-  const [minimum, setMinimum] = useState(debt?.minimumCents != null ? centsToInput(debt.minimumCents) : '')
-  const [dueDay, setDueDay] = useState(debt?.dueDay != null ? String(debt.dueDay) : '')
-  const [limit, setLimit] = useState(debt?.creditLimitCents != null ? centsToInput(debt.creditLimitCents) : '')
-  const [starting, setStarting] = useState(debt && debt.startingBalanceCents > 0 ? centsToInput(debt.startingBalanceCents) : '')
-  const [hidden, setHidden] = useState(debt?.isHidden ?? false)
-  const [err, setErr] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const balanceEditable = !debt?.balanceFromBank
-
-  function fields(): DebtFields | string {
-    const aprNum = apr.trim() === '' ? null : Number(apr.replace('%', ''))
-    if (aprNum !== null && (!Number.isFinite(aprNum) || aprNum < 0 || aprNum > 100)) return 'Enter the APR as a percentage, like 24.99.'
-    const min = minimum.trim() === '' ? null : parseDollars(minimum)
-    if (minimum.trim() !== '' && min === null) return 'Enter the minimum payment in dollars, like 35 or 35.00.'
-    const bal = balanceEditable ? parseDollars(balance) : null
-    if (balanceEditable && bal === null) return 'Enter what you owe in dollars.'
-    const day = dueDay.trim() === '' ? null : Number(dueDay)
-    if (day !== null && (!Number.isInteger(day) || day < 1 || day > 31)) return 'The due day is a day of the month, 1 to 31.'
-    const lim = limit.trim() === '' ? null : parseDollars(limit)
-    if (limit.trim() !== '' && lim === null) return 'Enter the limit in dollars.'
-    const start = starting.trim() === '' ? null : parseDollars(starting)
-    if (starting.trim() !== '' && start === null) return 'Enter the starting balance in dollars.'
-    if (!name.trim()) return 'Give it a name.'
-    return {
-      name: name.trim(),
-      balanceCents: bal,
-      aprBps: aprNum === null ? null : Math.round(aprNum * 100),
-      minimumCents: min,
-      dueDay: day,
-      creditLimitCents: lim,
-      startingBalanceCents: start,
-      isHidden: hidden,
-    }
-  }
-
-  async function save(e: FormEvent) {
-    e.preventDefault()
-    const f = fields()
-    if (typeof f === 'string') return setErr(f)
-    setBusy(true)
-    try {
-      if (isNew) await debtApi.add(f)
-      else await debtApi.update(debt.id, f)
-      await onSaved(isNew ? `Added ${f.name}.` : 'Saved.')
-    } catch (ex) {
-      onError(ex)
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/40" onClick={onClose}>
-      <form
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="debt-sheet-h"
-        onSubmit={save}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
-      >
-        <h2 id="debt-sheet-h" className="text-lg font-semibold">
-          {isNew ? 'Add a debt' : debt.name}
-        </h2>
-        {!isNew && debt.fromBank && <p className="text-xs text-ink-soft">APR and minimum came from your bank. Change them if they’re off.</p>}
-
-        <Field label="Name">
-          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Car loan" />
-        </Field>
-        {balanceEditable ? (
-          <Field label="What you owe now">
-            <Money value={balance} onChange={setBalance} label="Balance" />
-            {debt?.isCard && (
-              <p className="mt-1 text-xs text-ink-soft">
-                {debt.typedOn && debt.typedBalanceCents !== null
-                  ? `You typed ${formatCents(debt.typedBalanceCents)} on ${formatDay(debt.typedOn)}. Since then it follows your payments to this card and what its uploads show you charged. Type what the card’s own app says to correct it.`
-                  : 'This card isn’t linked to a bank. Type what its own app says you owe; after that it follows your payments to it and what its uploads show you charged.'}
-              </p>
-            )}
-          </Field>
-        ) : (
-          <p className="mt-4 text-sm text-ink-soft">
-            Owed now: <span className="font-semibold">{formatCents(debt!.balanceCents)}</span> <span className="text-xs text-ink-faint">(from your bank)</span>
-          </p>
-        )}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="APR">
-            <div className={`${inputCls} flex items-center`}>
-              <input value={apr} onChange={(e) => setApr(e.target.value)} inputMode="decimal" aria-label="APR percent" placeholder="24.99" className="w-full bg-transparent text-right outline-none" />
-              <span className="pl-1 text-sm text-ink-soft">%</span>
-            </div>
-          </Field>
-          <Field label="Minimum payment">
-            <Money value={minimum} onChange={setMinimum} label="Minimum payment" />
-          </Field>
-          <Field label="Due day of the month">
-            <select aria-label="Due day of the month" value={dueDay} onChange={(e) => setDueDay(e.target.value)} className={inputCls}>
-              <option value="">Not set</option>
-              {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
-                <option key={d} value={String(d)}>
-                  {ordinal(d)}
-                </option>
-              ))}
-              {/* Stored as 31: the 31st where there is one, otherwise the 30th, 29th or 28th. */}
-              <option value="31">Last day of the month</option>
-            </select>
-          </Field>
-          <Field label={debt?.isCard ? 'Credit limit' : 'Original amount'}>
-            <Money value={limit} onChange={setLimit} label="Limit" />
-          </Field>
-        </div>
-        <Field label="What you owed when you started tracking">
-          <Money value={starting} onChange={setStarting} label="Starting balance" />
-        </Field>
-        {!isNew && (
-          <label className="mt-4 flex items-center gap-3 rounded-xl neu-inset px-4 py-3">
-            <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} className="size-5" />
-            <span className="text-sm">
-              Leave out of the plan
-              <span className="block text-xs text-ink-soft">For a card you pay in full every month.</span>
-            </span>
-          </label>
-        )}
-
-        {err && (
-          <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
-            {err}
-          </p>
-        )}
-        {!isNew && !debt.isCard && (
-          <button
-            type="button"
-            onClick={async () => {
-              if (!(await ask(`Remove ${debt.name}? Its details are deleted.`, { yes: 'Remove', danger: true }))) return
-              try {
-                await debtApi.remove(debt.id)
-                await onSaved(`Removed ${debt.name}.`)
-              } catch (ex) {
-                onError(ex)
-              }
-            }}
-            className="mt-3 w-full py-2 text-sm font-medium text-danger"
-          >
-            Remove this debt
-          </button>
-        )}
-        <div className="mt-5 flex gap-3">
-          <button type="button" onClick={onClose} className="flex-1 rounded-2xl neu py-3 font-semibold text-danger text-sm">
-            Cancel
-          </button>
-          <button type="submit" disabled={busy} className="flex-1 rounded-2xl bg-primary shadow-neu-sm py-3 font-semibold text-primary-ink disabled:opacity-50 text-sm">
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
-const inputCls = 'mt-1 block w-full rounded-xl neu-inset px-3 py-2.5 text-base'
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="mt-4 block">
-      <span className="text-sm font-medium text-ink-soft">{label}</span>
-      {children}
-    </label>
-  )
-}
-
-function Money({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
-  return (
-    <div className={`${inputCls} flex items-center`}>
-      <span className="text-sm text-ink-soft">$</span>
-      <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" className="w-full bg-transparent px-1 text-right tabular-nums outline-none" />
-    </div>
-  )
 }

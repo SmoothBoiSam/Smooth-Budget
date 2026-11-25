@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { ask } from './confirm'
-import { accountsApi, budgetApi, plaidApi, type Account, type AccountImpact, type ImportBatch, type ManagedAccount } from './api'
+import { accountsApi, budgetApi, debtApi, plaidApi, type Account, type AccountImpact, type Debt, type ImportBatch, type ManagedAccount } from './api'
+import { DebtForm } from './DebtForm'
 import { formatCents, formatDay, formatTime } from './format'
 import { Switch } from './NotificationSetting'
 import { Card, Chevron, ErrorNotice, Loading, Page, PageHeader, Row, Rows, headerActionCls, reviewPrimary, reviewSecondary, smallBtn, smallBtnOn } from './ui'
@@ -16,7 +17,28 @@ const where = (a: ManagedAccount) => (a.bankSynced ? (a.bankName ?? 'Bank') : a.
 /** A card owes money: show what's owed, not a negative balance. */
 const money = (a: { type: ManagedAccount['type']; balanceCents: number }) =>
   a.type === 'CreditCard' ? (a.balanceCents < 0 ? `${formatCents(-a.balanceCents)} owed` : formatCents(a.balanceCents)) : formatCents(a.balanceCents)
-const pct = (bps: number) => `${(bps / 100).toFixed(2).replace(/\.?0+$/, '')}%`
+const accountsBack = { href: '#/more/accounts', label: 'Accounts' }
+/** A page opened from Debt goes back there (DECISIONS.md 326); otherwise back to Accounts. */
+function backFromHash() {
+  return new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('back') === 'debt' ? { href: '#/debt', label: 'Debt' } : accountsBack
+}
+
+/** Your cards and loans as Debt sees them, for their payoff details (DECISIONS.md 326). */
+function useDebts() {
+  const [debts, setDebts] = useState<Debt[] | null>(null)
+  const load = useCallback(
+    () =>
+      debtApi
+        .summary()
+        .then((s) => setDebts(s.debts))
+        .catch(() => setDebts((d) => d ?? [])),
+    [],
+  )
+  useEffect(() => {
+    void load()
+  }, [load])
+  return { debts, load }
+}
 
 function useAccounts() {
   const [list, setList] = useState<ManagedAccount[] | null>(null)
@@ -44,16 +66,18 @@ function useAccounts() {
  */
 export function AccountsList({ back }: { back: { href: string; label: string } }) {
   const { list, error, load } = useAccounts()
-  const [adding, setAdding] = useState<'csv' | 'manual' | null>(null)
+  const { debts } = useDebts()
+  const [adding, setAdding] = useState<'csv' | 'manual' | 'loan' | null>(null)
 
   const open = list?.filter((a) => !a.closedOn) ?? []
   const closed = list?.filter((a) => a.closedOn) ?? []
+  const loans = debts?.filter((d) => !d.isCard) ?? []
   return (
     <Page>
       <PageHeader title="Accounts" back={back} />
       {error && <ErrorNotice message={error} onRetry={() => void load()} />}
       {!list && !error && <Loading shape="list" />}
-      {list && list.length === 0 && <p className="mt-6 px-1 text-sm text-ink-soft">No accounts yet. Connect a bank, or add one below.</p>}
+      {list && list.length === 0 && loans.length === 0 && <p className="mt-6 px-1 text-sm text-ink-soft">No accounts yet. Connect a bank, or add one below.</p>}
       {kinds
         .filter((k) => open.some((a) => a.type === k.type))
         .map((k) => (
@@ -73,9 +97,27 @@ export function AccountsList({ back }: { back: { href: string; label: string } }
             </Rows>
           </Card>
         ))}
+      {/* Loans you track by hand live here with your accounts (DECISIONS.md 326). */}
+      {loans.length > 0 && (
+        <Card title="Loans">
+          <Rows>
+            {loans.map((d) => (
+              <Row
+                key={d.id}
+                label={d.name}
+                hint={`You${d.isHidden ? ' · left out of the plan' : ''}`}
+                value={`${formatCents(d.balanceCents)} owed`}
+                href={`#/more/accounts/loan/${d.id}`}
+              />
+            ))}
+          </Rows>
+        </Card>
+      )}
 
       <Card title="Add an account">
-        {adding ? (
+        {adding === 'loan' ? (
+          <DebtForm debt={null} onCancel={() => setAdding(null)} onSaved={(_, id) => (window.location.hash = `#/more/accounts/loan/${id}`)} />
+        ) : adding ? (
           <div className="px-5 pb-4">
             <AddAccountForm
               withBalance={adding === 'manual'}
@@ -90,6 +132,7 @@ export function AccountsList({ back }: { back: { href: string; label: string } }
             <Row label="Connect a bank" hint="It syncs on its own, through Plaid" href="#/more/banks" />
             <Row label="From a CSV" hint="Files you download from your bank" onClick={() => setAdding('csv')} />
             <Row label="Track it yourself" hint="A balance you update by hand" onClick={() => setAdding('manual')} />
+            <Row label="A loan" hint="Car, student or personal, tracked by hand" onClick={() => setAdding('loan')} />
           </Rows>
         )}
       </Card>
@@ -132,13 +175,17 @@ export function AccountsList({ back }: { back: { href: string; label: string } }
 /** One account's page (DECISIONS.md 318, 319): its name and kind, balance, data, its part in the budget, and ending it. */
 export function AccountPage({ id, onChanged }: { id: string; onChanged: () => void }) {
   const { list, error, load } = useAccounts()
+  const { debts, load: loadDebts } = useDebts()
   const [batches, setBatches] = useState<ImportBatch[]>([])
   const [ending, setEnding] = useState<'close' | 'delete' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
-  const back = { href: '#/more/accounts', label: 'Accounts' }
+  const [version, setVersion] = useState(0)
+  const [payoffNote, setPayoffNote] = useState<string | null>(null)
+  const back = backFromHash()
   const a = list?.find((x) => x.id === id)
+  const debt = debts?.find((d) => d.accountId === id)
 
   const loadBatches = useCallback(() => budgetApi.batches().then((b) => setBatches(b.filter((x) => x.accountId === id))).catch(() => undefined), [id])
   useEffect(() => {
@@ -148,9 +195,11 @@ export function AccountPage({ id, onChanged }: { id: string; onChanged: () => vo
   function changed(note?: string) {
     setEnding(null)
     setMessage(note ?? null)
+    setPayoffNote(null)
     onChanged()
     void load()
     void loadBatches()
+    void loadDebts().then(() => setVersion((v) => v + 1))
   }
 
   async function run(label: string, action: () => Promise<string | undefined>) {
@@ -289,7 +338,6 @@ export function AccountPage({ id, onChanged }: { id: string; onChanged: () => vo
               <BalanceField account={a} onSaved={() => changed('Balance saved.')} />
             </li>
           )}
-          {!a.bankSynced && isCard && !a.closedOn && <Row label="Set what it owes on Debt" href="#/debt" />}
         </Rows>
       </Card>
 
@@ -364,18 +412,26 @@ export function AccountPage({ id, onChanged }: { id: string; onChanged: () => vo
                 href="#/savings"
               />
             )}
-            {isCard && a.includedInBudget && (
-              <Row
-                label="Payoff"
-                hint={
-                  [a.aprBps != null && `APR ${pct(a.aprBps)}`, a.minimumCents != null && `minimum ${formatCents(a.minimumCents)}`, a.dueDay != null && `due day ${a.dueDay}`]
-                    .filter(Boolean)
-                    .join(' · ') || 'APR, minimum and due day not set yet'
-                }
-                href="#/debt"
-              />
-            )}
           </Rows>
+        </Card>
+      )}
+
+      {/* What Debt's pop-up used to edit, on the card's own page (DECISIONS.md 326). */}
+      {isCard && !a.closedOn && debt && (
+        <Card title="Payoff" action={<a href="#/debt" className="text-xs font-semibold text-accent">Debt ›</a>}>
+          <DebtForm
+            key={`${debt.id}-${version}`}
+            debt={debt}
+            onSaved={(note) => {
+              changed()
+              setPayoffNote(note)
+            }}
+          />
+          {payoffNote && (
+            <p role="status" className="-mt-2 px-5 pb-4 text-sm text-good">
+              {payoffNote}
+            </p>
+          )}
         </Card>
       )}
 
@@ -416,6 +472,69 @@ export function AccountPage({ id, onChanged }: { id: string; onChanged: () => vo
           </div>
         </section>
       )}
+    </Page>
+  )
+}
+
+/** A loan you track by hand (DECISIONS.md 326): what Debt's pop-up edited, and removing it. */
+export function LoanPage({ id, onChanged }: { id: string; onChanged: () => void }) {
+  const { debts, load } = useDebts()
+  const [message, setMessage] = useState<string | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [version, setVersion] = useState(0)
+  const back = backFromHash()
+  const d = debts?.find((x) => x.id === id && !x.isCard)
+
+  if (!debts) return <Page><PageHeader title="Loan" back={back} /><Loading shape="list" /></Page>
+  if (!d)
+    return (
+      <Page>
+        <PageHeader title="Loan" back={back} />
+        <p className="mt-6 px-1 text-sm text-ink-soft">This loan isn’t here any more.</p>
+      </Page>
+    )
+
+  async function remove() {
+    if (!d || !(await ask(`Remove ${d.name}? Its details are deleted.`, { yes: 'Remove', danger: true }))) return
+    try {
+      await debtApi.remove(d.id)
+      onChanged()
+      window.location.hash = '#/more/accounts'
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : 'Could not remove it.')
+    }
+  }
+
+  return (
+    <Page>
+      <PageHeader title={d.name} sub={`Loan · You${d.isHidden ? ' · left out of the plan' : ''}`} back={back} />
+      {problem && (
+        <p role="alert" className="mt-4 rounded-2xl neu-inset px-4 py-3 text-sm text-danger">
+          {problem}
+        </p>
+      )}
+      <Card title="Payoff" action={<a href="#/debt" className="text-xs font-semibold text-accent">Debt ›</a>}>
+        <DebtForm
+          key={`${d.id}-${version}`}
+          debt={d}
+          onSaved={(note) => {
+            setMessage(note)
+            setProblem(null)
+            onChanged()
+            void load().then(() => setVersion((v) => v + 1))
+          }}
+        />
+        {message && (
+          <p role="status" className="-mt-2 px-5 pb-4 text-sm text-good">
+            {message}
+          </p>
+        )}
+      </Card>
+      <div className="mt-6 text-center">
+        <button type="button" onClick={() => void remove()} className={`${smallBtn} bg-transparent! text-danger`}>
+          Remove this loan
+        </button>
+      </div>
     </Page>
   )
 }

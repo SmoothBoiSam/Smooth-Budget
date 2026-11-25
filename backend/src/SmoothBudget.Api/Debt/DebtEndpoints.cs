@@ -115,7 +115,8 @@ public static class DebtEndpoints
             if (Validate(req, manual: !bankBalance) is { } problem) return problem;
             if (d.AprBps != req.AprBps || d.MinimumPaymentCents != req.MinimumCents || d.DueDay != req.DueDay)
                 d.FromBank = false; // yours now: the bank won't overwrite it
-            d.Name = req.Name.Trim();
+            if (d.AccountId is null)
+                d.Name = req.Name.Trim(); // a card is named on its account's page (DECISIONS.md 326)
             d.AprBps = req.AprBps;
             d.MinimumPaymentCents = req.MinimumCents;
             d.DueDay = req.DueDay;

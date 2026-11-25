@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ask } from './confirm'
 import { ApiError, api, budgetApi, type Account, type ImportBatch, type ImportResult, type Me } from './api'
-import { AccountPage, AccountsList, AddAccountForm } from './AccountsMenu'
+import { AccountPage, AccountsList, AddAccountForm, LoanPage } from './AccountsMenu'
 import AppearanceSetting from './AppearanceSetting'
 import NotificationSetting from './NotificationSetting'
 import Mystery from './Mystery'
@@ -65,6 +65,7 @@ export default function MoreScreen({ me, onChanged, onSignedOut }: { me: Me; onC
 
   if (sub === 'accounts') return <AccountsList back={back} />
   if (sub?.startsWith('account:')) return <AccountPage id={sub.slice('account:'.length)} onChanged={changed} />
+  if (sub?.startsWith('loan:')) return <LoanPage id={sub.slice('loan:'.length)} onChanged={changed} />
 
   if (sub === 'banks')
     return (
@@ -206,6 +207,7 @@ const subFromHash = () => {
   const h = window.location.hash
   // Merchant rules are gone (DECISIONS.md 259): the most likely category learns from what you confirm.
   const account = /^#\/more\/accounts\/([0-9a-f-]{36})/.exec(h)
+  const loan = /^#\/more\/accounts\/loan\/([0-9a-f-]{36})/.exec(h)
   return h.startsWith('#/more/import') // #/more/imports, the old list page, lands here too
     ? 'import'
     : h.startsWith('#/more/banks')
@@ -214,6 +216,8 @@ const subFromHash = () => {
         ? 'notifications'
         : account
           ? `account:${account[1]}`
+          : loan
+            ? `loan:${loan[1]}`
           : h.startsWith('#/more/accounts') || h.startsWith('#/more/nicknames') // nicknames are on each account's page now
             ? 'accounts'
             : null
