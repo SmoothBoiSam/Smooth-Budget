@@ -106,9 +106,7 @@ public record BudgetSummaryDto(
     long UnfiledSpendingCents = 0,
     long OverplannedCents = 0,
     // How much the cash check lowered Left to Spend (DECISIONS.md 183).
-    long CashShortCents = 0,
-    // Money set aside in earlier months for a planned expense paid this month: part of the month's money (DECISIONS.md 327).
-    long SetAsideInCents = 0);
+    long CashShortCents = 0);
 
 /// <param name="ShortCents">What this month still needs beyond its money after every squeeze.</param>
 /// <param name="SetByYou">Categories whose limit you set yourself (from now on, or this month only).</param>
@@ -149,7 +147,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         var row = data.Row;
         // With fixed contributions set up, partner money is those contributions, counted once as offsets (DECISIONS.md 97).
         var moneyIn = MonthData.MoneyIn(row, data.Contributions);
-        var partnerExpected = moneyIn - row.IncomeExpectedCents - row.SetAsideInCents;
+        var partnerExpected = moneyIn - row.IncomeExpectedCents;
         // "In so far" for a friend's fixed contributions is what was matched to them (DECISIONS.md 252): one sent a day
         // early, before the month began, counts in the month you moved it to (166), like everywhere else.
         var partnerReceived = data.Contributions is { Count: > 0 } fixedOnes
@@ -170,7 +168,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
             new AutoBudgetDto(db.Households.Where(h => h.Id == householdId).Select(h => h.AutoBudget).Single(), row.AutoNote, row.AutoNoteUtc, row.AutoShortCents,
                 db.Categories.Where(c => c.HouseholdId == householdId && c.LimitSetByUser).Select(c => c.Id).AsEnumerable()
                     .Concat(data.Categories.Where(c => c.HasMonthOverride).Select(c => c.Id)).Distinct().ToList(), row.IncomeSetByUser, row.AutoHeldBackCents),
-            lts.UnfiledSpendingCents, lts.OverplannedCents, lts.CashShortCents, row.SetAsideInCents);
+            lts.UnfiledSpendingCents, lts.OverplannedCents, lts.CashShortCents);
     }
 
     /// <summary>
@@ -230,8 +228,7 @@ public class BudgetSummaryService(CurrentMonthLoader loader, BudgetMonthService 
         var friends = data.Contributions is { Count: > 0 } fixedOnes
             ? fixedOnes.Sum(x => x.ReceivedCents)
             : data.Transactions.Where(t => t.Kind == Core.Transactions.TransactionKind.PartnerContribution && !t.IsTransfer && t.AmountCents < 0).Sum(t => -t.AmountCents);
-        // Money set aside earlier for a planned expense is already in checking (DECISIONS.md 327).
-        return (MonthData.MoneyIn(data.Row, data.Contributions), income + friends + data.Row.SetAsideInCents);
+        return (MonthData.MoneyIn(data.Row, data.Contributions), income + friends);
     }
 
     private async Task<LastMonthDto?> LastMonthAsync(Guid householdId, Data.BudgetMonth current, CancellationToken ct)

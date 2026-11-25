@@ -95,7 +95,6 @@ public static class DemoMode
         await db.BudgetMonths.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.SavingsGoals.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.DebtAccounts.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
-        await db.PlannedExpenses.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.RecurringItems.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.ImportBatches.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);
         await db.Categories.Where(x => x.HouseholdId == id).ExecuteDeleteAsync(ct);

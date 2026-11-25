@@ -316,11 +316,6 @@ public class BudgetMonth
     public bool IncomeSetByUser { get; set; }
     /// <summary>What the plan still needs beyond the month's money after the automatic budget squeezed everything it can.</summary>
     public long AutoShortCents { get; set; }
-    /// <summary>
-    /// Money set aside in earlier months for a planned expense paid this month (DECISIONS.md 327). It's already in checking,
-    /// so it's part of the month's money, like income that has landed.
-    /// </summary>
-    public long SetAsideInCents { get; set; }
     /// <summary>Left out of the automatic budget because the bank accounts can't cover it this month (DECISIONS.md 233).</summary>
     public long AutoHeldBackCents { get; set; }
     /// <summary>The automatic budget's last change, in plain words, and when.</summary>
@@ -376,25 +371,6 @@ public class SweepTask
 /// A debt for the payoff plan (SPEC 4.4): a credit card (linked to its account, whose balance it follows) or a
 /// loan entered by hand. APR and minimum come from the bank when it shares them (Plaid Liabilities) and are always editable.
 /// </summary>
-/// <summary>
-/// A big one-time expense you're setting money aside for (DECISIONS.md 327). It has its own bill line (a category named
-/// after it), which plans what each month sets aside and, in the month it's paid, what it costs. Spending filed there is
-/// what's been paid on it.
-/// </summary>
-public class PlannedExpense
-{
-    public Guid Id { get; set; }
-    public Guid HouseholdId { get; set; }
-    public required string Name { get; set; }
-    public long AmountCents { get; set; }
-    public DateOnly DueOn { get; set; }
-    /// <summary>The payday of the check you were on when you added it: the first check that sets money aside.</summary>
-    public DateOnly FirstPay { get; set; }
-    public Guid CategoryId { get; set; }
-    public Category? Category { get; set; }
-    public DateTime CreatedUtc { get; set; }
-}
-
 public class DebtAccount
 {
     public Guid Id { get; set; }

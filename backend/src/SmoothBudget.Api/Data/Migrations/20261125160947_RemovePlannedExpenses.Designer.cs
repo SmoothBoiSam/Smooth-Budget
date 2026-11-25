@@ -13,8 +13,8 @@ using SmoothBudget.Api.Data;
 namespace SmoothBudget.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261125073145_PlannedExpenses")]
-    partial class PlannedExpenses
+    [Migration("20261125160947_RemovePlannedExpenses")]
+    partial class RemovePlannedExpenses
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -357,9 +357,6 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<long>("PartnerExpectedCents")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("SetAsideInCents")
                         .HasColumnType("bigint");
 
                     b.Property<DateOnly>("StartDate")
@@ -1061,44 +1058,6 @@ namespace SmoothBudget.Api.Data.Migrations
                     b.ToTable("PlaidItems");
                 });
 
-            modelBuilder.Entity("SmoothBudget.Api.Data.PlannedExpense", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<long>("AmountCents")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("CategoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateOnly>("DueOn")
-                        .HasColumnType("date");
-
-                    b.Property<DateOnly>("FirstPay")
-                        .HasColumnType("date");
-
-                    b.Property<Guid>("HouseholdId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CategoryId");
-
-                    b.HasIndex("HouseholdId");
-
-                    b.ToTable("PlannedExpenses");
-                });
-
             modelBuilder.Entity("SmoothBudget.Api.Data.PushDevice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1649,17 +1608,6 @@ namespace SmoothBudget.Api.Data.Migrations
                         .HasForeignKey("HouseholdId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("SmoothBudget.Api.Data.PlannedExpense", b =>
-                {
-                    b.HasOne("SmoothBudget.Api.Data.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Category");
                 });
 
             modelBuilder.Entity("SmoothBudget.Api.Data.PushDevice", b =>

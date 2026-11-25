@@ -23,7 +23,6 @@ import { useRemembered, useResume } from './offline'
 import { Caret, DateField, ErrorNotice, headerActionCls, Loading, Notice, Page, PageHeader, smallBtn, smallBtnOn } from './ui'
 import BudgetPlanner from './BudgetPlanner'
 import SweepSetting from './SweepSetting'
-import PlannedExpenses from './PlannedExpenses'
 import CategoryEditSheet from './CategoryEditSheet'
 import { ArchivedCategories, ResetCategories, UnusedCategories } from './CategoryTools'
 import BillSheet from './BillSheet'
@@ -193,7 +192,6 @@ export default function BudgetScreen({ demo = false, onChanged, onSignedOut }: {
           the planner's own income fields do that job. */}
       {/* The one savings/debt split first: Debt and Savings link here (DECISIONS.md 321). */}
       {view.kind === 'plan' && <SweepSetting />}
-      {view.kind === 'plan' && summary && <PlannedExpenses today={summary.today} onChanged={() => saved('Saved.')} />}
       {view.kind === 'plan' && (
         <BudgetPlanner
           top={() =>
@@ -1125,7 +1123,7 @@ function IncomeCard({
   const partnerLabel = first ? `From ${first}` : 'From friends'
   const fixed = s.contributions ?? []
   const a = s.auto
-  const moneyIn = s.incomeExpectedCents + s.partnerExpectedCents + (s.setAsideInCents ?? 0)
+  const moneyIn = s.incomeExpectedCents + s.partnerExpectedCents
   const short = a?.on ? a.shortCents : Math.max(0, -s.unallocatedCents)
 
   return (
@@ -1155,15 +1153,6 @@ function IncomeCard({
                   Use your paychecks instead
                 </button>
               </p>
-            )}
-            {/* Money set aside before this month for a big expense paid in it (DECISIONS.md 327). */}
-            {(s.setAsideInCents ?? 0) > 0 && (
-              <div className="flex justify-between gap-3">
-                <dt className="text-ink-soft">Set aside earlier</dt>
-                <dd className="tabular-nums">
-                  {formatCents(s.setAsideInCents)} <span className="text-xs text-ink-soft">· in checking</span>
-                </dd>
-              </div>
             )}
             {fixed.length === 0 ? (
             <div className="flex justify-between gap-3">

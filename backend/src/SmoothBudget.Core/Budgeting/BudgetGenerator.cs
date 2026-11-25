@@ -19,10 +19,7 @@ public sealed record CurrentBill(Guid CategoryId, string Name, long MonthlyCents
 /// What the automatic budget feeds the generator (DECISIONS.md 135): this month's income from the Payday forecast instead of
 /// a median, and limits you set yourself, which it never changes.
 /// </summary>
-/// <param name="SetAsideInCents">Money set aside in earlier months for a planned expense paid this month (DECISIONS.md 327).</param>
-/// <param name="LockedWhy">Why a locked line is what it is, when it isn't simply yours (a planned expense's line).</param>
-public sealed record BudgetOverrides(long? IncomeCents = null, string? IncomeExplanation = null, IReadOnlyDictionary<Guid, long>? LockedLimits = null,
-    long SetAsideInCents = 0, IReadOnlyDictionary<Guid, string>? LockedWhy = null);
+public sealed record BudgetOverrides(long? IncomeCents = null, string? IncomeExplanation = null, IReadOnlyDictionary<Guid, long>? LockedLimits = null);
 
 public sealed record BudgetProposal(
     int MonthsUsed,
@@ -40,13 +37,7 @@ public sealed record BudgetProposal(
     IReadOnlyList<long>? MonthlyPartnerCents = null,
     // Every card's minimum payment this month (interest included), when the minimums are known: in a tight month the card
     // lines can drop to this and no lower (DECISIONS.md 226).
-    long? CardMinimumsCents = null,
-    // Money set aside in earlier months for a planned expense paid this month (DECISIONS.md 327): part of the month's money.
-    long SetAsideInCents = 0)
-{
-    /// <summary>Everything the month's plan has to work with: income, partner money, and money set aside earlier.</summary>
-    public long MoneyCents => IncomeCents + PartnerCents + SetAsideInCents;
-}
+    long? CardMinimumsCents = null);
 
 /// <summary>
 /// Proposes a budget from the last few complete budget months (SPEC section 6.1):
@@ -114,7 +105,7 @@ public static class BudgetGenerator
             if (locked.TryGetValue(c.Id, out var mine))
             {
                 proposed = mine;
-                why = overrides?.LockedWhy?.GetValueOrDefault(c.Id) ?? "You set this limit, so it stays as you set it.";
+                why = "You set this limit, so it stays as you set it.";
             }
             else if (CardInterest.IsInterestCategory(c.Name, c.Type) && (cardDebts is { Count: > 0 } || !hasCardDebt))
             {
@@ -196,8 +187,7 @@ public static class BudgetGenerator
                 : 0;
             var minimums = allMinimums - interestInMinimums;
             var others = proposals.Where(p => p != savingsCategory && (!debtStep || p != cardCategory)).Sum(p => p.ProposedCents);
-            var setAsideIn = Math.Max(0, overrides?.SetAsideInCents ?? 0);
-            var left = Math.Max(0, income + partner + setAsideIn - others - minimums);
+            var left = Math.Max(0, income + partner - others - minimums);
             var share = savingsCategory is null ? 0 : !debtStep ? 100 : Math.Clamp(savings!.SavingsPercent, 0, 100);
             var toSavings = left * share / 100; // rounded down; the odd cents go to the cards
             var toDebt = debtStep ? left - toSavings : 0;
@@ -231,9 +221,8 @@ public static class BudgetGenerator
         return new BudgetProposal(
             n, income,
             overrides?.IncomeExplanation ?? (n == 0 ? "No complete months of history yet." : $"Your median monthly income over {Months(n)}: paychecks and other deposits."),
-            incomeByMonth, proposals, allocated, income + partner + Math.Max(0, overrides?.SetAsideInCents ?? 0) - allocated,
-            allocated > income + partner + Math.Max(0, overrides?.SetAsideInCents ?? 0), uncategorized,
-            partner, partnerByMonth, cardMinimums, Math.Max(0, overrides?.SetAsideInCents ?? 0));
+            incomeByMonth, proposals, allocated, income + partner - allocated, allocated > income + partner, uncategorized,
+            partner, partnerByMonth, cardMinimums);
     }
 
     /// <summary>The middle value; for an even count, the average of the two middle values rounded half up.</summary>

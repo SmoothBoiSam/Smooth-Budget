@@ -21,10 +21,10 @@ The app has five tabs.
 - **Budget:**
   - Spending categories, bills (one line each), debt payments and savings, each with spent vs limit and a "Maxed" state.
   - The **automatic budget** proposes limits from your history and your expected pay. It squeezes the least important spending first when a month brings in less. Limits you set yourself stay.
-  - Budget settings: **Extra money**, one savings/debt split for what's left each month after bills, spending and card minimums (and for anything unspent when a month closes); **Big expenses coming up**, where you name a cost and its due date and each paycheck before then keeps part of it in checking, with its own bill line; income; archived and unused categories; and **Refresh categories from bank**. The demo leaves that last one out.
+  - Budget settings: **Extra money**, one savings/debt split for what's left each month after bills, spending and card minimums (and for anything unspent when a month closes); income; archived and unused categories; and **Refresh categories from bank**. The demo leaves that last one out.
 - **Tasks:**
   - **Review transactions:** file anything the app couldn't categorize. One card covers spending, bills, income and transfers, and can make a merchant rule.
-  - **Pay period tasks:** for each paycheck, what to keep in checking for bills and for big expenses coming up, what to pay the cards, and what to move to savings.
+  - **Pay period tasks:** for each paycheck, what to keep in checking for bills, what to pay the cards, and what to move to savings.
     - Tasks only check themselves off, from what your accounts show; there's nothing to tick by hand. Moves to the same account merge into one.
     - Each task shows how far along it is: how far over or short an account is for its bills, or how much of a move has been sent and how much is left, with a bar.
     - A later check in the month sends what the earlier ones left of the month's card payment and savings, not just an even share.
@@ -192,7 +192,7 @@ Each area maps its own endpoints in its folder under `backend/src/SmoothBudget.A
 | Home | `Program.cs`, `Home/` | `GET /api/home/summary`: Left to Spend, Safe to Spend, the month overview, notices, sync health |
 | Accounts | `Accounts/` | Accounts and balances, Debit, nicknames, closing, reopening and deleting an account |
 | Transactions | `Transactions/TransactionEndpoints.cs` | Search, Review, filing a transaction, merchant rules, income |
-| Budget | `Budget/BudgetEndpoints.cs` | Categories, the summary, the automatic budget and generator, month close and sweeps, settings, big expenses coming up (`/api/planned`, in `PlannedExpenseService.cs`) |
+| Budget | `Budget/BudgetEndpoints.cs` | Categories, the summary, the automatic budget and generator, month close and sweeps, settings |
 | Bills | `Bills/RecurringEndpoints.cs` | Bills and subscriptions found from your transactions |
 | Debt | `Debt/DebtEndpoints.cs` | Cards and loans, the payoff plan, interest |
 | Savings | `Savings/` | Savings accounts, goals, the split between accounts |

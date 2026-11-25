@@ -224,12 +224,7 @@ function DoneMark({ item }: { item: PlanItem }) {
 
 /** "Keep $1,650.00 in Checking for Bills", how far over or short the account is, and a bar. */
 function KeepLines({ item, live }: { item: PlanItem; live: boolean }) {
-  // A big expense you're setting money aside for (DECISIONS.md 327) is a hold too, for everything set aside so far.
-  const what = item.key.startsWith('setaside:')
-    ? `Keep ${formatCents(item.cents)} in ${item.destination} for ${item.label}`
-    : item.kind === 'hold'
-      ? `Keep ${formatCents(item.cents)} more in ${item.destination} for ${item.label}`
-      : `Keep ${formatCents(item.cents)} in ${item.destination} for Bills`
+  const what = item.kind === 'hold' ? `Keep ${formatCents(item.cents)} more in ${item.destination} for ${item.label}` : `Keep ${formatCents(item.cents)} in ${item.destination} for Bills`
   const have = item.haveCents
   const need = item.needCents
   const known = live && have != null && need != null
