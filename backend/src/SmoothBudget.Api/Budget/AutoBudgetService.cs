@@ -32,7 +32,7 @@ public class BudgetRefreshTracker
 /// </summary>
 public class AutoBudgetService(AppDbContext db, BudgetMonthService months, BudgetGeneratorService generator, Payday.PaydayService payday,
     BudgetRefreshTracker tracker, Bills.RecurringService recurring, Debt.CardInterestService interest, Transactions.CategorizationService categorization,
-    Home.CurrentMonthLoader loader, TimeProvider clock)
+    Home.CurrentMonthLoader loader, PlannedExpenseService planned, TimeProvider clock)
 {
     private static readonly CultureInfo Us = CultureInfo.GetCultureInfo("en-US");
 
@@ -67,12 +67,16 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
         // Yours: limits you set from now on, and this month's "this month only" changes.
         var locked = categories.Where(c => c.LimitSetByUser).ToDictionary(c => c.Id, c => c.MonthlyLimitCents);
         foreach (var (id, cents) in monthOnly) locked[id] = cents;
+        // A planned expense's line is what this month sets aside for it, or what it costs in the month it's paid; what
+        // earlier months set aside is part of this month's money (DECISIONS.md 327).
+        var (plannedLimits, plannedWhy, setAsideIn) = await planned.MonthAsync(householdId, current, ct);
+        foreach (var (id, cents) in plannedLimits) locked[id] = Math.Max(cents, monthOnly.GetValueOrDefault(id));
 
         var income = current.IncomeSetByUser ? null : await payday.IncomeForMonthAsync(householdId, current.StartDate, current.EndDate, ct);
         var overrides = new BudgetOverrides(
             current.IncomeSetByUser ? current.IncomeExpectedCents : income?.Cents,
             current.IncomeSetByUser ? "The income you set for this month." : income?.Why,
-            locked);
+            locked, setAsideIn, plannedWhy);
         var (proposal, dto, savingsFromGoals) = await generator.BuildAsync(householdId, overrides, runCategorization: false, ct);
 
         // What's already spent this month: no limit goes below it.
@@ -128,6 +132,7 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
         await recurring.SplitBillLinesAsync(householdId, ct); // one line per bill, once (DECISIONS.md 279)
         if (await categorization.ReleaseHiddenAsync(householdId, ct) > 0) // spending left in a hidden category (DECISIONS.md 177)
             await categorization.RunAsync(householdId, ct);
+        await planned.SyncAsync(householdId, ct); // what planned expenses set aside this month (DECISIONS.md 327), automatic or not
         var household = await db.Households.SingleAsync(h => h.Id == householdId, ct);
         await OverrideOverspentAsync(householdId, household.AutoBudget, ct);
         if (!household.AutoBudget) return;
@@ -160,7 +165,7 @@ public class AutoBudgetService(AppDbContext db, BudgetMonthService months, Budge
             await db.SaveChangesAsync(ct);
             var cashShort = (await loader.LoadAsync(householdId, ct)).LeftToSpend().CashShortCents;
             if (cashShort <= 0 || fitted.ShortCents > 0) break; // fits the bank, or nothing left to squeeze
-            holdBack = Math.Max(0, p.IncomeCents + p.PartnerCents - p.AllocatedCents) + cashShort;
+            holdBack = Math.Max(0, p.MoneyCents - p.AllocatedCents) + cashShort;
         }
         current.AutoHeldBackCents = holdBack;
 

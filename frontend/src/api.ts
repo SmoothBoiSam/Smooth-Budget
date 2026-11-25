@@ -427,6 +427,8 @@ export interface BudgetSummary {
   overplannedCents: number
   /** How much the cash check lowered Left to Spend. */
   cashShortCents: number
+  /** Money set aside in earlier months for a big expense paid this month: part of the month's money (DECISIONS.md 327). */
+  setAsideInCents: number
   /** The automatic budget: on or off, its last change, any shortfall, and the limits you set yourself. */
   auto: { on: boolean; note: string | null; noteUtc: string | null; shortCents: number; setByYou: string[]; incomeSetByYou: boolean; heldBackCents: number } | null
 }
@@ -610,6 +612,28 @@ export interface GeneratorProposal {
 }
 
 export type SweepTarget = 'Debt' | 'Savings' | 'Split'
+
+/** A big expense you're setting money aside for (DECISIONS.md 327). */
+export interface PlannedExpense {
+  id: string
+  name: string
+  amountCents: number
+  dueOn: string
+  categoryId: string
+  /** What the checks paid so far were to set aside, less what's been paid on it. */
+  setAsideCents: number
+  spentCents: number
+  /** Each check's part, up to the due date. */
+  checks: { payDate: string; cents: number }[]
+  paid: boolean
+}
+
+export const plannedApi = {
+  list: () => request<PlannedExpense[]>('GET', '/planned'),
+  add: (name: string, amountCents: number, dueOn: string) => request<{ id: string }>('POST', '/planned', { name, amountCents, dueOn }),
+  update: (id: string, name: string, amountCents: number, dueOn: string) => request<void>('PUT', `/planned/${id}`, { name, amountCents, dueOn }),
+  remove: (id: string) => request<void>('DELETE', `/planned/${id}`),
+}
 
 export const budgetEditApi = {
   createCategory: (name: string, type: Category['type'], limitCents: number, priority?: Priority) =>

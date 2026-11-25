@@ -589,6 +589,10 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
         var bonuses = checks.Count == 0 ? []
             : await ExpectedIncomes.StillComingAsync(db, householdId, checks[0].Period.PayDate, checks[^1].Period.End.AddDays(1), c.Today, ct);
         List<ExpectedIncome> BonusesFor(DateOnly pay, DateOnly next) => bonuses.Where(x => x.ExpectedDate >= pay && x.ExpectedDate < next).ToList();
+        // Planned expenses (DECISIONS.md 327): each check up to the due date keeps its part in checking, on top of what the
+        // checks before it kept, until it's paid.
+        var planned = await Budget.PlannedExpenseService.LoadAsync(db, householdId, c.Rules, ct);
+        var keepIn = accounts.Where(a => a.Type == AccountType.Checking).OrderBy(a => a.CreatedUtc).Select(Label).FirstOrDefault() ?? "checking";
 
         // What the checks already gone by this budget month sent toward its card payment and savings (DECISIONS.md 316). The
         // checks still to come split the rest of the month's lines, not an even share each: one that sent less (a bonus was
@@ -779,7 +783,24 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             }
 
             var net = landedNet ?? f.NetCents;
-            return (PaydayPlan.Build(net + coming.Sum(x => x.AmountCents), bills, transfers), net, current, pay, next, coming,
+            var built = PaydayPlan.Build(net + coming.Sum(x => x.AmountCents), bills, transfers);
+            // Money kept for a planned expense is a "hold": it stays in checking, after the bills it keeps (327).
+            var setAside = planned.Where(e => !e.Paid && pay <= e.Row.DueOn).Select(e =>
+            {
+                var (need, own) = PlannedExpenses.AtCheck(e.Parts, pay, e.SpentCents);
+                var earlier = need - own;
+                var why = (own > 0 ? $"{PayEngine.Dollars(own)} from this check" + (earlier > 0 ? $", on top of {PayEngine.Dollars(earlier)} set aside by earlier checks." : ".")
+                              : $"Set aside by earlier checks.")
+                          + $" {e.Row.Name} costs {PayEngine.Dollars(e.Row.AmountCents)} on {e.Row.DueOn:MMM d}: {(e.Parts.Count == 1 ? "this check sets it aside" : $"{e.Parts.Count} checks set it aside")}. Keep it in checking until it's paid.";
+                return new PlanItem($"setaside:{e.Row.Id}", "hold", $"{e.Row.Name}, due {e.Row.DueOn:MMM d}", need, keepIn, why, FromOthersCents: earlier);
+            }).Where(x => x.Cents > 0).ToList();
+            if (setAside.Count > 0)
+            {
+                var items = built.Items.ToList();
+                items.InsertRange(items.FindLastIndex(x => x.Kind == "keep") + 1, setAside);
+                built = new PaydayPlanResult(items, Math.Max(0, items.Sum(x => x.Cents - x.FromOthersCents) - net - coming.Sum(x => x.AmountCents)));
+            }
+            return (built, net, current, pay, next, coming,
                 BonusPart(debtExtra) + BonusPart(savingsMonthly), friendsComing);
         }
         // What a check has to pay from its own money (not a friend's part of a bill, or card charges paid from spending money).
@@ -863,8 +884,11 @@ public class PaydayService(AppDbContext db, BudgetMonthService months, Recurring
             long? Need(PlanItem x) => x.Kind switch
             {
                 "keep" => x.Cents - (x.FromOthersCents - (x.Bills ?? []).Sum(b => b.ArrivedCents)),
+                // Several holds in one account (one for the next check's bills, one for a planned expense) add up.
                 "hold" => plan.Items.Where(y => y.Kind == "keep" && y.Destination == x.Destination)
-                              .Sum(y => y.Cents - (y.FromOthersCents - (y.Bills ?? []).Sum(b => b.ArrivedCents))) + x.Cents + ArrivedForLater(x),
+                              .Sum(y => y.Cents - (y.FromOthersCents - (y.Bills ?? []).Sum(b => b.ArrivedCents)))
+                          + plan.Items.Take(plan.Items.ToList().FindIndex(y => y.Key == x.Key) + 1).Where(y => y.Kind == "hold" && y.Destination == x.Destination).Sum(y => y.Cents)
+                          + ArrivedForLater(x),
                 _ => null,
             };
             var sentToward = SentToward();

@@ -57,10 +57,10 @@ public static class BudgetFitter
         {
             var raised = lines.Sum(l => l.ProposedCents);
             // A copy: the squeeze below edits \`lines\`, and this stays the unsqueezed proposal (DECISIONS.md 223).
-            p = p with { Categories = lines.ToList(), AllocatedCents = raised, UnallocatedCents = p.IncomeCents + p.PartnerCents - raised, SpendsMoreThanIncome = raised > p.IncomeCents + p.PartnerCents };
+            p = p with { Categories = lines.ToList(), AllocatedCents = raised, UnallocatedCents = p.MoneyCents - raised, SpendsMoreThanIncome = raised > p.MoneyCents };
         }
 
-        var available = p.IncomeCents + p.PartnerCents - Math.Max(0, holdBackCents);
+        var available = p.MoneyCents - Math.Max(0, holdBackCents);
         var over = p.AllocatedCents - available;
         if (over <= 0) return new FittedBudget(p, 0, 0, p);
         long Floor80(ProposedLimit l) => Math.Max(Spent(l.CategoryId), RoundUpToDollar(l.MedianCents * EssentialFloorPercent / 100));
@@ -78,7 +78,7 @@ public static class BudgetFitter
         Squeeze(l => Spending(l, CategoryPriority.High), SpentOnly);
 
         var allocated = lines.Sum(l => l.ProposedCents);
-        var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = p.IncomeCents + p.PartnerCents - allocated, SpendsMoreThanIncome = allocated > available };
+        var fitted = p with { Categories = lines, AllocatedCents = allocated, UnallocatedCents = p.MoneyCents - allocated, SpendsMoreThanIncome = allocated > available };
         return new FittedBudget(fitted, Math.Max(0, allocated - available), squeezed, p);
 
         // The card lines (payments and Card interest) together come down to the minimums, never below them or what's

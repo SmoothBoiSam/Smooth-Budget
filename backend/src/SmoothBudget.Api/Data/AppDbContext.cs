@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BudgetMonthCategory> BudgetMonthCategories => Set<BudgetMonthCategory>();
     public DbSet<SweepTask> SweepTasks => Set<SweepTask>();
     public DbSet<DebtAccount> DebtAccounts => Set<DebtAccount>();
+    public DbSet<PlannedExpense> PlannedExpenses => Set<PlannedExpense>();
     public DbSet<RecurringItem> RecurringItems => Set<RecurringItem>();
     public DbSet<PartnerArrangement> PartnerArrangements => Set<PartnerArrangement>();
     public DbSet<SavingsGoal> SavingsGoals => Set<SavingsGoal>();
@@ -209,6 +210,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Key).HasMaxLength(200);
             e.Property(x => x.Name).HasMaxLength(120);
             e.HasIndex(x => new { x.HouseholdId, x.Key }).IsUnique();
+        });
+
+        b.Entity<PlannedExpense>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(60);
+            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.HouseholdId);
         });
 
         b.Entity<DebtAccount>(e =>
